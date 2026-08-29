@@ -37,8 +37,11 @@ func isWebsiteFunctionalRoute(pattern string) bool {
 	if strings.HasPrefix(path, "/api/v2/openresty/") && (method == "GET" || method == "POST") {
 		return true
 	}
-	if path == "/api/v2/sites" || path == "/api/v2/standard-rules" || path == "/api/v2/access-lists" || path == "/api/v2/websites/list" {
+	if path == "/api/v2/sites" || path == "/api/v2/standard-rules" || path == "/api/v2/access-lists" || path == "/api/v2/websites" || path == "/api/v2/websites/list" || path == "/api/v2/websites/search" || path == "/api/v2/websites/update" || path == "/api/v2/websites/del" {
 		return method == "GET" || method == "POST"
+	}
+	if path == "/api/v2/websites/:id" {
+		return method == "GET"
 	}
 	if path == "/api/v2/sites/:id/rules" {
 		return method == "GET"
