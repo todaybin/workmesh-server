@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bytes"
 	"net/http"
 	"testing"
 )
@@ -19,6 +20,18 @@ func TestRegisterHostContainerCronRoutesDoesNotConflict(t *testing.T) {
 	mux.ServeHTTP(response, request)
 	if response.status != http.StatusOK {
 		t.Fatalf("组件路由状态码错误: %d", response.status)
+	}
+}
+
+func TestCoreLoginAndSession(t *testing.T) {
+	mux := http.NewServeMux()
+	Register(mux)
+	request, _ := http.NewRequest(http.MethodPost, "/api/v2/core/auth/login", bytes.NewBufferString(`{"Name":"admin","Password":"admin"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := newRecorder()
+	mux.ServeHTTP(response, request)
+	if response.status != http.StatusOK {
+		t.Fatalf("登录状态码错误: %d", response.status)
 	}
 }
 
