@@ -6,6 +6,7 @@ package api
 import (
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 	"net/http"
+	"strings"
 )
 
 const migrationPendingMessage = "该接口正在迁移"
@@ -23,10 +24,30 @@ func (m legacyFilterMux) HandleFunc(pattern string, handler http.HandlerFunc) {
 	if isBackupAlertLogSettingsRoute(pattern) || isWebsiteFunctionalRoute(pattern) {
 		return
 	}
-	// 非目标域保留原有专用处理器或占位响应。并行迁移期间可能出现同一路由
-	// 已被专用实现注册的情况，此时保留先注册的专用处理器即可。
+	if isLegacyConcreteRoute(pattern) {
+		defer func() { _ = recover() }()
+		m.mux.HandleFunc(normalizeServeMuxPattern(pattern), handler)
+		return
+	}
 	defer func() { _ = recover() }()
-	m.mux.HandleFunc(pattern, handler)
+	registerCompatibilityRoute(m.mux, normalizeServeMuxPattern(pattern))
+}
+
+// normalizeServeMuxPattern 将旧 Gin 风格 :id/*path 转换为 Go ServeMux 通配符。
+func normalizeServeMuxPattern(pattern string) string {
+	parts := strings.SplitN(pattern, " ", 2)
+	if len(parts) != 2 {
+		return pattern
+	}
+	segments := strings.Split(parts[1], "/")
+	for i, segment := range segments {
+		if strings.HasPrefix(segment, ":") && len(segment) > 1 {
+			segments[i] = "{" + strings.TrimPrefix(segment, ":") + "}"
+		} else if strings.HasPrefix(segment, "*") && len(segment) > 1 {
+			segments[i] = "{" + strings.TrimPrefix(segment, "*") + "...}"
+		}
+	}
+	return parts[0] + " " + strings.Join(segments, "/")
 }
 
 // isLegacyConcreteRoute 列出仍由旧迁移处理器承接、已经具备真实行为的少量路由。
