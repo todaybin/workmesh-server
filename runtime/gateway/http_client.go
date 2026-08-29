@@ -47,6 +47,14 @@ func (c *HTTPClient) Register(ctx context.Context, request RegisterRequest) (Aut
 	return response, err
 }
 
+// Heartbeat 上报节点在线状态并保持 Gateway 授权有效。
+func (c *HTTPClient) Heartbeat(ctx context.Context, registration Registration) error {
+	return c.do(ctx, http.MethodPost, "/api/workmesh/v1/nodes/heartbeat", map[string]any{
+		"nodeId":    registration.NodeID,
+		"bindingId": registration.BindingID,
+	}, nil)
+}
+
 // Status 查询节点在 Gateway 的注册和连接状态。
 func (c *HTTPClient) Status(ctx context.Context) (Status, error) {
 	var response Status
@@ -139,3 +147,4 @@ func randomID() string {
 }
 
 var _ ProtocolClient = (*HTTPClient)(nil)
+var _ Client = (*HTTPClient)(nil)
