@@ -16,4 +16,5 @@ func Register(mux *http.ServeMux) {
 	})
 	RegisterHostContainerCronRoutes(mux)
 	RegisterSSLRoutes(mux)
+	registerCoreAuthExtras(mux)
 }
