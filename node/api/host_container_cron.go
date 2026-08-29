@@ -120,7 +120,7 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200})
 	})
 
-	registerUnmigratedRoutes(mux)
+	RegisterLegacyCompatibilityRoutes(mux)
 }
 
 func registerUnmigratedRoutes(mux *http.ServeMux) {

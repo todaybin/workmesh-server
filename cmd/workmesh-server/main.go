@@ -43,7 +43,7 @@ func main() {
 	scheduler.Start(ctx)
 	defer scheduler.Stop()
 
-	mux := httpMux()
+	mux := httpMux(cfg)
 	server := wmhttp.New(cfg.ListenAddr, mux, cfg.RequestTimeout)
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, context.Canceled) {
@@ -58,8 +58,11 @@ func main() {
 	_ = server.Shutdown(shutdownCtx)
 }
 
-func httpMux() *http.ServeMux {
+func httpMux(cfg config.Config) *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]string{"service": "workmesh-server"}})
+	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
 	})
@@ -69,7 +72,7 @@ func httpMux() *http.ServeMux {
 	mux.HandleFunc("/api/v2/health/check", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
 	})
-	controlapi.Register(mux)
+	controlapi.Register(mux, cfg.NodeID, cfg.Role)
 	nodeapi.Register(mux)
 	return mux
 }

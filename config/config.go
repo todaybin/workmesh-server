@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 WorkMesh contributors
 
+// Package config 提供 WorkMesh Server 的环境配置读取。
 package config
 
 import (
@@ -9,11 +10,13 @@ import (
 	"time"
 )
 
-// Config 描述 WorkMesh Server 的最小运行配置。
+// Config 描述 WorkMesh Server 的运行配置。
 type Config struct {
 	ListenAddr      string
 	DataDir         string
 	GatewayURL      string
+	GatewayID       string
+	GatewaySecret   string
 	NodeID          string
 	Role            string
 	RequestTimeout  time.Duration
@@ -26,6 +29,8 @@ func Load() Config {
 		ListenAddr:      env("WORKMESH_SERVER_ADDR", ":9999"),
 		DataDir:         env("WORKMESH_DATA_DIR", "./data"),
 		GatewayURL:      env("WORKMESH_GATEWAY_URL", ""),
+		GatewayID:       env("WORKMESH_GATEWAY_ID", ""),
+		GatewaySecret:   env("WORKMESH_GATEWAY_SECRET", ""),
 		NodeID:          env("WORKMESH_NODE_ID", "local"),
 		Role:            env("WORKMESH_NODE_ROLE", "secondary"),
 		RequestTimeout:  durationEnv("WORKMESH_REQUEST_TIMEOUT", 30*time.Second),
