@@ -21,7 +21,7 @@ type routeRegistrar interface {
 type legacyFilterMux struct{ mux *http.ServeMux }
 
 func (m legacyFilterMux) HandleFunc(pattern string, handler http.HandlerFunc) {
-	if isBackupAlertLogSettingsRoute(pattern) || isWebsiteFunctionalRoute(pattern) || isContainerRoute(pattern) || isHostRoute(pattern) || isAIExecutionRoute(pattern) || isCoreResourceRoute(pattern) || isFileRoute(pattern) || isDatabaseRoute(pattern) || isDeploymentProcessRoute(pattern) || isRuntimeToolboxRoute(pattern) || isAppRoute(pattern) {
+	if isBackupAlertLogSettingsRoute(pattern) || isWebsiteFunctionalRoute(pattern) || isContainerRoute(pattern) || isHostRoute(pattern) || isAIExecutionRoute(pattern) || isCoreResourceRoute(pattern) || isFileRoute(pattern) || isDatabaseRoute(pattern) || isDeploymentProcessRoute(pattern) || isRuntimeToolboxRoute(pattern) || isAppRoute(pattern) || isSitesRoute(pattern) {
 		return
 	}
 	if isCoreAuthRoute(pattern) {
@@ -72,6 +72,15 @@ func isLegacyConcreteRoute(pattern string) bool {
 		}
 	}
 	return false
+}
+
+func isSitesRoute(pattern string) bool {
+	parts := strings.SplitN(pattern, " ", 2)
+	path := pattern
+	if len(parts) == 2 {
+		path = parts[1]
+	}
+	return path == "/api/v2/sites" || strings.HasPrefix(path, "/api/v2/sites/")
 }
 
 // RegisterLegacyCompatibilityRoutes 为所有旧公开契约提供统一入口。

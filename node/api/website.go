@@ -165,6 +165,10 @@ func registerWebsiteCRUD(mux *http.ServeMux, svc *service.WebsiteService) {
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
 	})
+	mux.HandleFunc("GET /api/v2/sites", func(w http.ResponseWriter, _ *http.Request) {
+		items := svc.List("", 0, 1000)
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
+	})
 }
 
 func registerWAFRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
