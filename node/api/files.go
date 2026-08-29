@@ -227,6 +227,77 @@ func handleFilesSize(w http.ResponseWriter, r *http.Request) {
 	})
 	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": path, "size": total}})
 }
+
+func handleFilesTree(w http.ResponseWriter, r *http.Request) {
+	req, err := decodeFileRequest(r)
+	if err != nil {
+		fileError(w, 400, err)
+		return
+	}
+	root, err := cleanFilePath(req.Path)
+	if err != nil {
+		fileError(w, 400, err)
+		return
+	}
+	var walk func(string, int) []map[string]any
+	walk = func(path string, depth int) []map[string]any {
+		if depth > 4 {
+			return nil
+		}
+		entries, _ := os.ReadDir(path)
+		result := make([]map[string]any, 0, len(entries))
+		for _, entry := range entries {
+			if !req.ShowHidden && strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			full := filepath.Join(path, entry.Name())
+			info, e := entry.Info()
+			if e != nil {
+				continue
+			}
+			item := fileInfo(full, info)
+			if info.IsDir() {
+				item["children"] = walk(full, depth+1)
+			}
+			result = append(result, item)
+		}
+		return result
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": walk(root, 0)})
+}
+
+func handleFilesUpload(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		fileError(w, 400, err)
+		return
+	}
+	dir, err := cleanFilePath(r.FormValue("path"))
+	if err != nil {
+		fileError(w, 400, err)
+		return
+	}
+	for _, headers := range r.MultipartForm.File {
+		for _, header := range headers {
+			in, e := header.Open()
+			if e != nil {
+				fileError(w, 400, e)
+				return
+			}
+			dst := filepath.Join(dir, filepath.Base(header.Filename))
+			out, e := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+			if e == nil {
+				_, e = io.Copy(out, in)
+				_ = out.Close()
+			}
+			_ = in.Close()
+			if e != nil {
+				fileError(w, 500, e)
+				return
+			}
+		}
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200})
+}
 func handleFilesDownload(w http.ResponseWriter, r *http.Request) {
 	path, err := cleanFilePath(r.URL.Query().Get("path"))
 	if err != nil {

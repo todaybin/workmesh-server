@@ -1254,19 +1254,19 @@ func RegisterLegacyCompatibilityRoutes(mux *http.ServeMux) {
 		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
 	})
 	mux.HandleFunc("POST /api/v2/databases/db", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		handleDatabaseCreate(w, r)
 	})
 	mux.HandleFunc("POST /api/v2/databases/db/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		handleDatabaseCheck(w, r)
 	})
 	mux.HandleFunc("POST /api/v2/databases/db/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		handleDatabaseDelete(w, r)
 	})
 	mux.HandleFunc("POST /api/v2/databases/db/del/check", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
 	})
 	mux.HandleFunc("POST /api/v2/databases/db/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		handleDatabaseSearch(w, r)
 	})
 	mux.HandleFunc("POST /api/v2/databases/db/update", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
