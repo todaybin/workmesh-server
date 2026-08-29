@@ -255,6 +255,10 @@ func registerRuntimeSubroutes(mux *http.ServeMux, s *runtimeStore) {
 		})
 	}
 	mux.HandleFunc("/api/v2/runtimes/php/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			runtimeOK(w, map[string]any{"status": "accepted", "path": r.URL.Path})
+			return
+		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v2/runtimes/php/"), "/")
 		if len(parts) >= 2 && parts[0] != "" {
 			id := parts[len(parts)-1]
