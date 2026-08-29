@@ -14,6 +14,8 @@ func Register(mux *http.ServeMux, nodeID, role string) *GatewayStateStore {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
 	})
 	store := RegisterGatewayRoutes(mux, nodeID, role)
-	RegisterRoleRoutes(mux, nodeID, role)
+	manager := NewRoleManager(nodeID, role)
+	RegisterRoleRoutesWithManager(mux, manager)
+	RegisterLinkRoutes(mux, nodeID, role, manager)
 	return store
 }

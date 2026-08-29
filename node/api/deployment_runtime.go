@@ -29,6 +29,15 @@ type deploymentState struct {
 	LastVerify string    `json:"lastVerify"`
 }
 
+// deploymentSnapshot 是对外返回的无锁状态快照，避免复制包含互斥锁的状态对象。
+type deploymentSnapshot struct {
+	Active     string    `json:"active"`
+	Previous   string    `json:"previous"`
+	Status     string    `json:"status"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+	LastVerify string    `json:"lastVerify"`
+}
+
 var localDeployment = deploymentState{Status: "idle"}
 
 func registerDeploymentAndProcessRoutes(mux *http.ServeMux) {
@@ -50,10 +59,18 @@ func isDeploymentProcessRoute(pattern string) bool {
 }
 
 func deploymentStatus(w http.ResponseWriter, _ *http.Request) {
-	localDeployment.mu.RLock()
-	state := localDeployment
-	localDeployment.mu.RUnlock()
+	state := deploymentStateSnapshot()
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": state})
+}
+
+func deploymentStateSnapshot() deploymentSnapshot {
+	localDeployment.mu.RLock()
+	defer localDeployment.mu.RUnlock()
+	return deploymentSnapshot{
+		Active: localDeployment.Active, Previous: localDeployment.Previous,
+		Status: localDeployment.Status, UpdatedAt: localDeployment.UpdatedAt,
+		LastVerify: localDeployment.LastVerify,
+	}
 }
 
 func deploymentManifestVerify(w http.ResponseWriter, r *http.Request) {
@@ -139,27 +156,31 @@ func deploymentArtifactActivate(w http.ResponseWriter, r *http.Request) {
 
 func deploymentExecute(w http.ResponseWriter, _ *http.Request) {
 	localDeployment.mu.Lock()
-	defer localDeployment.mu.Unlock()
 	if localDeployment.Active == "" {
+		localDeployment.mu.Unlock()
 		deploymentError(w, errors.New("尚未激活部署制品"))
 		return
 	}
 	localDeployment.Status = "active"
 	localDeployment.UpdatedAt = time.Now().UTC()
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": localDeployment})
+	state := deploymentSnapshot{Active: localDeployment.Active, Previous: localDeployment.Previous, Status: localDeployment.Status, UpdatedAt: localDeployment.UpdatedAt, LastVerify: localDeployment.LastVerify}
+	localDeployment.mu.Unlock()
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": state})
 }
 
 func deploymentRollback(w http.ResponseWriter, _ *http.Request) {
 	localDeployment.mu.Lock()
-	defer localDeployment.mu.Unlock()
 	if localDeployment.Previous == "" {
+		localDeployment.mu.Unlock()
 		deploymentError(w, errors.New("没有可回滚的版本"))
 		return
 	}
 	localDeployment.Active, localDeployment.Previous = localDeployment.Previous, localDeployment.Active
 	localDeployment.Status = "rolled_back"
 	localDeployment.UpdatedAt = time.Now().UTC()
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": localDeployment})
+	state := deploymentSnapshot{Active: localDeployment.Active, Previous: localDeployment.Previous, Status: localDeployment.Status, UpdatedAt: localDeployment.UpdatedAt, LastVerify: localDeployment.LastVerify}
+	localDeployment.mu.Unlock()
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": state})
 }
 
 func processInfo(w http.ResponseWriter, r *http.Request) {

@@ -21,9 +21,23 @@ type RoleController struct {
 
 // RegisterRoleRoutes 注册角色状态、预检查、准备、提交、取消接口。
 func RegisterRoleRoutes(mux *http.ServeMux, nodeID, initialRole string) {
+	RegisterRoleRoutesWithManager(mux, NewRoleManager(nodeID, initialRole))
+}
+
+// NewRoleManager 创建控制面和节点链路共同使用的角色管理器。
+// 初始化失败时沿用旧接口的兼容行为，回退到次节点角色。
+func NewRoleManager(nodeID, initialRole string) *role.Manager {
 	manager, err := role.New(nodeID, initialRole)
 	if err != nil {
 		manager, _ = role.New(nodeID, role.Secondary)
+	}
+	return manager
+}
+
+// RegisterRoleRoutesWithManager 使用指定管理器注册角色接口，确保 fencing 与角色查询共享 epoch。
+func RegisterRoleRoutesWithManager(mux *http.ServeMux, manager *role.Manager) {
+	if manager == nil {
+		return
 	}
 	controller := &RoleController{manager: manager}
 	mux.HandleFunc("GET /api/v2/core/nodes/role", controller.current)
