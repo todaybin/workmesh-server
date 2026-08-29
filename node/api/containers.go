@@ -23,6 +23,55 @@ func registerContainerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/containers", func(w http.ResponseWriter, r *http.Request) {
 		handleContainerRequest(docker, w, r)
 	})
+	mux.HandleFunc("POST /api/v2/containers/compose/search", handleComposeSearch)
+	mux.HandleFunc("POST /api/v2/containers/compose/test", handleComposeTest)
+	mux.HandleFunc("POST /api/v2/containers/compose/operate", handleComposeOperate)
+}
+
+type composeRequest struct {
+	Path      string   `json:"path"`
+	Operation string   `json:"operation"`
+	Services  []string `json:"services"`
+}
+
+func composeCommand(r *http.Request, req composeRequest, op string) (model.CommandResult, error) {
+	if strings.TrimSpace(req.Path) == "" {
+		return model.CommandResult{}, &containerError{"Compose 文件路径不能为空"}
+	}
+	allowed := map[string]bool{"up": true, "down": true, "start": true, "stop": true, "restart": true, "ps": true, "config": true, "pull": true}
+	if !allowed[op] {
+		return model.CommandResult{}, &containerError{"不支持的 Compose 操作"}
+	}
+	args := []string{"compose", "-f", req.Path, op}
+	args = append(args, req.Services...)
+	return runDocker(r, args...)
+}
+func handleComposeSearch(w http.ResponseWriter, r *http.Request) {
+	var req composeRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	result, err := composeCommand(r, req, "ps")
+	writeCommandResult(w, result, err)
+}
+func handleComposeTest(w http.ResponseWriter, r *http.Request) {
+	var req composeRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	result, err := composeCommand(r, req, "config")
+	writeCommandResult(w, result, err)
+}
+func handleComposeOperate(w http.ResponseWriter, r *http.Request) {
+	var req composeRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	result, err := composeCommand(r, req, req.Operation)
+	writeCommandResult(w, result, err)
 }
 
 func isContainerRoute(pattern string) bool {
