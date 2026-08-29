@@ -1,0 +1,4162 @@
+{
+  "schema": 1,
+  "generatedFrom": "apps/workmesh-node",
+  "routeCount": 831,
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/",
+      "source": "../workmesh-node/core/init/router/router.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/access-lists",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ai/accounts/providers",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ai/gpu/load",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ai/gpu/options",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/ai/mcp/domain/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/alert/clams/list",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/alert/disks/list",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/:key",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/checkupdate",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/detail/:appId/:version/:type",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/detail/node/:appKey/:version",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/details/:id",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/icon/:key",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/ignored/detail",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/installed/delete/check/:appInstallId",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/installed/info/:appInstallId",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/installed/list",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/installed/params/:appInstallId",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/services/:key",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/apps/tags",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/backups/check/:name",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/backups/local",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/backups/options",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/config/global",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/daemonjson",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/daemonjson/file",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/docker/status",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/image",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/image/all",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/limit",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/list/stats",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/network",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/repo",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/search/log",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/stats/:id",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/status",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/template",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/containers/volume",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/auth/captcha",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/auth/current",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/auth/passkey/list",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/auth/setting",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/auth/welcome",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/backups/client/:clientType",
+      "source": "../workmesh-node/core/router/ro_backup.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/script/run",
+      "source": "../workmesh-node/core/router/ro_script_library.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/settings/apps/store/config",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/settings/interface",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/settings/memo",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/settings/search/available",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/settings/ssl/info",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/settings/upgrade",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/core/settings/upgrade/releases",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/cronjobs/script/options",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/cubesandbox/health",
+      "source": "../workmesh-node/agent/router/ro_cubesandbox.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/cubesandbox/status",
+      "source": "../workmesh-node/agent/router/ro_cubesandbox.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/dashboard/app/launcher",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/dashboard/base/:ioOption/:netOption",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/dashboard/base/os",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/dashboard/current/:ioOption/:netOption",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/dashboard/current/node",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/dashboard/current/top/cpu",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/dashboard/current/top/mem",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/dashboard/quick/option",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/databases/db/:name",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/databases/db/item/:type",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/databases/db/list/:type",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/databases/redis/check",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/deployment/status",
+      "source": "../workmesh-node/agent/router/ro_deployment_artifact.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/files/download",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/files/recycle/status",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/files/share/check",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/files/share/download",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/files/share/info",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/files/share/qrcode",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/files/wget/process",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/files/wget/process/keys",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/health/check",
+      "source": "../workmesh-node/agent/init/router/router.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/components/:name",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/diagnostics/goroutines",
+      "source": "../workmesh-node/agent/router/ro_runtime_diagnostics.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/diagnostics/summary",
+      "source": "../workmesh-node/agent/router/ro_runtime_diagnostics.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/disks",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/firewall/docker/endpoints",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/firewall/docker/ports",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/firewall/rules/sync/task",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/firewall/settings",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/monitor/iooptions",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/monitor/netoptions",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/monitor/setting",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/terminal/container",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/terminal/local",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/terminal/ssh",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/hosts/tool/supervisor/process",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/images/*filename",
+      "source": "../workmesh-node/core/init/router/router.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/logs/system/files",
+      "source": "../workmesh-node/agent/router/ro_log.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/logs/system/services",
+      "source": "../workmesh-node/agent/router/ro_log.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/logs/system/status",
+      "source": "../workmesh-node/agent/router/ro_log.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/logs/tasks/executing/count",
+      "source": "../workmesh-node/agent/router/ro_log.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/openresty/https",
+      "source": "../workmesh-node/agent/router/ro_nginx.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/openresty/modules",
+      "source": "../workmesh-node/agent/router/ro_nginx.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/openresty/status",
+      "source": "../workmesh-node/agent/router/ro_nginx.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/process/:pid",
+      "source": "../workmesh-node/agent/router/ro_process.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/process/ws",
+      "source": "../workmesh-node/agent/router/ro_process.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runtimes/:id",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runtimes/installed/delete/check/:id",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runtimes/php/:id/extensions",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runtimes/php/config/:id",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runtimes/php/container/:id",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runtimes/php/fpm/config/:id",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runtimes/php/fpm/status/:id",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/runtimes/supervisor/process/:id",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/settings/basedir",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/settings/search/available",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/settings/snapshot/load",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/settings/ssh/conn",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/settings/website/dir",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/sites",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/sites/:id/rules",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/standard-rules",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/static/*filename",
+      "source": "../workmesh-node/core/init/router/router.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/status",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/toolbox/device/users",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/toolbox/device/zone/options",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/toolbox/fail2ban/base",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/toolbox/fail2ban/load/conf",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/toolbox/ftp/base",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/:id",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/:id/config/:type",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/:id/https",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/:id/lbs",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/ca/:id",
+      "source": "../workmesh-node/agent/router/ro_website_ca.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/cors/:id",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/databases",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/default/html/:type",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/domains/:websiteId",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/list",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/monitor/config/global",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/proxy/config/:id",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/realip/config/:id",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/resource/:id",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/rewrite/custom",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/ssl/:id",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/ssl/website/:websiteId",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/waf/access-lists",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/waf/sites",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/waf/sites/:id/rules",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/waf/standard-rules",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/websites/waf/status",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v2/workmesh/gateway/status",
+      "source": "../workmesh-node/agent/router/ro_workmesh_task.go"
+    },
+    {
+      "method": "GET",
+      "path": "/assets/*filepath",
+      "source": "../workmesh-node/core/init/router/router.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/access-lists",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts/counts",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts/delete",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts/models",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts/models/create",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts/models/delete",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts/models/discover",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts/models/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts/search",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/accounts/verify",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/agent/bind",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/agent/channels",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/agent/create",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/agent/delete",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/agent/list",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/agent/md/list",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/agent/md/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/agent/unbind",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/batch/install",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/batch/operate",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/batch/skill/install",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/batch/upgrade",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/delete",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/dingtalk/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/dingtalk/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/discord/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/discord/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/feishu/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/feishu/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/pairing/approve",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/qqbot/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/qqbot/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/telegram/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/telegram/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/wecom/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/wecom/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/weixin/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/channel/weixin/login",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/config-file/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/config-file/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/delete",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/delete/check",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/hermes/chat/sessions",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/hermes/chat/sessions/delete",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/hermes/chat/sessions/rename",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/model/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/model/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/other/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/other/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/overview",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/plugin/check",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/plugin/install",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/plugin/uninstall",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/plugin/upgrade",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/plugins/install",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/plugins/list",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/plugins/operate",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/plugins/search",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/remark",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/search",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/security/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/security/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/skills/install",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/skills/list",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/skills/search",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/skills/uninstall",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/skills/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/token/reset",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/website/bind",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/agents/website/unbind",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/domain/bind",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/domain/get",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/domain/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/gpu/search",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/mcp/domain/bind",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/mcp/domain/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/mcp/search",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/mcp/server",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/mcp/server/connection/test",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/mcp/server/del",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/mcp/server/detail",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/mcp/server/op",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/mcp/server/status/sync",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/mcp/server/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/ollama/close",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/ollama/model",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/ollama/model/del",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/ollama/model/load",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/ollama/model/recreate",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/ollama/model/search",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/ollama/model/sync",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/tensorrt/create",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/tensorrt/delete",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/tensorrt/operate",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/tensorrt/search",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/ai/tensorrt/update",
+      "source": "../workmesh-node/agent/router/ro_ai.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/config/del",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/config/info",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/config/search",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/config/test",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/config/update",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/cronjob/list",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/del",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/logs/clean",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/logs/search",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/search",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/status",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/alert/update",
+      "source": "../workmesh-node/agent/router/ro_alert.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/ignored/cancel",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/install",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/check",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/conf",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/config/update",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/conninfo",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/ignore",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/loadport",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/op",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/params/update",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/port/change",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/search",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/sort/update",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/sync",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/installed/update/versions",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/search",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/sync/local",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/apps/sync/remote",
+      "source": "../workmesh-node/agent/router/ro_app.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/attack/stat",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/backup",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/buckets",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/conn/check",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/del",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/record/del",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/record/description/update",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/record/download",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/record/search",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/record/search/bycronjob",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/record/size",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/recover",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/recover/byupload",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/refresh/token",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/search",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/search/files",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/update",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/backups/upload",
+      "source": "../workmesh-node/agent/router/backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/block/search",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/config/global",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/config/site",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/config/site/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/clean/log",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/commit",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/compose",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/compose/clean/log",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/compose/env",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/compose/operate",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/compose/pin",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/compose/search",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/compose/test",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/compose/update",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/daemonjson/update",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/daemonjson/update/byfile",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/docker/operate",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/download/log",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/files/content",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/files/del",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/files/download",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/files/search",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/files/size",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/files/upload",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/image/build",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/image/load",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/image/pull",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/image/push",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/image/remove",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/image/save",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/image/search",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/image/tag",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/info",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/inspect",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/ipv6option/update",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/item/stats",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/list",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/list/byimage",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/logoption/update",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/network",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/network/del",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/network/search",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/operate",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/prune",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/rename",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/repo",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/repo/del",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/repo/search",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/repo/status",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/repo/update",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/search",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/template",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/template/batch",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/template/del",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/template/search",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/template/update",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/update",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/upgrade",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/users",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/volume",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/volume/del",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/containers/volume/search",
+      "source": "../workmesh-node/agent/router/ro_container.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/api/generate",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/api/update",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/current/update",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/expired/reset",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/login",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/logout",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/mfa",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/mfa/bind",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/mfa/close",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/mfalogin",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/passkey/begin",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/passkey/del",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/passkey/finish",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/passkey/register/begin",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/auth/passkey/register/finish",
+      "source": "../workmesh-node/core/router/ro_base.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/backups/del",
+      "source": "../workmesh-node/core/router/ro_backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/backups/refresh/token",
+      "source": "../workmesh-node/core/router/ro_backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/backups/update",
+      "source": "../workmesh-node/core/router/ro_backup.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/commands/del",
+      "source": "../workmesh-node/core/router/command.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/commands/export",
+      "source": "../workmesh-node/core/router/command.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/commands/import",
+      "source": "../workmesh-node/core/router/command.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/commands/list",
+      "source": "../workmesh-node/core/router/command.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/commands/search",
+      "source": "../workmesh-node/core/router/command.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/commands/tree",
+      "source": "../workmesh-node/core/router/command.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/commands/update",
+      "source": "../workmesh-node/core/router/command.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/commands/upload",
+      "source": "../workmesh-node/core/router/command.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/groups/del",
+      "source": "../workmesh-node/core/router/ro_group.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/groups/search",
+      "source": "../workmesh-node/core/router/ro_group.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/groups/update",
+      "source": "../workmesh-node/core/router/ro_group.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/logs/clean",
+      "source": "../workmesh-node/core/router/ro_log.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/logs/login",
+      "source": "../workmesh-node/core/router/ro_log.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/logs/operation",
+      "source": "../workmesh-node/core/router/ro_log.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/script/del",
+      "source": "../workmesh-node/core/router/ro_script_library.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/script/search",
+      "source": "../workmesh-node/core/router/ro_script_library.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/script/sync",
+      "source": "../workmesh-node/core/router/ro_script_library.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/script/update",
+      "source": "../workmesh-node/core/router/ro_script_library.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/apps/store/update",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/bind/update",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/memo",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/menu/default",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/menu/update",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/port/update",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/proxy/update",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/search",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/search/base",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/ssl/download",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/ssl/reload",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/ssl/update",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/terminal/search",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/terminal/update",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/update",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/upgrade",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/core/settings/upgrade/notes",
+      "source": "../workmesh-node/core/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/del",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/export",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/group/update",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/handle",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/import",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/load/info",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/next",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/records/clean",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/records/log",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/search",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/search/records",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/status",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/stop",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cronjobs/update",
+      "source": "../workmesh-node/agent/router/ro_cronjob.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cubesandbox/reconcile",
+      "source": "../workmesh-node/agent/router/ro_cubesandbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cubesandbox/start",
+      "source": "../workmesh-node/agent/router/ro_cubesandbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/cubesandbox/stop",
+      "source": "../workmesh-node/agent/router/ro_cubesandbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/dashboard/app/launcher/option",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/dashboard/app/launcher/show",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/dashboard/quick/change",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/dashboard/system/restart/:operation",
+      "source": "../workmesh-node/agent/router/ro_dashboard.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/change/access",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/change/password",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/common/info",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/common/load/file",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/common/update/conf",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/db",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/db/check",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/db/del",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/db/del/check",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/db/search",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/db/update",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/del",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/del/check",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/description/update",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/format/options",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/grants",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/grants/del",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/grants/search",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/grants/summary",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/load",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb/bind",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb/del",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb/del/check",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb/description",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb/load",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb/password",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb/privileges",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb/privileges/change",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb/root/password",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/mongodb/search",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/pg",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/pg/:database/load",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/pg/bind",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/pg/del",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/pg/del/check",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/pg/description",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/pg/password",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/pg/privileges",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/pg/search",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/redis/conf",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/redis/conf/update",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/redis/install/cli",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/redis/password",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/redis/persistence/conf",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/redis/persistence/update",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/redis/status",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/remote",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/search",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/status",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/users",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/users/del",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/users/password",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/users/password/save",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/users/search",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/users/update",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/variables",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/databases/variables/update",
+      "source": "../workmesh-node/agent/router/ro_database.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/deployment-artifact/activate",
+      "source": "../workmesh-node/agent/router/ro_deployment_artifact.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/deployment-manifest/verify",
+      "source": "../workmesh-node/agent/router/ro_deployment_manifest.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/deployment/execute",
+      "source": "../workmesh-node/agent/router/ro_deployment_artifact.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/deployment/rollback",
+      "source": "../workmesh-node/agent/router/ro_deployment_artifact.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/ai-search",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/batch/check",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/batch/del",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/batch/role",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/check",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/chunkdownload",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/chunkupload",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/chunkupload/stop",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/compress",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/compress/stop",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/content",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/convert",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/convert/log",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/decompress",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/decompress/stop",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/del",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/depth/size",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/favorite",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/favorite/del",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/favorite/search",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/history/content",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/history/del",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/history/restore",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/history/search",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/mode",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/mount",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/move",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/move/stop",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/owner",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/preview",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/read/:type",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/recycle/clear",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/recycle/reduce",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/recycle/search",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/remark",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/remarks",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/rename",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/save",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/search",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/share/create",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/share/del",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/share/detail",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/share/search",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/size",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/tree",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/upload",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/upload/search",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/user/group",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/wget",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/files/wget/stop",
+      "source": "../workmesh-node/agent/router/ro_file.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/global",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/groups/del",
+      "source": "../workmesh-node/agent/router/ro_group.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/groups/search",
+      "source": "../workmesh-node/agent/router/ro_group.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/groups/update",
+      "source": "../workmesh-node/agent/router/ro_group.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/del",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/diagnostics/profiles",
+      "source": "../workmesh-node/agent/router/ro_runtime_diagnostics.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/disks/mount",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/disks/partition",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/disks/unmount",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/base",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/docker/operate",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/docker/policies/batch",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/docker/policies/delete/batch",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/docker/sync",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/filter/operate",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/forward/base",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/forward/enable",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/forward/operate",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/forward/search",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/operate",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/rules",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/rules/check",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/rules/delete",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/rules/native/detail",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/rules/reorder",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/rules/reset",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/rules/search",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/rules/sync",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/rules/sync/preview",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/rules/update",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/firewall/settings/operate",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/info",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/monitor/clean",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/monitor/search",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/monitor/setting/update",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/search",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/cert",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/cert/delete",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/cert/search",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/cert/sync",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/cert/update",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/file",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/file/update",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/log",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/log/clean",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/log/export",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/operate",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/search",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/ssh/update",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/test/byid",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/test/byinfo",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/tool/config/get",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/tool/config/set",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/tool/init",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/tool/operate",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/tool/status",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/tool/supervisor/process",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/tool/supervisor/process/file",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/tool/supervisor/process/file/get",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/tree",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/update",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/hosts/update/group",
+      "source": "../workmesh-node/agent/router/ro_host.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/log/search",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/logs/clear",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/logs/detail",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/logs/search",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/logs/stat",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/logs/system/read",
+      "source": "../workmesh-node/agent/router/ro_log.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/logs/tasks/read",
+      "source": "../workmesh-node/agent/router/ro_log.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/logs/tasks/search",
+      "source": "../workmesh-node/agent/router/ro_log.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/openresty/build",
+      "source": "../workmesh-node/agent/router/ro_nginx.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/openresty/file",
+      "source": "../workmesh-node/agent/router/ro_nginx.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/openresty/https",
+      "source": "../workmesh-node/agent/router/ro_nginx.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/openresty/modules/update",
+      "source": "../workmesh-node/agent/router/ro_nginx.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/openresty/scope",
+      "source": "../workmesh-node/agent/router/ro_nginx.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/openresty/update",
+      "source": "../workmesh-node/agent/router/ro_nginx.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/process/listening",
+      "source": "../workmesh-node/agent/router/ro_process.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/process/stop",
+      "source": "../workmesh-node/agent/router/ro_process.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/qps",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/rank",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/relation/stat",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/rules",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/rules/delete",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/del",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/node/modules",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/node/modules/operate",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/node/package",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/operate",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/config",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/container/update",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/extensions",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/extensions/del",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/extensions/install",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/extensions/search",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/extensions/uninstall",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/extensions/update",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/file",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/fpm/config",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/php/update",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/remark",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/search",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/supervisor/process",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/supervisor/process/file",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/sync",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/runtimes/update",
+      "source": "../workmesh-node/agent/router/ro_runtime.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/description/save",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/file-history/search",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/file-history/update",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/files/ai/search",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/files/ai/update",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/search",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/snapshot",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/snapshot/del",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/snapshot/description/update",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/snapshot/import",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/snapshot/recover",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/snapshot/recreate",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/snapshot/rollback",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/snapshot/search",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/ssh",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/ssh/check",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/ssh/check/info",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/ssh/default",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/terminal/ai/search",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/terminal/ai/update",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/settings/update",
+      "source": "../workmesh-node/agent/router/ro_setting.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/sites",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/stat",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/test",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/base",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/del",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/file/search",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/file/update",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/handle",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/operate",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/record/clean",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/record/search",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/search",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/status/update",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clam/update",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/clean",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/device/base",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/device/check/dns",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/device/conf",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/device/update/byconf",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/device/update/conf",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/device/update/host",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/device/update/passwd",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/device/update/swap",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/fail2ban/operate",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/fail2ban/operate/sshd",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/fail2ban/search",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/fail2ban/update",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/fail2ban/update/byconf",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/ftp",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/ftp/del",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/ftp/log/search",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/ftp/operate",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/ftp/search",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/ftp/sync",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/ftp/update",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/toolbox/scan",
+      "source": "../workmesh-node/agent/router/ro_toolbox.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/trend",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/visitors",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/visitors/loc",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/:id/https",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/acme/del",
+      "source": "../workmesh-node/agent/router/ro_website_acme_account.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/acme/search",
+      "source": "../workmesh-node/agent/router/ro_website_acme_account.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/acme/update",
+      "source": "../workmesh-node/agent/router/ro_website_acme_account.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/auths",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/auths/path",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/auths/path/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/auths/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/batch/group",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/batch/operate",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/batch/ssl",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ca/del",
+      "source": "../workmesh-node/agent/router/ro_website_ca.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ca/download",
+      "source": "../workmesh-node/agent/router/ro_website_ca.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ca/obtain",
+      "source": "../workmesh-node/agent/router/ro_website_ca.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ca/renew",
+      "source": "../workmesh-node/agent/router/ro_website_ca.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ca/search",
+      "source": "../workmesh-node/agent/router/ro_website_ca.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/check",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/config",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/config/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/cors/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/crosssite",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/databases",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/default/html/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/default/server",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/del",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/dir",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/dir/permission",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/dir/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/dns/del",
+      "source": "../workmesh-node/agent/router/ro_website_dns_account.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/dns/search",
+      "source": "../workmesh-node/agent/router/ro_website_dns_account.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/dns/update",
+      "source": "../workmesh-node/agent/router/ro_website_dns_account.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/domains",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/domains/del",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/domains/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/exec/composer",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/group/change",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/lbs/create",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/lbs/del",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/lbs/file",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/lbs/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/leech",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/leech/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/log/operate",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/log/search",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/config/global",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/config/site",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/config/site/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/logs/clear",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/logs/detail",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/logs/search",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/logs/stat",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/qps",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/rank",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/stat",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/trend",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/visitors",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/visitors/loc",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/monitor/websites",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/nginx/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/operate",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/options",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/php/version",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/proxies",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/proxies/delete",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/proxies/file",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/proxies/status",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/proxies/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/proxy/clear",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/proxy/config",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/realip/config",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/redirect",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/redirect/file",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/redirect/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/rewrite",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/rewrite/custom",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/rewrite/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/search",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/del",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/download",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/import",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/list",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/obtain",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/push",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/resolve",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/search",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/update",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/upload",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/ssl/upload/file",
+      "source": "../workmesh-node/agent/router/ro_website_ssl.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/stream/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/templates/del",
+      "source": "../workmesh-node/agent/router/ro_website_template.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/templates/get",
+      "source": "../workmesh-node/agent/router/ro_website_template.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/templates/outputs",
+      "source": "../workmesh-node/agent/router/ro_website_template.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/templates/outputs/del",
+      "source": "../workmesh-node/agent/router/ro_website_template.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/templates/outputs/get",
+      "source": "../workmesh-node/agent/router/ro_website_template.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/templates/outputs/search",
+      "source": "../workmesh-node/agent/router/ro_website_template.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/templates/preview",
+      "source": "../workmesh-node/agent/router/ro_website_template.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/templates/search",
+      "source": "../workmesh-node/agent/router/ro_website_template.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/templates/update",
+      "source": "../workmesh-node/agent/router/ro_website_template.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/templates/upload",
+      "source": "../workmesh-node/agent/router/ro_website_template.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/update",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/waf/access-lists",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/waf/attack/stat",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/waf/block/search",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/waf/global",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/waf/log/search",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/waf/relation/stat",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/waf/rules",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/waf/rules/delete",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/waf/sites",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/websites/waf/test",
+      "source": "../workmesh-node/agent/router/ro_website.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workmesh/gateway/login",
+      "source": "../workmesh-node/agent/router/ro_workmesh_task.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workmesh/gateway/register",
+      "source": "../workmesh-node/agent/router/ro_workmesh_task.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workmesh/gateway/unbind",
+      "source": "../workmesh-node/agent/router/ro_workmesh_task.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workmesh/tasks/cancel",
+      "source": "../workmesh-node/agent/router/ro_workmesh_task.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workmesh/tasks/collect",
+      "source": "../workmesh-node/agent/router/ro_workmesh_task.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workmesh/tasks/create",
+      "source": "../workmesh-node/agent/router/ro_workmesh_task.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workmesh/tasks/destroy",
+      "source": "../workmesh-node/agent/router/ro_workmesh_task.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workmesh/tasks/exec",
+      "source": "../workmesh-node/agent/router/ro_workmesh_task.go"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v2/workmesh/tasks/start",
+      "source": "../workmesh-node/agent/router/ro_workmesh_task.go"
+    }
+  ]
+}

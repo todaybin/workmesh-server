@@ -1,0 +1,8 @@
+# WorkMesh Server 本地忽略规则
+.cache/
+.tmp/
+data/
+*.exe
+*.test
+web/node_modules/
+web/dist/
