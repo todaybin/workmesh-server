@@ -123,6 +123,7 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/dashboard/base/{ioOption}/{netOption}", handleDashboardBase)
 	mux.HandleFunc("GET /api/v2/dashboard/current/{ioOption}/{netOption}", handleDashboardCurrent)
 	mux.HandleFunc("POST /api/v2/dashboard/system/restart/{operation}", handleDashboardRestart)
+	mux.HandleFunc("POST /api/v2/files", handleFilesCreate)
 
 	RegisterLegacyCompatibilityRoutes(mux)
 }
