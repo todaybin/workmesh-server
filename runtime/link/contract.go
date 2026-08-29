@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-WorkMesh-Pending
+// SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 WorkMesh contributors
 
 // Package link 定义 WorkMesh 节点之间的认证通信契约。

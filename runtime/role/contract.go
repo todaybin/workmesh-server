@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-WorkMesh-Pending
+// SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 WorkMesh contributors
 
 // Package role 定义本机主节点与次节点的角色切换契约。

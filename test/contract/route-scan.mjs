@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: LicenseRef-WorkMesh-Pending
+// SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 WorkMesh contributors
 /**
  * 读取 Go Gin 路由注册，生成或校验迁移路由清单。

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-WorkMesh-Pending
+// SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 WorkMesh contributors
 
 // Package gateway 定义 WorkMesh Server 与云端 Gateway 的协议边界。
