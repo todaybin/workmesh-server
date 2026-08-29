@@ -125,6 +125,8 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/dashboard/system/restart/{operation}", handleDashboardRestart)
 	mux.HandleFunc("POST /api/v2/files", handleFilesCreate)
 
+	registerBackupAlertLogSettingsRoutes(mux)
+	registerWebsiteFunctionalRoutes(mux)
 	RegisterLegacyCompatibilityRoutes(mux)
 }
 

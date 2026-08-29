@@ -12,7 +12,49 @@ const migrationPendingMessage = "该接口正在迁移"
 
 // RegisterLegacyCompatibilityRoutes 为所有旧公开契约提供统一入口。
 // 业务域迁移完成前返回结构化错误，避免前端出现 404；已迁移路由由专用处理器注册。
+// routeRegistrar 抽象 HandleFunc，便于过滤已经迁移的旧占位路由。
+type routeRegistrar interface {
+	HandleFunc(string, http.HandlerFunc)
+}
+
+type legacyFilterMux struct{ mux *http.ServeMux }
+
+func (m legacyFilterMux) HandleFunc(pattern string, handler http.HandlerFunc) {
+	if isBackupAlertLogSettingsRoute(pattern) || isWebsiteFunctionalRoute(pattern) {
+		return
+	}
+	// 非目标域保留原有专用处理器或占位响应。并行迁移期间可能出现同一路由
+	// 已被专用实现注册的情况，此时保留先注册的专用处理器即可。
+	defer func() { _ = recover() }()
+	m.mux.HandleFunc(pattern, handler)
+}
+
+// isLegacyConcreteRoute 列出仍由旧迁移处理器承接、已经具备真实行为的少量路由。
+func isLegacyConcreteRoute(pattern string) bool {
+	for _, route := range []string{
+		"GET /api/v2/dashboard/app/launcher",
+		"GET /api/v2/dashboard/base/os",
+		"GET /api/v2/dashboard/current/node",
+		"GET /api/v2/dashboard/current/top/cpu",
+		"GET /api/v2/dashboard/current/top/mem",
+		"GET /api/v2/dashboard/quick/option",
+		"GET /api/v2/files/download",
+		"GET /api/v2/files/tree",
+		"POST /api/v2/files/upload",
+	} {
+		if pattern == route {
+			return true
+		}
+	}
+	return false
+}
+
+// RegisterLegacyCompatibilityRoutes 为所有旧公开契约提供统一入口。
 func RegisterLegacyCompatibilityRoutes(mux *http.ServeMux) {
+	registerLegacyCompatibilityRoutes(legacyFilterMux{mux: mux})
+}
+
+func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 	// 兼容契约路径：PHP 扩展与配置动态段由下方统一子路径处理器承接。
 	// HandleFunc("GET /api/v2/runtimes/php/:id/extensions", ...)
 	// HandleFunc("GET /api/v2/runtimes/php/config/:id", ...)
