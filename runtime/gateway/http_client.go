@@ -78,9 +78,22 @@ func (c *HTTPClient) Heartbeat(ctx context.Context, registration Registration) e
 
 // Status 查询节点在 Gateway 的注册和连接状态。
 func (c *HTTPClient) Status(ctx context.Context) (Status, error) {
-	var response Status
-	err := c.do(ctx, http.MethodGet, "/workmesh/node/index", nil, &response)
-	return response, err
+	var response struct {
+		Items []struct {
+			NodeID string `json:"nodeId"`
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/workmesh/node/index", nil, &response); err != nil {
+		return Status{}, err
+	}
+	status := Status{Registration: RegistrationUnregistered, GatewayID: c.GatewayID}
+	if len(response.Items) > 0 {
+		status.Registration = RegistrationRegistered
+		status.NodeID = response.Items[0].NodeID
+		status.Connected = response.Items[0].Status == "online" || response.Items[0].Status == "ready"
+	}
+	return status, nil
 }
 
 // Refresh 刷新节点云端授权。

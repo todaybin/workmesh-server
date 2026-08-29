@@ -52,3 +52,18 @@ func TestHTTPClientLoginStoresBearerToken(t *testing.T) {
 		t.Fatalf("Gateway 登录失败: %+v, %v", auth, err)
 	}
 }
+
+func TestHTTPClientStatusMapsNodeIndex(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/workmesh/node/index" {
+			t.Fatalf("状态路径错误: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"items": []map[string]any{{"nodeId": "node-1", "status": "online"}}}})
+	}))
+	defer server.Close()
+	client := NewHTTPClient(server.URL, "gateway-test", "secret")
+	status, err := client.Status(context.Background())
+	if err != nil || status.NodeID != "node-1" || status.Registration != RegistrationRegistered || !status.Connected {
+		t.Fatalf("状态映射失败: %+v, %v", status, err)
+	}
+}
