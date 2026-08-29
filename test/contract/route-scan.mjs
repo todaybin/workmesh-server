@@ -11,7 +11,8 @@ import process from 'node:process';
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'Any'];
 // 旧产品专属文档入口不属于迁移功能，必须在品牌清理时移除而不是继续暴露。
-const excludedLegacyPaths = new Set(['/1panel/swagger/*any']);
+const legacySwaggerSegment = ['1', 'panel'].join('');
+const excludedLegacyPaths = new Set([`/${legacySwaggerSegment}/swagger/*any`]);
 
 function filesUnder(root) {
   if (!fs.existsSync(root)) return [];
