@@ -15,7 +15,7 @@
 主节点 `61.184.12.165:52834` 已完成以下非破坏性操作：
 
 1. 新制品已同步到 `/opt/workmesh-server/bin/workmesh-server`，远端 SHA256 与本地 `EFF045...B0F29` 一致。
-2. 已部署 `/opt/workmesh-server/web/dist` 前端产物并启用 `workmesh-server.service`（`0.0.0.0:9999`）。
+2. 已部署 `/opt/workmesh-server/web/dist` 前端产物并启用 `workmesh-server.service`（`0.0.0.0:9999`）；前端旧品牌标识和外链已清理。
 3. `/health`、`/ready`、应用目录、运行时和站点接口均返回 HTTP 200；服务常驻内存约 6.4 MiB。
 4. 已停止并禁用 `workmesh-node-core.service`、`workmesh-node-agent.service`，并移除其 systemd 单元和旧二进制；`/opt/workmesh` 数据目录保留。
 
