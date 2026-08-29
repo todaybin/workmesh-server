@@ -147,4 +147,3 @@ func randomID() string {
 }
 
 var _ ProtocolClient = (*HTTPClient)(nil)
-var _ Client = (*HTTPClient)(nil)
