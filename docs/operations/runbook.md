@@ -7,6 +7,8 @@
 
 每台主机安装同一版本独立二进制，配置 `WORKMESH_SERVER_ADDR`、`WORKMESH_DATA_DIR`、`WORKMESH_NODE_ID`、`WORKMESH_NODE_ROLE` 和 Gateway 地址。服务默认监听 `:9999`，由 systemd 或等效进程管理器托管。
 
+配置 `WORKMESH_GATEWAY_URL`、`WORKMESH_GATEWAY_ID` 和 `WORKMESH_GATEWAY_SECRET` 后，服务启动会自动注册当前节点，并每 30 秒发送一次心跳。注册失败时节点保持 `pending` 状态并记录原因；Gateway 不可用不会阻塞 `/health`，但云端任务必须等待授权恢复。
+
 ## 首次启用
 
 先完成本机账号登录，再使用 Gateway 账号完成当前节点注册。主节点 `61.184.12.165` 和次节点 `162.14.96.198` 必须分别注册，不可由主节点代注册。注册成功前只显示健康、登录和授权页面。
