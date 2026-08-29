@@ -6,6 +6,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -23,20 +24,50 @@ type GatewayStateStore struct {
 	mu     sync.RWMutex
 	status gateway.Status
 	auth   gateway.Authorization
+	client gateway.ProtocolClient
 }
 
 // RegisterGatewayRoutes 注册前端使用的 Gateway 状态、注册、心跳和授权接口。
 func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string) {
-	store := &GatewayStateStore{status: gateway.Status{Registration: gateway.RegistrationUnregistered, NodeID: nodeID, Role: role}}
+	store := &GatewayStateStore{status: gateway.Status{Registration: gateway.RegistrationUnregistered, NodeID: nodeID, GatewayID: os.Getenv("WORKMESH_GATEWAY_ID"), Role: role}}
+	// 配置 Gateway 地址后启用真实云端协议；未配置时保留离线开发模式。
+	if baseURL := os.Getenv("WORKMESH_GATEWAY_URL"); baseURL != "" {
+		store.client = gateway.NewHTTPClient(baseURL, os.Getenv("WORKMESH_GATEWAY_ID"), os.Getenv("WORKMESH_GATEWAY_SECRET"))
+	}
 	mux.HandleFunc("GET /api/v2/gateway/status", store.statusHandler)
 	mux.HandleFunc("GET /api/v2/workmesh/gateway/status", store.statusHandler)
 	mux.HandleFunc("POST /api/v2/gateway/register", store.registerHandler)
 	mux.HandleFunc("POST /api/v2/workmesh/gateway/register", store.registerHandler)
-	mux.HandleFunc("POST /api/v2/workmesh/gateway/login", store.registerHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/gateway/login", store.loginHandler)
 	mux.HandleFunc("POST /api/v2/gateway/heartbeat", store.heartbeatHandler)
 	mux.HandleFunc("POST /api/v2/gateway/authorization/refresh", store.refreshHandler)
 	mux.HandleFunc("POST /api/v2/gateway/unbind", store.unbindHandler)
 	mux.HandleFunc("POST /api/v2/workmesh/gateway/unbind", store.unbindHandler)
+}
+
+func (s *GatewayStateStore) loginHandler(w http.ResponseWriter, r *http.Request) {
+	var request gateway.LoginRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if s.client == nil {
+		writeError(w, http.StatusServiceUnavailable, errors.New("Gateway 未配置"))
+		return
+	}
+	auth, err := s.client.Login(r.Context(), request)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	s.mu.Lock()
+	s.status.Registration = gateway.RegistrationRegistered
+	s.status.Connected = true
+	s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
+	s.status.Reason = ""
+	s.auth = auth
+	s.mu.Unlock()
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": auth})
 }
 
 func (s *GatewayStateStore) statusHandler(w http.ResponseWriter, _ *http.Request) {
@@ -56,6 +87,24 @@ func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, errNodeIDRequired)
 		return
 	}
+	if s.client != nil {
+		auth, err := s.client.Register(r.Context(), request)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		s.mu.Lock()
+		s.status.Registration = gateway.RegistrationRegistered
+		s.status.NodeID = request.NodeID
+		s.status.Role = request.Role
+		s.status.Connected = true
+		s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
+		s.status.Reason = ""
+		s.auth = auth
+		s.mu.Unlock()
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": auth})
+		return
+	}
 	s.mu.Lock()
 	s.status.Registration = gateway.RegistrationRegistered
 	s.status.NodeID = request.NodeID
@@ -68,7 +117,16 @@ func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Reque
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": s.auth})
 }
 
-func (s *GatewayStateStore) heartbeatHandler(w http.ResponseWriter, _ *http.Request) {
+func (s *GatewayStateStore) heartbeatHandler(w http.ResponseWriter, r *http.Request) {
+	if s.client != nil {
+		s.mu.RLock()
+		registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Registered: s.status.Registration == gateway.RegistrationRegistered}
+		s.mu.RUnlock()
+		if err := s.client.Heartbeat(r.Context(), registration); err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+	}
 	s.mu.Lock()
 	s.status.Connected = true
 	s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
@@ -76,7 +134,7 @@ func (s *GatewayStateStore) heartbeatHandler(w http.ResponseWriter, _ *http.Requ
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200})
 }
 
-func (s *GatewayStateStore) refreshHandler(w http.ResponseWriter, _ *http.Request) {
+func (s *GatewayStateStore) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	auth := s.auth
 	registered := s.status.Registration == gateway.RegistrationRegistered
@@ -85,10 +143,27 @@ func (s *GatewayStateStore) refreshHandler(w http.ResponseWriter, _ *http.Reques
 		writeError(w, http.StatusUnauthorized, errGatewayUnregistered)
 		return
 	}
+	if s.client != nil {
+		refreshed, err := s.client.Refresh(r.Context())
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		s.mu.Lock()
+		s.auth = refreshed
+		auth = refreshed
+		s.mu.Unlock()
+	}
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": auth})
 }
 
-func (s *GatewayStateStore) unbindHandler(w http.ResponseWriter, _ *http.Request) {
+func (s *GatewayStateStore) unbindHandler(w http.ResponseWriter, r *http.Request) {
+	if s.client != nil {
+		if err := s.client.Revoke(r.Context()); err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+	}
 	s.mu.Lock()
 	s.status.Registration = gateway.RegistrationUnregistered
 	s.status.Connected = false

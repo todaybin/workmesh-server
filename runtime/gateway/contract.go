@@ -67,6 +67,7 @@ type Authorization struct {
 type ProtocolClient interface {
 	Login(context.Context, LoginRequest) (Authorization, error)
 	Register(context.Context, RegisterRequest) (Authorization, error)
+	Heartbeat(context.Context, Registration) error
 	Status(context.Context) (Status, error)
 	Refresh(context.Context) (Authorization, error)
 	Revoke(context.Context) error
