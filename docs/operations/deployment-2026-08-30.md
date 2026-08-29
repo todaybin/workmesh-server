@@ -6,8 +6,8 @@
 ## 制品
 
 - 目标平台：Linux amd64
-- 构建提交：`25ef72c`（包含 Compose、运行时、终端、SSH、toolbox 和应用目录接口）
-- SHA256：`ED000FC952B922E19C00C1304E0650560B2ECD01240291BE6C658792AD60B157`
+- 构建提交：`5711e93`（包含 Compose、运行时、终端、SSH、toolbox、应用目录和 sites 接口）
+- SHA256：`EFF04589400C6E6EA1A8A0AD9C437F213DEA45B9DA9F89FD3CE9D477327B0F29`
 - 本地制品：`.tmp/workmesh-server-linux-amd64`
 
 ## 主节点旁路验证
