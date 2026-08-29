@@ -43,7 +43,8 @@ func main() {
 	scheduler.Start(ctx)
 	defer scheduler.Stop()
 
-	mux := httpMux(cfg)
+	mux, gatewayStore := httpMux(cfg)
+	gatewayStore.Start(ctx, []string{"system", "containers", "files", "databases", "websites", "tasks"})
 	server := wmhttp.New(cfg.ListenAddr, mux, cfg.RequestTimeout)
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, context.Canceled) {
@@ -58,7 +59,7 @@ func main() {
 	_ = server.Shutdown(shutdownCtx)
 }
 
-func httpMux(cfg config.Config) *http.ServeMux {
+func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 发布包包含 web/dist 时由同一进程托管前端，开发环境无构建产物则返回服务信息。
@@ -78,7 +79,7 @@ func httpMux(cfg config.Config) *http.ServeMux {
 	mux.HandleFunc("GET /api/v2/health/check", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
 	})
-	controlapi.Register(mux, cfg.NodeID, cfg.Role)
+	gatewayStore := controlapi.Register(mux, cfg.NodeID, cfg.Role)
 	nodeapi.Register(mux)
-	return mux
+	return mux, gatewayStore
 }

@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -27,8 +28,60 @@ type GatewayStateStore struct {
 	client gateway.ProtocolClient
 }
 
+// Start 启动节点自动注册和周期心跳；未配置云端客户端时不创建后台任务。
+func (s *GatewayStateStore) Start(ctx context.Context, capabilities []string) {
+	if s.client == nil {
+		return
+	}
+	go func() {
+		register := func() {
+			s.mu.RLock()
+			request := gateway.RegisterRequest{NodeID: s.status.NodeID, Role: s.status.Role, ProtocolVersion: "v1", Capabilities: capabilities}
+			s.mu.RUnlock()
+			auth, err := s.client.Register(ctx, request)
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if err != nil {
+				s.status.Registration = gateway.RegistrationPending
+				s.status.Connected = false
+				s.status.Reason = err.Error()
+				return
+			}
+			s.status.Registration = gateway.RegistrationRegistered
+			s.status.Connected = true
+			s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
+			s.status.Reason = ""
+			s.auth = auth
+		}
+		register()
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.mu.RLock()
+				registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Registered: s.status.Registration == gateway.RegistrationRegistered}
+				s.mu.RUnlock()
+				if err := s.client.Heartbeat(ctx, registration); err != nil {
+					s.mu.Lock()
+					s.status.Connected = false
+					s.status.Reason = err.Error()
+					s.mu.Unlock()
+				} else {
+					s.mu.Lock()
+					s.status.Connected = true
+					s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
+					s.mu.Unlock()
+				}
+			}
+		}
+	}()
+}
+
 // RegisterGatewayRoutes 注册前端使用的 Gateway 状态、注册、心跳和授权接口。
-func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string) {
+func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string) *GatewayStateStore {
 	store := &GatewayStateStore{status: gateway.Status{Registration: gateway.RegistrationUnregistered, NodeID: nodeID, GatewayID: os.Getenv("WORKMESH_GATEWAY_ID"), Role: role}}
 	// 配置 Gateway 地址后启用真实云端协议；未配置时保留离线开发模式。
 	if baseURL := os.Getenv("WORKMESH_GATEWAY_URL"); baseURL != "" {
@@ -43,6 +96,7 @@ func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string) {
 	mux.HandleFunc("POST /api/v2/gateway/authorization/refresh", store.refreshHandler)
 	mux.HandleFunc("POST /api/v2/gateway/unbind", store.unbindHandler)
 	mux.HandleFunc("POST /api/v2/workmesh/gateway/unbind", store.unbindHandler)
+	return store
 }
 
 func (s *GatewayStateStore) loginHandler(w http.ResponseWriter, r *http.Request) {
