@@ -37,9 +37,7 @@ func registerDeploymentAndProcessRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/deployment/rollback", deploymentRollback)
 	mux.HandleFunc("POST /api/v2/deployment-manifest/verify", deploymentManifestVerify)
 	mux.HandleFunc("POST /api/v2/deployment-artifact/activate", deploymentArtifactActivate)
-	mux.HandleFunc("GET /api/v2/process/", processInfo)
-	mux.HandleFunc("POST /api/v2/process/stop", processStop)
-	mux.HandleFunc("POST /api/v2/process/listening", processListening)
+	registerProcessRoutes(mux)
 }
 
 func isDeploymentProcessRoute(pattern string) bool {
@@ -48,7 +46,7 @@ func isDeploymentProcessRoute(pattern string) bool {
 	if len(parts) == 2 {
 		path = parts[1]
 	}
-	return path == "/api/v2/deployment/status" || strings.HasPrefix(path, "/api/v2/deployment/") || strings.HasPrefix(path, "/api/v2/deployment-") || strings.HasPrefix(path, "/api/v2/process/")
+	return path == "/api/v2/deployment/status" || strings.HasPrefix(path, "/api/v2/deployment/") || strings.HasPrefix(path, "/api/v2/deployment-")
 }
 
 func deploymentStatus(w http.ResponseWriter, _ *http.Request) {
