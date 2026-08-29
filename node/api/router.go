@@ -18,4 +18,5 @@ func Register(mux *http.ServeMux) {
 	RegisterSSLRoutes(mux)
 	registerCoreAuthExtras(mux)
 	RegisterRuntimeToolboxRoutes(mux)
+	RegisterAppRoutes(mux)
 }
