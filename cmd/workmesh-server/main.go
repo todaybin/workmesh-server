@@ -61,6 +61,12 @@ func main() {
 func httpMux(cfg config.Config) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// 发布包包含 web/dist 时由同一进程托管前端，开发环境无构建产物则返回服务信息。
+		index := filepath.Join("web", "dist", "index.html")
+		if _, err := os.Stat(index); err == nil {
+			http.FileServer(http.Dir(filepath.Join("web", "dist"))).ServeHTTP(w, r)
+			return
+		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]string{"service": "workmesh-server"}})
 	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
