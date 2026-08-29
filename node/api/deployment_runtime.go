@@ -46,7 +46,7 @@ func isDeploymentProcessRoute(pattern string) bool {
 	if len(parts) == 2 {
 		path = parts[1]
 	}
-	return path == "/api/v2/deployment/status" || strings.HasPrefix(path, "/api/v2/deployment/") || strings.HasPrefix(path, "/api/v2/deployment-")
+	return path == "/api/v2/deployment/status" || strings.HasPrefix(path, "/api/v2/deployment/") || strings.HasPrefix(path, "/api/v2/deployment-") || strings.HasPrefix(path, "/api/v2/process/")
 }
 
 func deploymentStatus(w http.ResponseWriter, _ *http.Request) {
