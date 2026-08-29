@@ -6,7 +6,7 @@ const message = {
         false: 'Palsu',
         colon: ': ',
         example: 'cth., ',
-        fit2cloud: 'FIT2CLOUD',
+        workmesh: 'workmesh',
         lingxia: 'LXware',
         button: {
             run: 'Jalankan',
@@ -230,7 +230,7 @@ const message = {
             logout: 'Log keluar',
             agreeTitle: 'Agreement',
             agreeContent:
-                'Untuk melindungi hak dan kepentingan sah anda dengan lebih baik, sila baca dan setuju dengan perjanjian berikut &laquo; <a href = "https://www.fit2cloud.com/legal/licenses.html" target = "_blank" > Perjanjian Lesen Komuniti </a> &raquo;',
+                'Untuk melindungi hak dan kepentingan sah anda dengan lebih baik, sila baca dan setuju dengan perjanjian berikut &laquo; <a href = "https://www.workmesh.com/legal/licenses.html" target = "_blank" > Perjanjian Lesen Komuniti </a> &raquo;',
             passkeyFailed: 'Log masuk Passkey gagal, sila cuba lagi',
             passkeyNotSupported: 'Pelayar atau persekitaran semasa tidak menyokong passkey',
             passkeyToPassword: 'Ada masalah menggunakan passkey? Gunakan kata laluan sahaja',
@@ -3289,7 +3289,7 @@ const message = {
         importLicense: 'Lesen',
         securityWarningTitle: 'Jangan gunakan lesen retak atau lesen daripada sumber yang tidak diketahui.',
         securityWarningContent:
-            'WorkMesh perlu dijalankan oleh pengguna dengan keistimewaan pentadbiran sistem. Lesen tidak rasmi atau versi yang diubah suai boleh menyebabkan pelayan hilang kawalan, kebocoran data dan risiko keselamatan serius lain. Dapatkan lesen dan pakej pemasangan hanya melalui saluran rasmi FIT2CLOUD.',
+            'WorkMesh perlu dijalankan oleh pengguna dengan keistimewaan pentadbiran sistem. Lesen tidak rasmi atau versi yang diubah suai boleh menyebabkan pelayan hilang kawalan, kebocoran data dan risiko keselamatan serius lain. Dapatkan lesen dan pakej pemasangan hanya melalui saluran rasmi workmesh.',
         importHelper: 'Sila klik atau seret fail lesen ke sini',
         licenseRequiredTip:
             'Lesen belum diimport. Salin ID peranti, dapatkan lesen dan importkannya sebelum anda boleh log masuk.',

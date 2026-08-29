@@ -6,7 +6,7 @@ const message = {
         false: 'falso',
         colon: ': ',
         example: 'ex.: ',
-        fit2cloud: 'FIT2CLOUD',
+        workmesh: 'workmesh',
         lingxia: 'LXware',
         button: {
             run: 'Executar',
@@ -228,7 +228,7 @@ const message = {
             logout: 'Sair',
             agreeTitle: 'Termo de Aceite',
             agreeContent:
-                'Para proteger melhor seus direitos e interesses legítimos, leia e concorde com o seguinte termo &laquo; <a href="https://www.fit2cloud.com/legal/licenses.html" target="_blank">Acordo de Licença Comunitária</a> &raquo;',
+                'Para proteger melhor seus direitos e interesses legítimos, leia e concorde com o seguinte termo &laquo; <a href="https://www.workmesh.com/legal/licenses.html" target="_blank">Acordo de Licença Comunitária</a> &raquo;',
             passkeyFailed: 'Falha no login com Passkey, tente novamente',
             passkeyNotSupported: 'O navegador ou ambiente atual não suporta passkeys',
             passkeyToPassword: 'Está com problemas para usar uma passkey? Use a senha',
@@ -3296,7 +3296,7 @@ const message = {
         importLicense: 'Licença',
         securityWarningTitle: 'Não use licenças crackeadas ou de fontes desconhecidas.',
         securityWarningContent:
-            'O WorkMesh precisa ser executado por um usuário com privilégios de administração do sistema. Licenças não oficiais ou versões adulteradas podem causar perda de controle do servidor, vazamento de dados e outros riscos graves de segurança. Obtenha licenças e instaladores apenas pelos canais oficiais da FIT2CLOUD.',
+            'O WorkMesh precisa ser executado por um usuário com privilégios de administração do sistema. Licenças não oficiais ou versões adulteradas podem causar perda de controle do servidor, vazamento de dados e outros riscos graves de segurança. Obtenha licenças e instaladores apenas pelos canais oficiais da workmesh.',
         importHelper: 'Clique ou arraste o arquivo de licença aqui',
         licenseRequiredTip:
             'A licença ainda não foi importada. Copie o ID do dispositivo, obtenha a licença e importe-a antes de fazer login.',

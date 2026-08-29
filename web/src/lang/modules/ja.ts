@@ -6,7 +6,7 @@ const message = {
         false: 'いいえ',
         colon: ':',
         example: '例：',
-        fit2cloud: 'FIT2CLOUD',
+        workmesh: 'workmesh',
         lingxia: 'LXware',
         button: {
             run: '実行',
@@ -229,7 +229,7 @@ const message = {
             logout: 'ログアウト',
             agreeTitle: '合意',
             agreeContent:
-                'あなたの正当な権利と利益をよりよく保護するために、次の契約とラコを読んで同意してください。<a href = "https://www.fit2cloud.com/legal/licenses.html" target="_blank">コミュニティライセンス契約</a>＆raquo;',
+                'あなたの正当な権利と利益をよりよく保護するために、次の契約とラコを読んで同意してください。<a href = "https://www.workmesh.com/legal/licenses.html" target="_blank">コミュニティライセンス契約</a>＆raquo;',
             passkeyFailed: 'パスキーでのログインに失敗しました。再試行してください',
             passkeyNotSupported: '現在のブラウザまたは環境はパスキーに対応していません',
             passkeyToPassword: 'パスキーが使えませんか？パスワードでログインしてください',
@@ -3216,7 +3216,7 @@ const message = {
         import: 'インポート',
         securityWarningTitle: 'クラック版または出所不明のライセンスを使用しないでください。',
         securityWarningContent:
-            'WorkMesh はシステム管理者権限を持つユーザーで実行する必要があります。非公式ライセンスや改ざんされたバージョンは、サーバーの制御不能、データ漏えいなどの重大なセキュリティリスクを引き起こす可能性があります。ライセンスとインストールパッケージは FIT2CLOUD 公式チャネルから入手してください。',
+            'WorkMesh はシステム管理者権限を持つユーザーで実行する必要があります。非公式ライセンスや改ざんされたバージョンは、サーバーの制御不能、データ漏えいなどの重大なセキュリティリスクを引き起こす可能性があります。ライセンスとインストールパッケージは workmesh 公式チャネルから入手してください。',
         importHelper: 'ここでライセンスファイルをクリックまたはドラッグしてください',
         licenseRequiredTip:
             'まだライセンスがインポートされていません。デバイス ID をコピーしてライセンスを取得し、インポートしてからログインしてください。',

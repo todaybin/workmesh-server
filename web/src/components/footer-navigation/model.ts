@@ -109,7 +109,7 @@ export const isSafeExternalUrl = (value: unknown): value is string => {
     }
 };
 
-const legacyPanelHosts = new Set(['workmesh.cn', 'workmesh.pro', 'bbs.fit2cloud.com']);
+const legacyPanelHosts = new Set(['workmesh.cn', 'workmesh.pro']);
 
 const isLegacyPanelUrl = (value: string): boolean => {
     try {

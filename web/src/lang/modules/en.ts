@@ -6,7 +6,7 @@ const message = {
         false: 'False',
         colon: ': ',
         example: 'e.g., ',
-        fit2cloud: 'FIT2CLOUD',
+        workmesh: 'workmesh',
         lingxia: 'LXware',
         button: {
             run: 'Run',
@@ -226,7 +226,7 @@ const message = {
             logout: 'Logout',
             agreeTitle: 'Agreement',
             agreeContent:
-                'In order to better protect your legitimate rights and interests, please read and agree to the following agreement &laquo; <a href = "https://www.fit2cloud.com/legal/licenses.html" target = "_blank" > Community License Agreement </a> &raquo;',
+                'In order to better protect your legitimate rights and interests, please read and agree to the following agreement &laquo; <a href = "https://www.workmesh.com/legal/licenses.html" target = "_blank" > Community License Agreement </a> &raquo;',
             passkeyFailed: 'Passkey sign-in failed, please try again',
             passkeyNotSupported:
                 'Current browser or environment does not support passkeys, confirm you have bound a domain name and are accessing through HTTPS',
@@ -3237,7 +3237,7 @@ const message = {
         importLicense: 'Import license',
         securityWarningTitle: 'Do not use cracked licenses or licenses from unknown sources.',
         securityWarningContent:
-            'WorkMesh runs with system administration privileges. Unofficial licenses or tampered builds may cause server takeover, data leaks, and other serious security risks. Obtain licenses and installers only from official FIT2CLOUD channels.',
+            'WorkMesh runs with system administration privileges. Unofficial licenses or tampered builds may cause server takeover, data leaks, and other serious security risks. Obtain licenses and installers only from official workmesh channels.',
         importHelper: 'Click or drag the license file here',
         licenseRequiredTip:
             'The license has not been imported yet. Copy the device ID, obtain the license, and import it before logging in.',

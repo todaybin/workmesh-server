@@ -5,7 +5,7 @@ const message = {
         true: '是',
         false: '否',
         example: '例：',
-        fit2cloud: '飞致云',
+        workmesh: 'WorkMesh',
         lingxia: '凌霞',
         colon: '：',
         button: {
@@ -224,11 +224,11 @@ const message = {
             passkeyFailed: '通行密钥登录失败，请重试',
             passkeyNotSupported: '当前浏览器或环境不支持通行密钥',
             passkeyToPassword: '无法使用通行密钥? 使用账号密码登录',
-            licenseHelper: '《飞致云社区软件许可协议》',
+            licenseHelper: '《WorkMesh社区软件许可协议》',
             errorAgree: '请点击同意社区软件许可协议',
             agreeTitle: '服务协议及隐私保护',
             agreeContent:
-                '为了更好的保障您的合法权益，请您阅读并同意以下协议 &laquo; <a href="https://www.fit2cloud.com/legal/licenses.html" target="_blank"> 飞致云社区软件许可协议 </a> &raquo;',
+                '为了更好的保障您的合法权益，请您阅读并同意以下协议 &laquo; <a href="https://www.workmesh.com/legal/licenses.html" target="_blank"> WorkMesh社区软件许可协议 </a> &raquo;',
             logout: '退出登录',
         },
         rule: {
@@ -3065,7 +3065,7 @@ const message = {
         importLicense: '导入许可证',
         securityWarningTitle: '请勿使用破解版或来源不明的许可证！',
         securityWarningContent:
-            'WorkMesh 需要以具备系统管理权限的用户运行，非官方许可证或被篡改版本可能导致服务器失控、数据泄露等严重安全风险。请通过飞致云官方渠道获取许可证和安装包。',
+            'WorkMesh 需要以具备系统管理权限的用户运行，非官方许可证或被篡改版本可能导致服务器失控、数据泄露等严重安全风险。请通过WorkMesh官方渠道获取许可证和安装包。',
         importHelper: '请点击或拖动许可文件到此处',
         licenseRequiredTip: '当前尚未导入许可证，复制设备 ID 后获取许可证并导入后才能登录使用。',
         licenseRequiredShortTip: '请先复制设备 ID 获取许可证，导入许可证后即可登录。',

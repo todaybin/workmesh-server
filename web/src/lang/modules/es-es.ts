@@ -6,7 +6,7 @@ const message = {
         false: 'Falso',
         colon: ': ',
         example: 'p.ej., ',
-        fit2cloud: 'FIT2CLOUD',
+        workmesh: 'workmesh',
         lingxia: 'LXware',
         button: {
             run: 'Ejecutar',
@@ -227,7 +227,7 @@ const message = {
             logout: 'Cerrar sesión',
             agreeTitle: 'Acuerdo',
             agreeContent:
-                'Para proteger mejor sus derechos e intereses legítimos, por favor lea y acepte el siguiente acuerdo &laquo; <a href = "https://www.fit2cloud.com/legal/licenses.html" target = "_blank" > Acuerdo de Licencia Comunitaria </a> &raquo;',
+                'Para proteger mejor sus derechos e intereses legítimos, por favor lea y acepte el siguiente acuerdo &laquo; <a href = "https://www.workmesh.com/legal/licenses.html" target = "_blank" > Acuerdo de Licencia Comunitaria </a> &raquo;',
             passkeyFailed: 'El inicio de sesión con Passkey falló, inténtalo de nuevo',
             passkeyNotSupported: 'El navegador o entorno actual no admite Passkey',
             passkeyToPassword: '¿Tienes problemas para usar una passkey? Usa la contraseña en su lugar',
@@ -3295,7 +3295,7 @@ const message = {
         importLicense: 'Importar licencia',
         securityWarningTitle: 'No uses licencias crackeadas ni de origen desconocido.',
         securityWarningContent:
-            'WorkMesh debe ejecutarse con un usuario con permisos de administración del sistema. Las licencias no oficiales o las versiones manipuladas pueden causar pérdida de control del servidor, filtraciones de datos y otros riesgos graves de seguridad. Obtén licencias e instaladores solo desde canales oficiales de FIT2CLOUD.',
+            'WorkMesh debe ejecutarse con un usuario con permisos de administración del sistema. Las licencias no oficiales o las versiones manipuladas pueden causar pérdida de control del servidor, filtraciones de datos y otros riesgos graves de seguridad. Obtén licencias e instaladores solo desde canales oficiales de workmesh.',
         importHelper: 'Haga clic o arrastre el archivo de licencia aquí',
         licenseRequiredTip:
             'La licencia aún no se ha importado. Copie el ID del dispositivo, obtenga la licencia e impórtela antes de iniciar sesión.',

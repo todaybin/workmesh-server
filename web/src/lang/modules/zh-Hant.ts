@@ -5,7 +5,7 @@ const message = {
         true: '是',
         false: '否',
         example: '例：',
-        fit2cloud: '飛致雲',
+        workmesh: 'WorkMesh',
         lingxia: 'LXware',
         colon: '：',
         button: {
@@ -221,11 +221,11 @@ const message = {
             mfaTitle: 'MFA 認證',
             mfaCode: 'MFA 驗證碼',
             title: 'Linux 伺服器維運面板',
-            licenseHelper: '《飛致雲社區軟體許可協議》',
+            licenseHelper: '《WorkMesh社區軟體許可協議》',
             errorAgree: '請點選同意社區軟體許可協議',
             agreeTitle: '服務協議及隱私保護',
             agreeContent:
-                '為了更好的保障您的合法權益，請您閱讀並同意以下協議 &laquo; <a href="https://www.fit2cloud.com/legal/licenses.html" target="_blank"> 飛致雲社區軟體許可協議 </a> &raquo;',
+                '為了更好的保障您的合法權益，請您閱讀並同意以下協議 &laquo; <a href="https://www.workmesh.com/legal/licenses.html" target="_blank"> WorkMesh社區軟體許可協議 </a> &raquo;',
             logout: '登出',
             passkeyFailed: '通行金鑰登入失敗，請重試',
             passkeyNotSupported: '目前瀏覽器或環境不支援通行金鑰',
@@ -3029,7 +3029,7 @@ const message = {
         importLicense: '匯入許可證',
         securityWarningTitle: '請勿使用破解版或來源不明的許可證！',
         securityWarningContent:
-            'WorkMesh 需要以具備系統管理權限的使用者執行，非官方許可證或被竄改版本可能導致伺服器失控、資料外洩等嚴重安全風險。請透過飛致雲官方管道取得許可證和安裝包。',
+            'WorkMesh 需要以具備系統管理權限的使用者執行，非官方許可證或被竄改版本可能導致伺服器失控、資料外洩等嚴重安全風險。請透過WorkMesh官方管道取得許可證和安裝包。',
         importHelper: '請點選或拖動許可檔案到此處',
         licenseRequiredTip: '目前尚未匯入許可證，複製裝置 ID 後取得許可證並匯入後才能登入使用。',
         licenseRequiredShortTip: '請先複製裝置 ID 取得許可證，匯入許可證後即可登入。',

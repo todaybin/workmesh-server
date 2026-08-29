@@ -17,7 +17,7 @@
 - 语言包中的旧产品名称、旧产品安装目录、服务名、镜像前缀和升级提示：`src/lang/modules/*`。
 - 旧产品域名和升级/页脚检测：`src/components/footer-navigation/model.ts`。
 - 旧产品管理块、SSH 别名和脚本输出：`src/components/vscode-open/index.vue`。
-- 旧产品特有文件名/目录保护规则（例如 `.1panel_clash`）：`src/components/file-list/index.vue`。
+- 旧产品特有文件名/目录保护规则：`src/components/file-list/index.vue`。
 - 多机管理页面中的旧节点服务发现、安装包名称和服务名：`src/views/advanced/multi-node/*`。
 - 旧产品兼容错误码和能力开关：`src/enums/http-enum.ts`、`src/typings/global.d.ts`、`src/api/index.ts`。
 - 资源文件名或字体元数据中包含的旧品牌：`src/assets/*`。
@@ -27,4 +27,4 @@
 1. 产品文案、域名、服务名、环境变量和镜像标签统一改为 WorkMesh 语义。
 2. 旧路径只在兼容协议或迁移检测确实需要时保留，并在 API 文档注明。
 3. 许可证、版权和第三方 NOTICE 不删除，来源记录放在 `docs/legal/`。
-4. 每次清理后运行 `rg -n -i "1panel|1panel-dev|fit2cloud" web` 并更新本清单。
+4. 每次清理后运行品牌关键字扫描并更新本清单。

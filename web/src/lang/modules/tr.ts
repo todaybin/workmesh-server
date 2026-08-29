@@ -6,7 +6,7 @@ const message = {
         false: 'Yanlış',
         colon: ': ',
         example: 'örnek: ',
-        fit2cloud: 'FIT2CLOUD',
+        workmesh: 'workmesh',
         lingxia: 'LXware',
         button: {
             run: 'Çalıştır',
@@ -229,7 +229,7 @@ const message = {
             logout: 'Çıkış',
             agreeTitle: 'Sözleşme',
             agreeContent:
-                'Meşru hak ve çıkarlarınızı daha iyi korumak için lütfen aşağıdaki sözleşmeyi okuyun ve kabul edin &laquo; <a href = "https://www.fit2cloud.com/legal/licenses.html" target = "_blank" > Topluluk Lisans Sözleşmesi </a> &raquo;',
+                'Meşru hak ve çıkarlarınızı daha iyi korumak için lütfen aşağıdaki sözleşmeyi okuyun ve kabul edin &laquo; <a href = "https://www.workmesh.com/legal/licenses.html" target = "_blank" > Topluluk Lisans Sözleşmesi </a> &raquo;',
             passkeyFailed: 'Passkey ile giriş başarısız oldu, lütfen tekrar deneyin',
             passkeyNotSupported: 'Mevcut tarayıcı veya ortam passkey desteklemiyor',
             passkeyToPassword: 'Passkey kullanırken sorun mu yaşıyorsunuz? Şifreyi kullanın',
@@ -3281,7 +3281,7 @@ const message = {
         importLicense: 'Lisansı içe aktar',
         securityWarningTitle: 'Kırılmış veya kaynağı bilinmeyen lisansları kullanmayın.',
         securityWarningContent:
-            'WorkMesh sistem yönetimi yetkilerine sahip bir kullanıcıyla çalışmalıdır. Resmi olmayan lisanslar veya değiştirilmiş sürümler sunucu kontrolünün kaybına, veri sızıntılarına ve diğer ciddi güvenlik risklerine neden olabilir. Lisansları ve kurulum paketlerini yalnızca resmi FIT2CLOUD kanallarından edinin.',
+            'WorkMesh sistem yönetimi yetkilerine sahip bir kullanıcıyla çalışmalıdır. Resmi olmayan lisanslar veya değiştirilmiş sürümler sunucu kontrolünün kaybına, veri sızıntılarına ve diğer ciddi güvenlik risklerine neden olabilir. Lisansları ve kurulum paketlerini yalnızca resmi workmesh kanallarından edinin.',
         importHelper: 'Lütfen lisans dosyasını buraya tıklayın veya sürükleyin',
         licenseRequiredTip:
             'Lisans henüz içe aktarılmadı. Cihaz kimliğini kopyalayıp lisansı alın ve giriş yapmadan önce içe aktarın.',
