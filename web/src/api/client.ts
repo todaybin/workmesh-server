@@ -30,11 +30,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function getGatewayStatus(): Promise<GatewayStatus> {
-  return request<GatewayStatus>('/api/v2/core/gateway/status')
+  return request<GatewayStatus>('/api/v2/workmesh/gateway/status')
 }
 
 export function loginGateway(payload: GatewayLoginRequest): Promise<GatewayLoginResponse> {
-  return request<GatewayLoginResponse>('/api/v2/core/gateway/login', {
+  return request<GatewayLoginResponse>('/api/v2/workmesh/gateway/login', {
     method: 'POST',
     body: JSON.stringify(payload),
   })

@@ -32,9 +32,11 @@ func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string) {
 	mux.HandleFunc("GET /api/v2/workmesh/gateway/status", store.statusHandler)
 	mux.HandleFunc("POST /api/v2/gateway/register", store.registerHandler)
 	mux.HandleFunc("POST /api/v2/workmesh/gateway/register", store.registerHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/gateway/login", store.registerHandler)
 	mux.HandleFunc("POST /api/v2/gateway/heartbeat", store.heartbeatHandler)
 	mux.HandleFunc("POST /api/v2/gateway/authorization/refresh", store.refreshHandler)
 	mux.HandleFunc("POST /api/v2/gateway/unbind", store.unbindHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/gateway/unbind", store.unbindHandler)
 }
 
 func (s *GatewayStateStore) statusHandler(w http.ResponseWriter, _ *http.Request) {

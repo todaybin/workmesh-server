@@ -78,7 +78,7 @@ function scanFile(file, area, base = area === 'core' ? '/api/v2/core' : '/api/v2
   }
   // ServeMux 对健康检查等路径允许省略方法；按旧契约将其视为 GET。
   for (const line of lines) {
-    const plain = line.match(/\bHandleFunc\(\s*["'](\/[^"']+)["']/);
+    const plain = line.match(/\bHandleFunc\(\s*["'](\/[^"']*)["']/);
     if (plain && !plain[1].includes(' ')) {
       routes.push({ method: 'GET', path: joinRoute(plain[1]), source: path.relative(process.cwd(), file).replaceAll('\\', '/') });
     }
