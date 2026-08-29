@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 WorkMesh contributors
+
+[Unit]
+Description=WorkMesh Server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/workmesh-server
+ExecStart=/opt/workmesh-server/bin/workmesh-server
+EnvironmentFile=-/opt/workmesh-server/config/server.env
+Restart=on-failure
+RestartSec=5s
+UMask=0027
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
