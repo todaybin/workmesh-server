@@ -265,11 +265,15 @@ func (s *WebsiteService) UpdateWAFSite(id uint, enabled bool, mode string) (mode
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.getWebsiteLocked(id); err != nil {
+	website, err := s.getWebsiteLocked(id)
+	if err != nil {
 		return model.WAFSite{}, err
 	}
 	site := s.wafSites[id]
 	site.WebsiteID, site.Enabled, site.Mode = id, enabled, mode
+	if site.Alias == "" {
+		site.Alias = website.Alias
+	}
 	if site.Rules == nil {
 		site.Rules = []model.WAFRule{}
 	}
