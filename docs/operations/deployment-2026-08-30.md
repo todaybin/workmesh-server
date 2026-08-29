@@ -14,16 +14,18 @@
 
 主节点 `61.184.12.165:52834` 已完成以下非破坏性操作：
 
-1. 上一次旁路制品已同步到 `/opt/workmesh-server/bin/workmesh-server`；本次新制品因 SSH 公钥认证失败尚未覆盖远端文件。
-2. 本地 Linux amd64 制品已构建并完成 SHA256 校验。
-3. 主节点现有旁路服务验证仍为 `/health` 与 `/ready` 返回 `{"code":200}`，systemd 保持 `disabled/inactive`。
+1. 新制品已同步到 `/opt/workmesh-server/bin/workmesh-server`，远端 SHA256 与本地 `EFF045...B0F29` 一致。
+2. 已部署 `/opt/workmesh-server/web/dist` 前端产物并启用 `workmesh-server.service`（`0.0.0.0:9999`）。
+3. `/health`、`/ready`、应用目录、运行时和站点接口均返回 HTTP 200；服务常驻内存约 6.4 MiB。
+4. 已停止并禁用 `workmesh-node-core.service`、`workmesh-node-agent.service`，并移除其 systemd 单元和旧二进制；`/opt/workmesh` 数据目录保留。
 
 现有 `workmesh-node-core.service` 与 `workmesh-node-agent.service` 未停止，生产端口和数据保持不变。
 
 ## 切换阻断
 
-- Gateway 登录用户名和密码尚未提供，无法完成节点注册、授权和心跳验收。
-- 当前执行环境访问主节点 `61.184.12.165:52834` 返回 `Permission denied (publickey,password)`，无法同步本次制品；需要在同一 Windows 会话加载受信 SSH key 后重试。
+- Gateway 登录用户名和密码尚未提供，节点状态目前为 `pending`，无法完成注册、授权和心跳验收。
+- `162.14.96.198` 当前是 Gateway 主机，未提供可覆盖的次节点地址；未在该主机上部署 Node，避免影响 Gateway。
+- 主机预检缺少 `/dev/kvm` 且内存约 3.8 GiB，只能以 degraded/restricted 控制面运行，不能标记 CubeSandbox E2E。
 - `162.14.96.198` 当前运行 Gateway 服务，不是可确认的次节点；不能覆盖其现有进程。
 - 主机无 `/dev/kvm` 且内存低于 CubeSandbox 建议值，只能以 degraded 控制面运行。
 
@@ -31,4 +33,4 @@
 
 ## 回滚
 
-切换失败时保持旧服务运行；新单元可执行 `systemctl disable --now workmesh-server.service`，不删除 `/opt/workmesh-server` 数据目录。旧服务卸载必须显式设置 `WORKMESH_CONFIRM_OLD_UNINSTALL=REMOVE_OLD_WORKMESH_NODE`，并在人工验收后执行。
+切换失败时可从 `/root/workmesh-pre-switch-20260830-020622.tar.gz` 恢复旧程序和单元；新单元可执行 `systemctl disable --now workmesh-server.service`，不删除 `/opt/workmesh-server` 数据目录。旧数据目录 `/opt/workmesh` 仍保留。
