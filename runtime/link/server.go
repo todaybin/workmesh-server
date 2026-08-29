@@ -161,6 +161,9 @@ func NewServer(options ServerOptions) (*Server, error) {
 			return nil, err
 		}
 	}
+	if state := manager.State(context.Background()); state.NodeID != options.NodeID {
+		return nil, errors.New("角色管理器节点身份与链路节点不一致")
+	}
 	if options.SyncStore == nil {
 		options.SyncStore = NewMemorySyncStore()
 	}
@@ -174,6 +177,7 @@ func NewServer(options ServerOptions) (*Server, error) {
 	if clock == nil {
 		clock = time.Now
 	}
+	options.Secret = append([]byte(nil), options.Secret...)
 	return &Server{
 		options: options,
 		manager: manager,

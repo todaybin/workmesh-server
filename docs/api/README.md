@@ -10,6 +10,8 @@
 - `/api/v2/gateway/*`：每个节点的 Gateway 登录、注册、授权刷新、心跳和同步。
 - `/api/v2/gateway/inbound/*`：Gateway 向节点派发任务、策略和授权撤销。
 - `/api/v2/link/*`：主节点与次节点握手、心跳、角色切换和增量同步。
+
+节点链路的签名、重试、游标和 fencing 约束见 [link.md](link.md)。
 - `/api/v2/system/agent/*`：Agent 沙盒和在线开发统一生命周期。
 
 ## 完整性校验

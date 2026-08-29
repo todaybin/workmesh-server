@@ -212,10 +212,16 @@ func (c *HTTPClient) doAttempt(ctx context.Context, method, endpoint string, bod
 	if response == nil {
 		return nil, 0, errors.New("节点传输返回空响应")
 	}
+	if response.Body == nil {
+		return nil, response.StatusCode, nil
+	}
 	defer response.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes))
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, response.StatusCode, fmt.Errorf("读取链路响应: %w", err)
+	}
+	if len(data) > maxResponseBytes {
+		return nil, response.StatusCode, errors.New("链路响应超过 8 MiB 限制")
 	}
 	return data, response.StatusCode, nil
 }
