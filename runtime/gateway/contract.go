@@ -60,6 +60,7 @@ type Authorization struct {
 	Scopes      []string `json:"scopes"`
 	ExpiresAt   string   `json:"expiresAt"`
 	Refreshable bool     `json:"refreshable"`
+	AccessToken string   `json:"-"`
 }
 
 // ProtocolClient 是完整 Gateway 访问适配器，具体 HTTP、签名和重试策略由 runtime 实现。

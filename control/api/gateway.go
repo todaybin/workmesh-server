@@ -35,6 +35,14 @@ func (s *GatewayStateStore) Start(ctx context.Context, capabilities []string) {
 	}
 	go func() {
 		register := func() {
+			if err := s.loginIfConfigured(ctx); err != nil {
+				s.mu.Lock()
+				s.status.Registration = gateway.RegistrationPending
+				s.status.Connected = false
+				s.status.Reason = err.Error()
+				s.mu.Unlock()
+				return
+			}
 			s.mu.RLock()
 			request := gateway.RegisterRequest{NodeID: s.status.NodeID, Role: s.status.Role, ProtocolVersion: "v1", Capabilities: capabilities}
 			s.mu.RUnlock()
@@ -78,6 +86,19 @@ func (s *GatewayStateStore) Start(ctx context.Context, capabilities []string) {
 			}
 		}
 	}()
+}
+
+func (s *GatewayStateStore) loginIfConfigured(ctx context.Context) error {
+	username := os.Getenv("WORKMESH_GATEWAY_USERNAME")
+	password := os.Getenv("WORKMESH_GATEWAY_PASSWORD")
+	if username == "" && password == "" {
+		return nil
+	}
+	if username == "" || password == "" {
+		return errors.New("Gateway 登录凭据配置不完整")
+	}
+	_, err := s.client.Login(ctx, gateway.LoginRequest{Username: username, Password: password})
+	return err
 }
 
 // RegisterGatewayRoutes 注册前端使用的 Gateway 状态、注册、心跳和授权接口。
@@ -142,6 +163,10 @@ func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if s.client != nil {
+		if err := s.loginIfConfigured(r.Context()); err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
 		auth, err := s.client.Register(r.Context(), request)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err)

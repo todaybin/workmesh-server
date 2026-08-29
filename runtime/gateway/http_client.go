@@ -21,11 +21,12 @@ import (
 
 // HTTPClient 通过 HTTPS 调用 Gateway 注册、授权和心跳接口。
 type HTTPClient struct {
-	BaseURL   string
-	GatewayID string
-	Secret    []byte
-	HTTP      *http.Client
-	Timeout   time.Duration
+	BaseURL     string
+	GatewayID   string
+	Secret      []byte
+	HTTP        *http.Client
+	Timeout     time.Duration
+	AccessToken string
 }
 
 // NewHTTPClient 创建 Gateway 客户端；BaseURL 必须为 https 地址（本地测试可使用 http）。
@@ -35,30 +36,50 @@ func NewHTTPClient(baseURL, gatewayID, secret string) *HTTPClient {
 
 // Login 使用 Gateway 账号换取节点授权摘要。
 func (c *HTTPClient) Login(ctx context.Context, request LoginRequest) (Authorization, error) {
-	var response Authorization
-	err := c.do(ctx, http.MethodPost, "/api/workmesh/v1/auth/login", request, &response)
-	return response, err
+	var response struct {
+		Token     string `json:"token"`
+		ExpiresIn int64  `json:"expiresIn"`
+	}
+	err := c.do(ctx, http.MethodPost, "/workmesh/auth/login", request, &response)
+	if err != nil {
+		return Authorization{}, err
+	}
+	c.AccessToken = response.Token
+	auth := Authorization{AccessToken: response.Token, Refreshable: response.Token != ""}
+	if response.ExpiresIn > 0 {
+		auth.ExpiresAt = time.Now().UTC().Add(time.Duration(response.ExpiresIn) * time.Second).Format(time.RFC3339)
+	}
+	return auth, nil
 }
 
 // Register 将当前节点独立注册到 Gateway。
 func (c *HTTPClient) Register(ctx context.Context, request RegisterRequest) (Authorization, error) {
-	var response Authorization
-	err := c.do(ctx, http.MethodPost, "/api/workmesh/v1/nodes/register", request, &response)
-	return response, err
+	var response struct {
+		BindingID string `json:"bindingId"`
+	}
+	err := c.do(ctx, http.MethodPost, "/workmesh/node/register", request, &response)
+	if err != nil {
+		return Authorization{}, err
+	}
+	if response.BindingID == "" {
+		response.BindingID = request.NodeID
+	}
+	return Authorization{BindingID: response.BindingID, AccessToken: c.AccessToken, Refreshable: true}, nil
 }
 
 // Heartbeat 上报节点在线状态并保持 Gateway 授权有效。
 func (c *HTTPClient) Heartbeat(ctx context.Context, registration Registration) error {
-	return c.do(ctx, http.MethodPost, "/api/workmesh/v1/nodes/heartbeat", map[string]any{
-		"nodeId":    registration.NodeID,
-		"bindingId": registration.BindingID,
+	return c.do(ctx, http.MethodPost, "/workmesh/node/heartbeat", map[string]any{
+		"nodeId": registration.NodeID,
+		"status": "online",
+		"sentAt": time.Now().UTC().Format(time.RFC3339),
 	}, nil)
 }
 
 // Status 查询节点在 Gateway 的注册和连接状态。
 func (c *HTTPClient) Status(ctx context.Context) (Status, error) {
 	var response Status
-	err := c.do(ctx, http.MethodGet, "/api/workmesh/v1/nodes/status", nil, &response)
+	err := c.do(ctx, http.MethodGet, "/workmesh/node/index", nil, &response)
 	return response, err
 }
 
@@ -104,10 +125,16 @@ func (c *HTTPClient) do(ctx context.Context, method, endpoint string, input, out
 	nonce := randomID()
 	request.Header.Set("X-WorkMesh-Nonce", nonce)
 	request.Header.Set("X-WorkMesh-Gateway-Id", c.GatewayID)
+	request.Header.Set("X-Timestamp", timestamp)
+	request.Header.Set("X-Nonce", nonce)
 	if len(c.Secret) > 0 {
 		mac := hmac.New(sha256.New, c.Secret)
 		_, _ = mac.Write([]byte(method + "\n" + endpoint + "\n" + timestamp + "\n" + nonce + "\n" + string(body)))
 		request.Header.Set("X-WorkMesh-Signature", hex.EncodeToString(mac.Sum(nil)))
+		request.Header.Set("X-Signature", hex.EncodeToString(mac.Sum(nil)))
+	}
+	if c.AccessToken != "" {
+		request.Header.Set("Authorization", "Bearer "+c.AccessToken)
 	}
 	response, err := c.HTTP.Do(request)
 	if err != nil {

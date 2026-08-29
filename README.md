@@ -15,7 +15,7 @@ WorkMesh Server 是独立的单进程节点服务，Git 权威仓库为
 go run ./cmd/workmesh-server
 ```
 
-默认监听 `:9999`。可通过 `WORKMESH_SERVER_ADDR`、`WORKMESH_DATA_DIR`、`WORKMESH_NODE_ID`、`WORKMESH_NODE_ROLE` 和 `WORKMESH_GATEWAY_URL` 配置。首次运行会在数据目录写入节点状态文件，敏感凭据不得写入日志或普通配置。
+默认监听 `:9999`。可通过 `WORKMESH_SERVER_ADDR`、`WORKMESH_DATA_DIR`、`WORKMESH_NODE_ID`、`WORKMESH_NODE_ROLE`、`WORKMESH_GATEWAY_URL`、`WORKMESH_GATEWAY_ID`、`WORKMESH_GATEWAY_SECRET`、`WORKMESH_GATEWAY_USERNAME` 和 `WORKMESH_GATEWAY_PASSWORD` 配置。Gateway 用户名和密码仅用于启动时换取短期 JWT，不写入日志或响应。首次运行会在数据目录写入节点状态文件，敏感凭据不得写入日志或普通配置。
 
 ## 验证
 

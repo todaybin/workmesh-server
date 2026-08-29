@@ -58,7 +58,7 @@ func TestGatewayRoutesUseExternalProtocolClient(t *testing.T) {
 	if unbind.Code != http.StatusOK {
 		t.Fatalf("unbind status = %d, body = %s", unbind.Code, unbind.Body.String())
 	}
-	for _, path := range []string{"/api/workmesh/v1/nodes/register", "/api/workmesh/v1/auth/login", "/api/workmesh/v1/nodes/heartbeat", "/api/workmesh/v1/nodes/authorization/refresh", "/api/workmesh/v1/nodes/authorization/revoke"} {
+	for _, path := range []string{"/workmesh/node/register", "/workmesh/auth/login", "/workmesh/node/heartbeat", "/api/workmesh/v1/nodes/authorization/refresh", "/api/workmesh/v1/nodes/authorization/revoke"} {
 		if calls[path] != 1 {
 			t.Errorf("cloud %s calls = %d, want 1", path, calls[path])
 		}

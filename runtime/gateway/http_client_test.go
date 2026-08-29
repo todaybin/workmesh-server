@@ -16,7 +16,7 @@ func TestHTTPClientRegisterUsesSignedEnvelope(t *testing.T) {
 		if r.Header.Get("X-WorkMesh-Signature") == "" || r.Header.Get("X-WorkMesh-Nonce") == "" {
 			t.Fatal("Gateway 请求缺少签名头")
 		}
-		if r.URL.Path != "/api/workmesh/v1/nodes/register" {
+		if r.URL.Path != "/workmesh/node/register" {
 			t.Fatalf("注册路径错误: %s", r.URL.Path)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": Authorization{BindingID: "binding-1", Refreshable: true}})
@@ -35,5 +35,20 @@ func TestHTTPClientRejectsGatewayHTTPError(t *testing.T) {
 	client := NewHTTPClient(server.URL, "gateway-test", "")
 	if _, err := client.Refresh(context.Background()); err == nil {
 		t.Fatal("Gateway HTTP 错误应返回错误")
+	}
+}
+
+func TestHTTPClientLoginStoresBearerToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/workmesh/auth/login" {
+			t.Fatalf("登录路径错误: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"token": "jwt-test", "expiresIn": 60}})
+	}))
+	defer server.Close()
+	client := NewHTTPClient(server.URL, "gateway-test", "secret")
+	auth, err := client.Login(context.Background(), LoginRequest{Username: "u", Password: "p"})
+	if err != nil || auth.AccessToken != "jwt-test" || client.AccessToken != "jwt-test" {
+		t.Fatalf("Gateway 登录失败: %+v, %v", auth, err)
 	}
 }

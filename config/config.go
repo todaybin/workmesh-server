@@ -17,6 +17,8 @@ type Config struct {
 	GatewayURL      string
 	GatewayID       string
 	GatewaySecret   string
+	GatewayUsername string
+	GatewayPassword string
 	NodeID          string
 	Role            string
 	RequestTimeout  time.Duration
@@ -31,6 +33,8 @@ func Load() Config {
 		GatewayURL:      env("WORKMESH_GATEWAY_URL", ""),
 		GatewayID:       env("WORKMESH_GATEWAY_ID", ""),
 		GatewaySecret:   env("WORKMESH_GATEWAY_SECRET", ""),
+		GatewayUsername: env("WORKMESH_GATEWAY_USERNAME", ""),
+		GatewayPassword: env("WORKMESH_GATEWAY_PASSWORD", ""),
 		NodeID:          env("WORKMESH_NODE_ID", "local"),
 		Role:            env("WORKMESH_NODE_ROLE", "secondary"),
 		RequestTimeout:  durationEnv("WORKMESH_REQUEST_TIMEOUT", 30*time.Second),
