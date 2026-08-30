@@ -36,4 +36,4 @@ node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='o
 node scripts/with-dev-env.mjs -- node test/contract/route-scan.mjs check --legacy apps/workmesh-node --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json
 ```
 
-部署制品 SHA256：`74ab39001f8de88085a58d553bb07ef76ce85761a641a24762d331b483f9bf17`。
+最新部署制品 SHA256：`60f6fe33a8282047fdcef8eabed18c4123115a09284bf24cc227be8611f884d3`。
