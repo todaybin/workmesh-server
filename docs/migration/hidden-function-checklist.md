@@ -8,6 +8,12 @@
 | [x] | 任务日志分页与路径安全 | `apps/workmesh-node/agent/app/service/task.go:ReadByLine` | `node/api/functional_domains.go:readTaskLog`，路径白名单、单页 500 行 | 正常读取、分页、越权 403 测试通过 |
 | [x] | 执行中任务计数 | `apps/workmesh-node/agent/app/service/task.go:CountExecutingTask` | `node/api/functional_domains.go:registerLogRoutes`，从持久化日志状态统计 | 写入 running/executing 后计数准确 |
 
+## 2026-08-30 运行时详情能力
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | PHP 运行时扩展、配置及 FPM 状态查询 | `apps/workmesh-node/agent/app/service/runtime.go` | `node/api/runtime_toolbox.go:registerRuntimeSubroutes` 从 runtime.json 返回记录 | 创建运行时后详情可查询，未知 ID 返回 404 |
+| [x] | Supervisor 进程配置查询 | `apps/workmesh-node/agent/app/service/runtime.go` | `node/api/runtime_toolbox.go:registerRuntimeSubroutes` 读取 supervisor 配置 | 未配置进程返回 not_configured，不伪造运行状态 |
+
 # 隐藏功能迁移清单
 
 ## 2026-08-30 仪表盘采集
