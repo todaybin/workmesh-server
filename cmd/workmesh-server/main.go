@@ -148,11 +148,26 @@ func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 发布包包含 web/dist 时由同一进程托管前端，开发环境无构建产物则返回服务信息。
 		index := filepath.Join(staticRoot, "index.html")
-		if _, err := os.Stat(index); err == nil {
-			http.FileServer(http.Dir(staticRoot)).ServeHTTP(w, r)
+		if _, err := os.Stat(index); err != nil {
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]string{"service": "workmesh-server"}})
 			return
 		}
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]string{"service": "workmesh-server"}})
+		// API 未命中时必须继续返回 JSON 404，不能把接口请求错误地回退成 HTML。
+		if strings.HasPrefix(r.URL.Path, "/api/") || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+			wmhttp.JSON(w, http.StatusNotFound, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "ROUTE_NOT_FOUND", "path": r.URL.Path}})
+			return
+		}
+		// Vue Router 使用 history 模式。存在的静态文件照常返回，其他前端路径统一回退到 index.html，
+		// 这样直接刷新 /login、/settings/bind 等页面不会被 FileServer 当作物理文件返回 404。
+		clean := filepath.Clean(filepath.FromSlash(strings.TrimPrefix(r.URL.Path, "/")))
+		if clean != "." && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			candidate := filepath.Join(staticRoot, clean)
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				http.ServeFile(w, r, candidate)
+				return
+			}
+		}
+		http.ServeFile(w, r, index)
 	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
