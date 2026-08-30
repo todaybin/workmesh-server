@@ -516,14 +516,29 @@ func cronField(expr string, value, min, max int) bool {
 
 // Update 修改计划任务定义并保留原有创建时间。
 func (s *CronjobService) Update(_ context.Context, job model.Cronjob) (model.Cronjob, error) {
-	if job.ID == "" || strings.TrimSpace(job.Name) == "" || strings.TrimSpace(job.Command) == "" {
-		return model.Cronjob{}, errors.New("invalid cronjob")
+	if job.ID == "" || strings.TrimSpace(job.Name) == "" {
+		return model.Cronjob{}, errors.New("计划任务 ID 和名称不能为空")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old, ok := s.items[job.ID]
 	if !ok {
 		return model.Cronjob{}, errors.New("cronjob not found")
+	}
+	if strings.TrimSpace(job.Type) == "" {
+		job.Type = old.Type
+	}
+	if !validCronType(job.Type) {
+		return model.Cronjob{}, fmt.Errorf("不支持的计划任务类型: %s", job.Type)
+	}
+	if job.Type == "shell" && strings.TrimSpace(job.Command) == "" && strings.TrimSpace(job.Script) == "" {
+		return model.Cronjob{}, errors.New("脚本或命令不能为空")
+	}
+	if job.Type == "curl" && strings.TrimSpace(job.URL) == "" {
+		return model.Cronjob{}, errors.New("curl 任务 URL 不能为空")
+	}
+	if strings.TrimSpace(job.Spec) == "" {
+		job.Spec = old.Spec
 	}
 	if job.Status == "" {
 		job.Status = old.Status

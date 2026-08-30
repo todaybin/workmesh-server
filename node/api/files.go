@@ -120,6 +120,17 @@ func handleFilesSave(w http.ResponseWriter, r *http.Request) {
 		fileError(w, http.StatusInternalServerError, err)
 		return
 	}
+	// 保存前保留有限历史版本，供历史查询与恢复接口使用。
+	if old, readErr := os.ReadFile(path); readErr == nil && len(old) <= 2<<20 {
+		fileAux.Lock()
+		loadFileAuxLocked()
+		fileAux.data.History = append(fileAux.data.History, fileHistoryItem{ID: fileAuxID("history"), Path: path, Content: string(old), CreatedAt: time.Now().UTC()})
+		if len(fileAux.data.History) > 200 {
+			fileAux.data.History = fileAux.data.History[len(fileAux.data.History)-200:]
+		}
+		_ = saveFileAuxLocked()
+		fileAux.Unlock()
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".workmesh-save-*")
 	if err != nil {
 		fileError(w, http.StatusInternalServerError, err)
@@ -312,6 +323,7 @@ func handleFilesTree(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleFilesUpload(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		fileError(w, 400, err)
 		return
@@ -329,10 +341,20 @@ func handleFilesUpload(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			dst := filepath.Join(dir, filepath.Base(header.Filename))
-			out, e := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+			out, e := os.CreateTemp(dir, ".workmesh-upload-*")
+			tmpName := ""
 			if e == nil {
-				_, e = io.Copy(out, in)
-				_ = out.Close()
+				tmpName = out.Name()
+				_ = out.Chmod(0o600)
+				_, e = io.Copy(out, io.LimitReader(in, 64<<20))
+				if closeErr := out.Close(); e == nil {
+					e = closeErr
+				}
+				if e == nil {
+					e = os.Rename(tmpName, dst)
+				} else {
+					_ = os.Remove(tmpName)
+				}
 			}
 			_ = in.Close()
 			if e != nil {

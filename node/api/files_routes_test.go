@@ -6,12 +6,96 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestChunkUploadAndDownload(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	dst := t.TempDir()
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+	parts := []string{"hello ", "world"}
+	for i, content := range parts {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		_ = mw.WriteField("path", dst)
+		_ = mw.WriteField("filename", "chunk.txt")
+		_ = mw.WriteField("uploadID", "upload-test")
+		_ = mw.WriteField("chunkIndex", fmt.Sprint(i))
+		_ = mw.WriteField("chunkCount", "2")
+		_ = mw.WriteField("offset", fmt.Sprint(i*6))
+		_ = mw.WriteField("fileSize", "11")
+		part, _ := mw.CreateFormFile("chunk", "chunk.txt")
+		_, _ = io.WriteString(part, content)
+		_ = mw.Close()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/files/chunkupload", &body)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("chunk %d: %d %s", i, res.Code, res.Body.String())
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(dst, "chunk.txt"))
+	if err != nil || string(got) != "hello world" {
+		t.Fatalf("uploaded=%q err=%v", got, err)
+	}
+	payload, _ := json.Marshal(map[string]any{"path": filepath.Join(dst, "chunk.txt"), "offset": 6, "fileSize": 5})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/files/chunkdownload", bytes.NewReader(payload)))
+	if res.Code != http.StatusPartialContent || res.Body.String() != "world" {
+		t.Fatalf("download=%d %q", res.Code, res.Body.String())
+	}
+}
+
+func TestFileHistoryAndAdvancedOperations(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	path := filepath.Join(root, "history.txt")
+	if err := os.WriteFile(path, []byte("v1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+	post := func(route string, payload any) *httptest.ResponseRecorder {
+		b, _ := json.Marshal(payload)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, route, bytes.NewReader(b)))
+		return rr
+	}
+	if rr := post("/api/v2/files/save", map[string]any{"path": path, "content": "v2"}); rr.Code != 200 {
+		t.Fatalf("save=%d %s", rr.Code, rr.Body.String())
+	}
+	search := post("/api/v2/files/history/search", map[string]any{"path": path})
+	if search.Code != 200 || !bytes.Contains(search.Body.Bytes(), []byte("v1")) {
+		t.Fatalf("history search=%d %s", search.Code, search.Body.String())
+	}
+	var env struct {
+		Data struct {
+			Items []fileHistoryItem `json:"items"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(search.Body.Bytes(), &env)
+	if len(env.Data.Items) != 1 {
+		t.Fatalf("history items=%d", len(env.Data.Items))
+	}
+	if rr := post("/api/v2/files/history/restore", map[string]any{"id": env.Data.Items[0].ID}); rr.Code != 200 {
+		t.Fatalf("restore=%d %s", rr.Code, rr.Body.String())
+	}
+	if got, _ := os.ReadFile(path); string(got) != "v1" {
+		t.Fatalf("restored=%q", got)
+	}
+	if rr := post("/api/v2/files/depth/size", map[string]any{"path": root}); rr.Code != 200 {
+		t.Fatalf("depth=%d %s", rr.Code, rr.Body.String())
+	}
+}
 
 func TestZipAndUnzipPath(t *testing.T) {
 	root := t.TempDir()

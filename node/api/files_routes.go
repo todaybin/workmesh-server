@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -72,6 +73,12 @@ type fileAdvancedRequest struct {
 	IgnoreCertificate bool     `json:"ignoreCertificate"`
 	Page              int      `json:"page"`
 	PageSize          int      `json:"pageSize"`
+	UploadID          string   `json:"uploadID"`
+	ChunkIndex        int      `json:"chunkIndex"`
+	ChunkCount        int      `json:"chunkCount"`
+	Offset            int64    `json:"offset"`
+	FileSize          int64    `json:"fileSize"`
+	Overwrite         bool     `json:"overwrite"`
 }
 
 // fileWgetProcess 保存远程下载任务状态；状态仅保留有限字段，避免无界内存增长。
@@ -138,6 +145,15 @@ type fileAuxState struct {
 	Favorites []fileFavorite    `json:"favorites"`
 	Recycle   []fileRecycleItem `json:"recycle"`
 	Uploads   []fileUploadItem  `json:"uploads"`
+	Remarks   map[string]string `json:"remarks,omitempty"`
+	History   []fileHistoryItem `json:"history,omitempty"`
+}
+
+type fileHistoryItem struct {
+	ID        string    `json:"id"`
+	Path      string    `json:"path"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 var fileAux struct {
@@ -161,7 +177,7 @@ func loadFileAuxLocked() {
 		return
 	}
 	fileAux.loaded, fileAux.path = true, path
-	fileAux.data = fileAuxState{Favorites: []fileFavorite{}, Recycle: []fileRecycleItem{}, Uploads: []fileUploadItem{}}
+	fileAux.data = fileAuxState{Favorites: []fileFavorite{}, Recycle: []fileRecycleItem{}, Uploads: []fileUploadItem{}, Remarks: map[string]string{}, History: []fileHistoryItem{}}
 	if raw, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(raw, &fileAux.data)
 	}
@@ -173,6 +189,12 @@ func loadFileAuxLocked() {
 	}
 	if fileAux.data.Uploads == nil {
 		fileAux.data.Uploads = []fileUploadItem{}
+	}
+	if fileAux.data.Remarks == nil {
+		fileAux.data.Remarks = map[string]string{}
+	}
+	if fileAux.data.History == nil {
+		fileAux.data.History = []fileHistoryItem{}
 	}
 }
 
@@ -195,7 +217,7 @@ func fileAuxID(prefix string) string {
 	return prefix + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
 
-func fileAuxSearch(path string, req fileAdvancedRequest) ([]any, int) {
+func fileAuxSearch(path string, req fileAdvancedRequest) ([]any, int, int, int) {
 	fileAux.Lock()
 	defer fileAux.Unlock()
 	loadFileAuxLocked()
@@ -230,7 +252,7 @@ func fileAuxSearch(path string, req fileAdvancedRequest) ([]any, int) {
 	if end > total {
 		end = total
 	}
-	return source[start:end], total
+	return source[start:end], total, page, size
 }
 
 var fileShareState struct {
@@ -290,6 +312,15 @@ func findFileShare(token string) (fileShare, bool) {
 
 func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v2/files/"), "/")
+	// 分片上传使用 multipart/form-data，必须在 JSON 解码前单独处理。
+	if r.Method == http.MethodPost && path == "chunkupload" {
+		handleChunkUpload(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && path == "chunkdownload" {
+		handleChunkDownload(w, r)
+		return
+	}
 	if r.Method == http.MethodGet {
 		switch path {
 		case "recycle/status":
@@ -539,6 +570,9 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"deleted": true}})
 	case "compress":
+		if req.Dst == "" {
+			req.Dst = req.Path + ".zip"
+		}
 		if err := zipPath(req.Path, req.Dst); err != nil {
 			fileError(w, http.StatusBadRequest, err)
 			return
@@ -609,8 +643,8 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		fileShareState.Unlock()
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
 	case "recycle/search", "favorite/search", "upload/search":
-		items, total := fileAuxSearch(path, req)
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": total, "page": 1, "pageSize": len(items)}})
+		items, total, page, size := fileAuxSearch(path, req)
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": total, "page": page, "pageSize": size}})
 	case "recycle/clear":
 		fileAux.Lock()
 		loadFileAuxLocked()
@@ -678,10 +712,221 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
-	case "compress/stop", "decompress/stop", "chunkupload/stop", "move/stop":
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"stopped": true}})
+	case "compress/stop", "decompress/stop", "move/stop":
+		fileError(w, http.StatusNotImplemented, errors.New("该异步任务未启动或已完成"))
+	case "chunkupload/stop":
+		id := strings.TrimSpace(req.UploadID)
+		if id == "" {
+			id = strings.TrimSpace(req.ID)
+		}
+		if id == "" || filepath.Base(id) != id || strings.ContainsAny(id, `/\\`) {
+			fileError(w, http.StatusBadRequest, errors.New("uploadID 无效"))
+			return
+		}
+		root := fileChunkDir()
+		if err := os.RemoveAll(filepath.Join(root, id)); err != nil {
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"stopped": true, "uploadID": id}})
+	case "depth/size":
+		clean, err := cleanFilePath(req.Path)
+		if err != nil {
+			fileError(w, 400, err)
+			return
+		}
+		info, err := os.Stat(clean)
+		if err != nil || !info.IsDir() {
+			if err == nil {
+				err = errors.New("路径不是目录")
+			}
+			fileError(w, 404, err)
+			return
+		}
+		items := make([]map[string]any, 0)
+		entries, _ := os.ReadDir(clean)
+		for _, entry := range entries {
+			p := filepath.Join(clean, entry.Name())
+			var size int64
+			_ = filepath.Walk(p, func(_ string, i os.FileInfo, e error) error {
+				if e == nil && i != nil && !i.IsDir() {
+					size += i.Size()
+				}
+				return nil
+			})
+			items = append(items, map[string]any{"path": p, "name": entry.Name(), "size": size, "isDir": entry.IsDir()})
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": items})
+	case "mode":
+		clean, err := cleanFilePath(req.Path)
+		if err != nil || req.Mode < 0 || req.Mode > 0o7777 {
+			if err == nil {
+				err = errors.New("mode 超出范围")
+			}
+			fileError(w, 400, err)
+			return
+		}
+		if err := os.Chmod(clean, os.FileMode(req.Mode)); err != nil {
+			fileError(w, 500, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": clean, "mode": req.Mode}})
+	case "owner":
+		fileError(w, http.StatusNotImplemented, errors.New("当前平台未提供安全的 owner 修改器"))
+	case "preview", "content":
+		clean, err := cleanFilePath(req.Path)
+		if err != nil {
+			fileError(w, 400, err)
+			return
+		}
+		f, err := os.Open(clean)
+		if err != nil {
+			fileError(w, 404, err)
+			return
+		}
+		defer f.Close()
+		b, err := io.ReadAll(io.LimitReader(f, 2<<20))
+		if err != nil {
+			fileError(w, 500, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": clean, "content": string(b), "size": len(b)}})
+	case "read":
+		clean, err := cleanFilePath(req.Path)
+		if err != nil {
+			fileError(w, 400, err)
+			return
+		}
+		b, err := os.ReadFile(clean)
+		if err != nil {
+			fileError(w, 404, err)
+			return
+		}
+		lines := strings.Split(strings.TrimRight(string(b), "\r\n"), "\n")
+		page, size := req.Page, req.PageSize
+		if page < 1 {
+			page = 1
+		}
+		if size < 1 || size > 500 {
+			size = 100
+		}
+		start := (page - 1) * size
+		if start > len(lines) {
+			start = len(lines)
+		}
+		end := start + size
+		if end > len(lines) {
+			end = len(lines)
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": clean, "lines": lines[start:end], "totalLines": len(lines), "page": page, "pageSize": size, "end": end >= len(lines)}})
+	case "remarks":
+		fileAux.Lock()
+		loadFileAuxLocked()
+		out := map[string]string{}
+		for _, p := range req.Paths {
+			if v, ok := fileAux.data.Remarks[p]; ok {
+				out[p] = v
+			}
+		}
+		fileAux.Unlock()
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"remarks": out}})
+	case "remark":
+		clean, err := cleanFilePath(req.Path)
+		if err != nil {
+			fileError(w, 400, err)
+			return
+		}
+		fileAux.Lock()
+		loadFileAuxLocked()
+		if fileAux.data.Remarks == nil {
+			fileAux.data.Remarks = map[string]string{}
+		}
+		fileAux.data.Remarks[clean] = req.Name
+		saveErr := saveFileAuxLocked()
+		fileAux.Unlock()
+		if saveErr != nil {
+			fileError(w, 500, saveErr)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": clean, "remark": req.Name}})
+	case "history/search":
+		fileAux.Lock()
+		loadFileAuxLocked()
+		list := append([]fileHistoryItem(nil), fileAux.data.History...)
+		fileAux.Unlock()
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": list, "total": len(list)}})
+	case "history/content":
+		fileAux.Lock()
+		loadFileAuxLocked()
+		var found *fileHistoryItem
+		for i := range fileAux.data.History {
+			if fileAux.data.History[i].ID == req.ID {
+				found = &fileAux.data.History[i]
+				break
+			}
+		}
+		fileAux.Unlock()
+		if found == nil {
+			fileError(w, 404, errors.New("历史版本不存在"))
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": found})
+	case "history/del":
+		fileAux.Lock()
+		loadFileAuxLocked()
+		kept := fileAux.data.History[:0]
+		removed := false
+		for _, item := range fileAux.data.History {
+			if item.ID == req.ID {
+				removed = true
+			} else {
+				kept = append(kept, item)
+			}
+		}
+		fileAux.data.History = kept
+		err := saveFileAuxLocked()
+		fileAux.Unlock()
+		if err != nil {
+			fileError(w, 500, err)
+			return
+		}
+		if !removed {
+			fileError(w, 404, errors.New("历史版本不存在"))
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"deleted": true}})
+	case "history/restore":
+		fileAux.Lock()
+		loadFileAuxLocked()
+		var found *fileHistoryItem
+		for i := range fileAux.data.History {
+			if fileAux.data.History[i].ID == req.ID {
+				found = &fileAux.data.History[i]
+				break
+			}
+		}
+		fileAux.Unlock()
+		if found == nil {
+			fileError(w, 404, errors.New("历史版本不存在"))
+			return
+		}
+		tmp, e := os.CreateTemp(filepath.Dir(found.Path), ".workmesh-restore-*")
+		if e == nil {
+			_, e = tmp.WriteString(found.Content)
+			_ = tmp.Close()
+			if e == nil {
+				e = os.Rename(tmp.Name(), found.Path)
+			} else {
+				_ = os.Remove(tmp.Name())
+			}
+		}
+		if e != nil {
+			fileError(w, 500, e)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": found.Path, "restored": true}})
 	default:
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"accepted": true, "operation": path}})
+		fileError(w, http.StatusNotImplemented, fmt.Errorf("文件操作 %q 尚未实现", path))
 	}
 }
 
@@ -880,14 +1125,18 @@ func zipPath(source, destination string) error {
 	if strings.TrimSpace(source) == "" || strings.TrimSpace(destination) == "" {
 		return errors.New("压缩源和目标不能为空")
 	}
-	out, err := os.Create(destination)
+	if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(destination), ".workmesh-zip-*")
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	out := tmp
 	zw := zip.NewWriter(out)
-	defer zw.Close()
-	return filepath.Walk(source, func(path string, info os.FileInfo, walkErr error) error {
+	err = filepath.Walk(source, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -910,6 +1159,16 @@ func zipPath(source, destination string) error {
 		_ = in.Close()
 		return copyErr
 	})
+	if closeErr := zw.Close(); err == nil {
+		err = closeErr
+	}
+	if closeErr := out.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmpName, destination)
 }
 
 func unzipPath(source, destination string) error {
@@ -923,6 +1182,9 @@ func unzipPath(source, destination string) error {
 		return err
 	}
 	for _, item := range items.File {
+		if item.FileInfo().Mode()&os.ModeSymlink != 0 {
+			return errors.New("压缩包不允许包含符号链接")
+		}
 		target := filepath.Join(root, filepath.FromSlash(item.Name))
 		if !strings.HasPrefix(target, root+string(os.PathSeparator)) && target != root {
 			return errors.New("压缩包包含非法路径")
@@ -940,10 +1202,18 @@ func unzipPath(source, destination string) error {
 		if err != nil {
 			return err
 		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		// 每个条目先写同目录临时文件，完成后原子替换目标，避免中断留下半文件。
+		tmp, err := os.CreateTemp(filepath.Dir(target), ".workmesh-unzip-*")
 		if err == nil {
-			_, err = io.Copy(out, in)
-			_ = out.Close()
+			_, err = io.Copy(tmp, in)
+			if closeErr := tmp.Close(); err == nil {
+				err = closeErr
+			}
+			if err == nil {
+				err = os.Rename(tmp.Name(), target)
+			} else {
+				_ = os.Remove(tmp.Name())
+			}
 		}
 		_ = in.Close()
 		if err != nil {
@@ -951,4 +1221,167 @@ func unzipPath(source, destination string) error {
 		}
 	}
 	return nil
+}
+
+func fileChunkDir() string {
+	root := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
+	if root == "" {
+		root = ".workmesh-data"
+	}
+	return filepath.Join(root, "chunks")
+}
+
+// handleChunkUpload 按偏移量写入受控分片，并在最后一片使用原子 rename 完成提交。
+func handleChunkUpload(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		fileError(w, http.StatusBadRequest, err)
+		return
+	}
+	part, _, err := r.FormFile("chunk")
+	if err != nil {
+		fileError(w, http.StatusBadRequest, errors.New("缺少 chunk 文件字段"))
+		return
+	}
+	defer part.Close()
+	filename := strings.TrimSpace(r.FormValue("filename"))
+	dstDir, err := cleanFilePath(r.FormValue("path"))
+	if err != nil || filename == "" || filepath.Base(filename) != filename || strings.ContainsAny(filename, `/\\`) {
+		if err == nil {
+			err = errors.New("filename 无效")
+		}
+		fileError(w, http.StatusBadRequest, err)
+		return
+	}
+	chunkIndex, err1 := strconv.Atoi(r.FormValue("chunkIndex"))
+	chunkCount, err2 := strconv.Atoi(r.FormValue("chunkCount"))
+	if err1 != nil || err2 != nil || chunkCount <= 0 || chunkCount > 10000 || chunkIndex < 0 || chunkIndex >= chunkCount {
+		fileError(w, http.StatusBadRequest, errors.New("chunkIndex/chunkCount 无效"))
+		return
+	}
+	uploadID := strings.TrimSpace(r.FormValue("uploadID"))
+	if uploadID == "" {
+		uploadID = fileAuxID("upload")
+	}
+	if filepath.Base(uploadID) != uploadID || strings.ContainsAny(uploadID, `/\\`) {
+		fileError(w, http.StatusBadRequest, errors.New("uploadID 无效"))
+		return
+	}
+	offset := int64(0)
+	if raw := strings.TrimSpace(r.FormValue("offset")); raw != "" {
+		offset, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || offset < 0 {
+			fileError(w, http.StatusBadRequest, errors.New("offset 无效"))
+			return
+		}
+	}
+	fileSize := int64(-1)
+	if raw := strings.TrimSpace(r.FormValue("fileSize")); raw != "" {
+		fileSize, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || fileSize < 0 || fileSize > 8<<30 {
+			fileError(w, http.StatusBadRequest, errors.New("fileSize 超出范围"))
+			return
+		}
+	}
+	if err := os.MkdirAll(fileChunkDir(), 0o750); err != nil {
+		fileError(w, 500, err)
+		return
+	}
+	workDir := filepath.Join(fileChunkDir(), uploadID)
+	if err := os.MkdirAll(workDir, 0o750); err != nil {
+		fileError(w, 500, err)
+		return
+	}
+	partPath := filepath.Join(workDir, filename+".part")
+	out, err := os.OpenFile(partPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		fileError(w, 500, err)
+		return
+	}
+	if offset == 0 && chunkIndex == 0 {
+		_ = out.Truncate(0)
+	}
+	if _, err = out.Seek(offset, io.SeekStart); err == nil {
+		_, err = io.Copy(out, io.LimitReader(part, 64<<20))
+	}
+	_ = out.Close()
+	if err != nil {
+		fileError(w, 500, err)
+		return
+	}
+	done := chunkIndex+1 == chunkCount
+	dstFile := filepath.Join(dstDir, filename)
+	if done {
+		if fileSize >= 0 {
+			if info, statErr := os.Stat(partPath); statErr != nil || info.Size() != fileSize {
+				fileError(w, http.StatusBadRequest, errors.New("分片文件大小不匹配"))
+				return
+			}
+		}
+		if err := os.MkdirAll(dstDir, 0o750); err != nil {
+			fileError(w, 500, err)
+			return
+		}
+		overwrite := !strings.EqualFold(strings.TrimSpace(r.FormValue("overwrite")), "false")
+		if !overwrite {
+			if _, statErr := os.Stat(dstFile); statErr == nil {
+				fileError(w, http.StatusConflict, errors.New("目标文件已存在"))
+				return
+			}
+		}
+		if err := os.Rename(partPath, dstFile); err != nil {
+			fileError(w, 500, err)
+			return
+		}
+		_ = os.RemoveAll(workDir)
+	}
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"uploadID": uploadID, "chunkIndex": chunkIndex, "chunkCount": chunkCount, "completed": done, "path": dstFile}})
+}
+
+// handleChunkDownload 支持 HTTP Range，便于大文件断点续传而无需额外进程。
+func handleChunkDownload(w http.ResponseWriter, r *http.Request) {
+	var req fileAdvancedRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&req); err != nil {
+		fileError(w, http.StatusBadRequest, errors.New("请求体格式无效"))
+		return
+	}
+	path, err := cleanFilePath(req.Path)
+	if err != nil {
+		fileError(w, 400, err)
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		if err == nil {
+			err = errors.New("文件不存在")
+		}
+		fileError(w, 404, err)
+		return
+	}
+	start, end := req.Offset, info.Size()-1
+	if req.FileSize > 0 {
+		end = start + req.FileSize - 1
+	}
+	if start < 0 || start >= info.Size() || end < start {
+		fileError(w, 400, errors.New("下载范围无效"))
+		return
+	}
+	if end >= info.Size() {
+		end = info.Size() - 1
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		fileError(w, 500, err)
+		return
+	}
+	defer f.Close()
+	if _, err = f.Seek(start, io.SeekStart); err != nil {
+		fileError(w, 500, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, info.Size()))
+	w.WriteHeader(http.StatusPartialContent)
+	_, _ = io.CopyN(w, f, end-start+1)
 }
