@@ -26,6 +26,20 @@ func TestProcessWebSocketNonUpgrade(t *testing.T) {
 	}
 }
 
+func TestProcessWebSocketUpgradeRequiresAuth(t *testing.T) {
+	t.Setenv("WORKMESH_PROCESS_TOKEN", "process-secret")
+	mux := http.NewServeMux()
+	registerProcessRoutes(mux)
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/process/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized websocket status = %d", res.Code)
+	}
+}
+
 func TestWriteWebSocketTextFrameExtendedLength(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()

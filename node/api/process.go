@@ -35,6 +35,9 @@ func handleProcessWebSocket(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"websocket": true, "upgradeRequired": true}})
 		return
 	}
+	if !requireStreamAuth(w, r, "WORKMESH_PROCESS_TOKEN", "WORKMESH_STREAM_TOKEN") {
+		return
+	}
 	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
 	if key == "" {
 		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "WEBSOCKET_KEY_REQUIRED"}})
