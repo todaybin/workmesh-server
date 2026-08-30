@@ -842,6 +842,12 @@ func testMCPConnection(s *executionState, body map[string]any) (map[string]any, 
 	if transport == "" {
 		transport = "streamablehttp"
 	}
+	if transport != "sse" && transport != "streamablehttp" && transport != "streamable-http" {
+		return nil, fmt.Errorf("MCP 传输类型不受支持: %s", transport)
+	}
+	if transport == "streamable-http" {
+		transport = "streamablehttp"
+	}
 	endpoint := base
 	if transport == "sse" {
 		if suffix := strings.TrimSpace(aiString(server, "ssePath")); suffix != "" {
@@ -985,8 +991,12 @@ func handleAIPost(w http.ResponseWriter, r *http.Request, s *executionState, pat
 			current[key] = value
 		}
 		s.data.Domains[key] = current
-		_ = s.saveLocked()
+		saveErr := s.saveLocked()
 		s.mu.Unlock()
+		if saveErr != nil {
+			aiError(w, http.StatusInternalServerError, "AI_CONFIG_SAVE_FAILED", saveErr.Error())
+			return
+		}
 		aiOK(w, sanitizeAIMap(current))
 		return
 	}
@@ -1007,8 +1017,12 @@ func handleAIPost(w http.ResponseWriter, r *http.Request, s *executionState, pat
 		key := path + ":" + aiID(body, "id", "agentId", "accountId")
 		s.mu.Lock()
 		s.data.Configs[key] = cloneMap(body)
-		_ = s.saveLocked()
+		saveErr := s.saveLocked()
 		s.mu.Unlock()
+		if saveErr != nil {
+			aiError(w, http.StatusInternalServerError, "AI_CONFIG_SAVE_FAILED", saveErr.Error())
+			return
+		}
 		aiOK(w, map[string]any{"updated": true})
 		return
 	}
@@ -1176,7 +1190,10 @@ func syncMCPStatuses(s *executionState, body map[string]any) []map[string]any {
 				break
 			}
 		}
-		_ = s.saveLocked()
+		if saveErr := s.saveLocked(); saveErr != nil {
+			status = "error"
+			message = fmt.Sprintf("保存 MCP 状态失败: %v", saveErr)
+		}
 		s.mu.Unlock()
 		entry := map[string]any{"id": id, "status": status, "message": message}
 		if probe != nil {
