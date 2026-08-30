@@ -4,16 +4,19 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
+// appRecord 保存一个已安装应用及其运行参数；应用目录记录使用相同结构以减少常驻内存。
 type appRecord struct {
 	ID        string         `json:"id"`
 	Key       string         `json:"key"`
@@ -21,12 +24,21 @@ type appRecord struct {
 	Version   string         `json:"version"`
 	Status    string         `json:"status"`
 	Config    map[string]any `json:"config,omitempty"`
+	SortOrder int            `json:"sortOrder,omitempty"`
 	UpdatedAt time.Time      `json:"updatedAt"`
 }
+
+type appStoreState struct {
+	Apps        []appRecord      `json:"apps"`
+	Catalog     []appRecord      `json:"catalog"`
+	Ignored     []map[string]any `json:"ignored"`
+	StoreConfig map[string]any   `json:"storeConfig"`
+}
+
 type appStore struct {
-	mu   sync.RWMutex
-	path string
-	Apps []appRecord `json:"apps"`
+	mu    sync.RWMutex
+	path  string
+	state appStoreState
 }
 
 var appStoreMu sync.Mutex
@@ -43,104 +55,362 @@ func getAppStore() *appStore {
 	if appStoreInstance != nil && appStoreInstance.path == path {
 		return appStoreInstance
 	}
-	s := &appStore{path: path}
-	if b, e := os.ReadFile(path); e == nil {
-		_ = json.Unmarshal(b, s)
+	state := appStoreState{StoreConfig: map[string]any{"uninstallDeleteImage": "false", "uninstallDeleteBackup": "false", "upgradeBackup": "true", "upgradeDeleteImage": "false", "installAllowPort": "true"}}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &state)
 	}
-	appStoreInstance = s
-	return s
+	if state.StoreConfig == nil {
+		state.StoreConfig = map[string]any{}
+	}
+	if state.Catalog == nil {
+		state.Catalog = append([]appRecord(nil), state.Apps...)
+	}
+	if state.Ignored == nil {
+		state.Ignored = []map[string]any{}
+	}
+	appStoreInstance = &appStore{path: path, state: state}
+	return appStoreInstance
 }
+
 func (s *appStore) saveLocked() error {
-	if e := os.MkdirAll(filepath.Dir(s.path), 0o750); e != nil {
-		return e
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
+		return err
 	}
-	b, e := json.Marshal(s)
-	if e != nil {
-		return e
+	b, err := json.Marshal(s.state)
+	if err != nil {
+		return err
 	}
 	tmp := s.path + ".tmp"
-	if e = os.WriteFile(tmp, b, 0o600); e != nil {
-		return e
+	if err = os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
 	}
 	return os.Rename(tmp, s.path)
 }
+
 func appBody(r *http.Request) map[string]any {
-	var v map[string]any
+	var value map[string]any
 	if r.Body != nil {
-		_ = json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&v)
+		_ = json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&value)
 	}
-	if v == nil {
-		v = map[string]any{}
+	if value == nil {
+		value = map[string]any{}
 	}
-	return v
+	return value
 }
+
 func appValue(v map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if x, ok := v[k].(string); ok && strings.TrimSpace(x) != "" {
-			return strings.TrimSpace(x)
+	for _, key := range keys {
+		if value, ok := v[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+		if value, ok := v[key].(float64); ok {
+			return strconv.FormatInt(int64(value), 10)
 		}
 	}
 	return ""
 }
+
 func appOK(w http.ResponseWriter, d any) { runtimeOK(w, d) }
 
-// RegisterAppRoutes 注册应用目录和已安装应用兼容接口。
-func RegisterAppRoutes(mux *http.ServeMux) {
-	s := getAppStore()
-	list := func(w http.ResponseWriter, _ *http.Request) {
-		s.mu.RLock()
-		a := append([]appRecord(nil), s.Apps...)
-		s.mu.RUnlock()
-		appOK(w, map[string]any{"items": a, "total": len(a)})
+func appRecordData(a appRecord) map[string]any {
+	id := a.ID
+	item := map[string]any{"id": id, "key": a.Key, "name": a.Name, "version": a.Version, "status": a.Status, "appKey": a.Key, "appName": a.Name, "appStatus": a.Status, "ready": 1, "total": 1, "canUpdate": false, "favorite": false, "sortOrder": a.SortOrder, "updatedAt": a.UpdatedAt, "config": a.Config}
+	if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+		item["id"] = n
 	}
-	for _, p := range []string{"/api/v2/apps/installed/list", "/api/v2/apps/installed/search", "/api/v2/apps/search", "/api/v2/apps/sync/local", "/api/v2/apps/sync/remote"} {
-		mux.HandleFunc("POST "+p, list)
-	}
-	for _, p := range []string{"/api/v2/apps/checkupdate", "/api/v2/apps/ignored/detail", "/api/v2/apps/tags"} {
-		mux.HandleFunc("GET "+p, func(w http.ResponseWriter, _ *http.Request) { appOK(w, map[string]any{"items": []any{}, "total": 0}) })
-	}
-	mux.HandleFunc("GET /api/v2/apps/installed/list", list)
-	mux.HandleFunc("GET /api/v2/apps/installed/info/{appInstallId}", func(w http.ResponseWriter, r *http.Request) { appGet(w, s, r.PathValue("appInstallId")) })
-	mux.HandleFunc("GET /api/v2/apps/installed/params/{appInstallId}", func(w http.ResponseWriter, r *http.Request) { appGet(w, s, r.PathValue("appInstallId")) })
-	mux.HandleFunc("GET /api/v2/apps/installed/delete/check/{appInstallId}", func(w http.ResponseWriter, r *http.Request) {
-		appOK(w, map[string]any{"id": r.PathValue("appInstallId"), "allowed": true})
-	})
-	mux.HandleFunc("GET /api/v2/apps/{key}", func(w http.ResponseWriter, r *http.Request) {
-		appOK(w, map[string]any{"key": r.PathValue("key"), "available": true})
-	})
-	for _, p := range []string{"/api/v2/apps/detail/{appId}/{version}/{type}", "/api/v2/apps/detail/node/{appKey}/{version}", "/api/v2/apps/details/{id}", "/api/v2/apps/services/{key}", "/api/v2/apps/icon/{key}"} {
-		mux.HandleFunc("GET "+p, func(w http.ResponseWriter, r *http.Request) {
-			appOK(w, map[string]any{"path": r.URL.Path, "available": true})
-		})
-	}
-	for _, p := range []string{"/api/v2/apps/install", "/api/v2/apps/installed/check", "/api/v2/apps/installed/conf", "/api/v2/apps/installed/config/update", "/api/v2/apps/installed/conninfo", "/api/v2/apps/installed/ignore", "/api/v2/apps/installed/loadport", "/api/v2/apps/installed/op", "/api/v2/apps/installed/params/update", "/api/v2/apps/installed/port/change", "/api/v2/apps/installed/sort/update", "/api/v2/apps/installed/sync", "/api/v2/apps/installed/update/versions", "/api/v2/apps/ignored/cancel"} {
-		mux.HandleFunc("POST "+p, func(w http.ResponseWriter, r *http.Request) {
-			v := appBody(r)
-			id := appValue(v, "id", "appId", "appInstallId", "key")
-			if id == "" {
-				id = appValue(v, "name")
-			}
-			if p == "/api/v2/apps/install" && id != "" {
-				s.mu.Lock()
-				s.Apps = append(s.Apps, appRecord{ID: id, Key: id, Name: appValue(v, "name"), Version: appValue(v, "version"), Status: "running", Config: v, UpdatedAt: time.Now().UTC()})
-				_ = s.saveLocked()
-				s.mu.Unlock()
-			}
-			appOK(w, map[string]any{"id": id, "status": "accepted", "config": v})
-		})
-	}
+	return item
 }
-func appGet(w http.ResponseWriter, s *appStore, id string) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, a := range s.Apps {
-		if a.ID == id || a.Key == id {
-			appOK(w, a)
-			return
+
+func findApp(items []appRecord, id string) (int, appRecord) {
+	for index, item := range items {
+		if item.ID == id || item.Key == id || item.Name == id {
+			return index, item
 		}
 	}
-	appOK(w, map[string]any{"id": id, "status": "not_installed"})
+	return -1, appRecord{}
 }
+
+func appCatalogFromEnv() []appRecord {
+	var result []appRecord
+	if file := strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG")); file != "" {
+		if data, err := os.ReadFile(file); err == nil {
+			_ = json.Unmarshal(data, &result)
+		}
+	}
+	return result
+}
+
+// RegisterAppRoutes 注册应用目录与已安装应用接口，所有写操作都会原子持久化到 apps.json。
+func RegisterAppRoutes(mux *http.ServeMux) {
+	s := getAppStore()
+	listInstalled := func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		items := make([]map[string]any, 0, len(s.state.Apps))
+		for _, app := range s.state.Apps {
+			items = append(items, appRecordData(app))
+		}
+		s.mu.RUnlock()
+		if r.Method == http.MethodGet {
+			appOK(w, items)
+			return
+		}
+		appOK(w, map[string]any{"items": items, "total": len(items), "page": 1, "pageSize": 50})
+	}
+	searchCatalog := func(w http.ResponseWriter, r *http.Request) {
+		body := appBody(r)
+		name := strings.ToLower(appValue(body, "name", "key"))
+		s.mu.Lock()
+		if len(s.state.Catalog) == 0 {
+			s.state.Catalog = appCatalogFromEnv()
+			if len(s.state.Catalog) == 0 {
+				s.state.Catalog = append([]appRecord(nil), s.state.Apps...)
+			}
+		}
+		items := make([]map[string]any, 0, len(s.state.Catalog))
+		for _, app := range s.state.Catalog {
+			if name != "" && !strings.Contains(strings.ToLower(app.Name+" "+app.Key), name) {
+				continue
+			}
+			items = append(items, appRecordData(app))
+		}
+		_ = s.saveLocked()
+		s.mu.Unlock()
+		appOK(w, map[string]any{"items": items, "total": len(items), "page": 1, "pageSize": 50})
+	}
+	for _, path := range []string{"/api/v2/apps/installed/list", "/api/v2/apps/installed/search"} {
+		mux.HandleFunc("GET "+path, listInstalled)
+		mux.HandleFunc("POST "+path, listInstalled)
+	}
+	for _, path := range []string{"/api/v2/apps/search", "/api/v2/apps/sync/local", "/api/v2/apps/sync/remote"} {
+		mux.HandleFunc("POST "+path, searchCatalog)
+	}
+	mux.HandleFunc("GET /api/v2/apps/checkupdate", func(w http.ResponseWriter, _ *http.Request) {
+		appOK(w, map[string]any{"canUpdate": false, "isSyncing": false, "lastSyncAt": time.Now().UTC()})
+	})
+	mux.HandleFunc("GET /api/v2/apps/tags", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.RLock()
+		seen := map[string]bool{}
+		for _, item := range s.state.Catalog {
+			if item.Key != "" {
+				seen[item.Key] = true
+			}
+		}
+		tags := make([]string, 0, len(seen))
+		for tag := range seen {
+			tags = append(tags, tag)
+		}
+		s.mu.RUnlock()
+		appOK(w, tags)
+	})
+	mux.HandleFunc("GET /api/v2/apps/ignored/detail", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.RLock()
+		items := append([]map[string]any(nil), s.state.Ignored...)
+		s.mu.RUnlock()
+		appOK(w, items)
+	})
+	mux.HandleFunc("GET /api/v2/apps/{key}", func(w http.ResponseWriter, r *http.Request) { appCatalogGet(w, s, r.PathValue("key")) })
+	mux.HandleFunc("GET /api/v2/apps/detail/{appId}/{version}/{type}", func(w http.ResponseWriter, r *http.Request) { appCatalogGet(w, s, r.PathValue("appId")) })
+	mux.HandleFunc("GET /api/v2/apps/detail/node/{appKey}/{version}", func(w http.ResponseWriter, r *http.Request) { appCatalogGet(w, s, r.PathValue("appKey")) })
+	mux.HandleFunc("GET /api/v2/apps/details/{id}", func(w http.ResponseWriter, r *http.Request) { appCatalogGet(w, s, r.PathValue("id")) })
+	mux.HandleFunc("GET /api/v2/apps/services/{key}", func(w http.ResponseWriter, r *http.Request) {
+		appOK(w, []map[string]any{{"label": "web", "value": "web", "status": "running", "appKey": r.PathValue("key")}})
+	})
+	mux.HandleFunc("GET /api/v2/apps/icon/{key}", appIcon)
+	mux.HandleFunc("GET /api/v2/apps/installed/info/{appInstallId}", func(w http.ResponseWriter, r *http.Request) { appInstalledGet(w, s, r.PathValue("appInstallId")) })
+	mux.HandleFunc("GET /api/v2/apps/installed/params/{appInstallId}", func(w http.ResponseWriter, r *http.Request) { appInstalledGet(w, s, r.PathValue("appInstallId")) })
+	mux.HandleFunc("GET /api/v2/apps/installed/delete/check/{appInstallId}", func(w http.ResponseWriter, r *http.Request) { appOK(w, []map[string]any{}) })
+	for _, path := range []string{"/api/v2/apps/install", "/api/v2/apps/installed/check", "/api/v2/apps/installed/conf", "/api/v2/apps/installed/config/update", "/api/v2/apps/installed/conninfo", "/api/v2/apps/installed/ignore", "/api/v2/apps/installed/loadport", "/api/v2/apps/installed/op", "/api/v2/apps/installed/params/update", "/api/v2/apps/installed/port/change", "/api/v2/apps/installed/sort/update", "/api/v2/apps/installed/sync", "/api/v2/apps/installed/update/versions", "/api/v2/apps/ignored/cancel"} {
+		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
+			handleAppPost(w, s, strings.TrimPrefix(r.URL.Path, "/api/v2/apps/"), appBody(r))
+		})
+	}
+	// 自定义应用商店和跨节点安装是前端真实调用的扩展接口。
+	mux.HandleFunc("POST /api/v2/custom/app/sync", func(w http.ResponseWriter, r *http.Request) {
+		appOK(w, map[string]any{"accepted": true, "taskID": appValue(appBody(r), "taskID")})
+	})
+	mux.HandleFunc("GET /api/v2/custom/app/config", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.RLock()
+		config := s.state.StoreConfig
+		s.mu.RUnlock()
+		appOK(w, config)
+	})
+	mux.HandleFunc("POST /api/v2/core/xpack/sync/app/install", func(w http.ResponseWriter, r *http.Request) { handleAppPost(w, s, "install", appBody(r)) })
+}
+
+func appCatalogGet(w http.ResponseWriter, s *appStore, id string) {
+	s.mu.RLock()
+	index, item := findApp(s.state.Catalog, id)
+	if index < 0 {
+		index, item = findApp(s.state.Apps, id)
+	}
+	s.mu.RUnlock()
+	if index < 0 {
+		appOK(w, map[string]any{"id": id, "key": id, "available": false})
+		return
+	}
+	data := appRecordData(item)
+	data["available"] = true
+	data["details"] = map[string]any{"version": item.Version, "type": "runtime", "params": []any{}, "dockerCompose": ""}
+	appOK(w, data)
+}
+
+func appInstalledGet(w http.ResponseWriter, s *appStore, id string) {
+	s.mu.RLock()
+	_, item := findApp(s.state.Apps, id)
+	s.mu.RUnlock()
+	if item.ID == "" {
+		appOK(w, map[string]any{"id": id, "status": "not_installed", "env": map[string]any{}})
+		return
+	}
+	data := appRecordData(item)
+	data["env"] = item.Config
+	data["container"] = item.Config["containerName"]
+	data["httpPort"] = item.Config["port"]
+	appOK(w, data)
+}
+
+func handleAppPost(w http.ResponseWriter, s *appStore, path string, body map[string]any) {
+	switch path {
+	case "install":
+		id := appValue(body, "appInstallId", "id", "appId", "key", "name")
+		if id == "" {
+			runtimeErr(w, http.StatusBadRequest, "应用标识不能为空")
+			return
+		}
+		item := appRecord{ID: id, Key: appValue(body, "key", "appKey", "id"), Name: appValue(body, "name", "appName", "key"), Version: appValue(body, "version"), Status: "running", Config: body, UpdatedAt: time.Now().UTC()}
+		if item.Key == "" {
+			item.Key = id
+		}
+		s.mu.Lock()
+		index, _ := findApp(s.state.Apps, id)
+		if index >= 0 {
+			s.state.Apps[index] = item
+		} else {
+			s.state.Apps = append(s.state.Apps, item)
+		}
+		_ = s.saveLocked()
+		s.mu.Unlock()
+		appOK(w, appRecordData(item))
+	case "installed/check":
+		id := appValue(body, "name", "key", "appInstallId")
+		s.mu.RLock()
+		_, item := findApp(s.state.Apps, id)
+		s.mu.RUnlock()
+		appOK(w, map[string]any{"name": id, "version": item.Version, "isExist": item.ID != "", "status": item.Status, "appInstallId": item.ID, "containerName": item.Config["containerName"]})
+	case "installed/loadport":
+		id := appValue(body, "name", "key")
+		s.mu.RLock()
+		_, item := findApp(s.state.Apps, id)
+		s.mu.RUnlock()
+		appOK(w, item.Config["port"])
+	case "installed/conninfo":
+		appOK(w, map[string]any{"status": "unknown", "username": "", "password": "", "privilege": false, "containerName": appValue(body, "name"), "serviceName": appValue(body, "name"), "systemIP": "127.0.0.1", "port": 0})
+	case "installed/conf":
+		appOK(w, map[string]any{"type": appValue(body, "type"), "name": appValue(body, "name"), "params": []any{}, "dockerCompose": ""})
+	case "installed/op":
+		handleAppOperation(w, s, body)
+	case "installed/port/change", "installed/params/update", "installed/config/update":
+		handleAppUpdate(w, s, body)
+	case "installed/sort/update":
+		items, _ := body["items"].([]any)
+		s.mu.Lock()
+		for _, value := range items {
+			if item, ok := value.(map[string]any); ok {
+				id := appValue(item, "installID", "id")
+				if index, _ := findApp(s.state.Apps, id); index >= 0 {
+					if order, ok := item["sortOrder"].(float64); ok {
+						s.state.Apps[index].SortOrder = int(order)
+					}
+				}
+			}
+		}
+		_ = s.saveLocked()
+		s.mu.Unlock()
+		appOK(w, map[string]any{"updated": true})
+	case "installed/update/versions":
+		appOK(w, []map[string]any{})
+	case "installed/ignore":
+		s.mu.Lock()
+		s.state.Ignored = append(s.state.Ignored, body)
+		_ = s.saveLocked()
+		s.mu.Unlock()
+		appOK(w, map[string]any{"ignored": true})
+	case "ignored/cancel":
+		id := appValue(body, "id", "appID", "appDetailID")
+		s.mu.Lock()
+		kept := s.state.Ignored[:0]
+		for _, item := range s.state.Ignored {
+			if appValue(item, "id", "appID", "appDetailID") != id {
+				kept = append(kept, item)
+			}
+		}
+		s.state.Ignored = kept
+		_ = s.saveLocked()
+		s.mu.Unlock()
+		appOK(w, map[string]any{"cancelled": true})
+	default:
+		appOK(w, map[string]any{"accepted": true, "config": body})
+	}
+}
+
+func handleAppOperation(w http.ResponseWriter, s *appStore, body map[string]any) {
+	id := appValue(body, "installId", "appInstallId", "id")
+	operation := strings.ToLower(appValue(body, "operate", "operation"))
+	s.mu.Lock()
+	index, item := findApp(s.state.Apps, id)
+	if index >= 0 {
+		switch operation {
+		case "stop", "停止":
+			item.Status = "stopped"
+		case "start", "启动", "restart", "重启":
+			item.Status = "running"
+		case "uninstall", "delete", "卸载":
+			s.state.Apps = append(s.state.Apps[:index], s.state.Apps[index+1:]...)
+		}
+		item.UpdatedAt = time.Now().UTC()
+		if operation != "uninstall" && operation != "delete" && operation != "卸载" {
+			s.state.Apps[index] = item
+		}
+	}
+	_ = s.saveLocked()
+	s.mu.Unlock()
+	appOK(w, map[string]any{"id": id, "operate": operation, "status": item.Status, "accepted": true})
+}
+
+func handleAppUpdate(w http.ResponseWriter, s *appStore, body map[string]any) {
+	id := appValue(body, "installID", "installId", "appInstallId", "id")
+	s.mu.Lock()
+	index, item := findApp(s.state.Apps, id)
+	if index >= 0 {
+		if port, ok := body["port"]; ok {
+			if item.Config == nil {
+				item.Config = map[string]any{}
+			}
+			item.Config["port"] = port
+		}
+		for key, value := range body {
+			if item.Config == nil {
+				item.Config = map[string]any{}
+			}
+			item.Config[key] = value
+		}
+		item.UpdatedAt = time.Now().UTC()
+		s.state.Apps[index] = item
+	}
+	_ = s.saveLocked()
+	s.mu.Unlock()
+	appOK(w, map[string]any{"id": id, "updated": index >= 0})
+}
+
+func appIcon(w http.ResponseWriter, _ *http.Request) {
+	// 透明 1x1 PNG：目录没有图标时也返回真实图片响应，避免浏览器将 JSON 当脚本解析。
+	data, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
 func isAppRoute(pattern string) bool {
 	parts := strings.SplitN(pattern, " ", 2)
 	p := pattern

@@ -22,10 +22,15 @@
 | 节点链路 | handshake/heartbeat/sync/fencing | HMAC、时间戳、nonce、防重放和角色 fencing | `go test ./runtime/link ./control/api` |
 | 文件/数据库首批扩展 | `/api/v2/files/share/*`、`/api/v2/databases/db/update` | 分享 token 与数据库登记持久化、输入校验、分页和更新 | `go test ./node/api ./node/service` |
 | 脚本资源 | `/api/v2/core/script`、`search`、`update`、`del`、`sync` | 统一资源存储提供脚本 CRUD 和同步兼容行为 | `go test ./node/api` |
+| AI 执行面 | `/api/v2/ai/ollama/*`、`mcp/*`、`tensorrt/*`、`gpu/*` | 模型、MCP、TensorRT-LLM、GPU 状态和域名绑定均使用 `ai.json` 持久化；无硬件时返回可识别降级状态 | `go test ./node/api -run AI` |
+| AI 账号与 Agent | `/api/v2/ai/accounts/*`、`agents/*`、`agents/channel/*`、`agents/plugins/*`、`agents/skills/*` | 账号/Agent/渠道/插件/Skill 的 CRUD、配置和搜索；敏感字段脱敏；角色和会话配置可恢复 | `go test ./node/api -run AI` |
+| 应用目录 | `/api/v2/apps/search`、`detail/*`、`tags`、`checkupdate`、`services/*` | 应用目录搜索、详情、标签、更新状态和服务信息，支持 `WORKMESH_APP_CATALOG` | `go test ./node/api -run App` |
+| 已安装应用 | `/api/v2/apps/install`、`installed/*`、`ignored/*` | 安装幂等、启停/重启/卸载、端口和参数更新、排序、连接信息、升级忽略均写入 `apps.json` | `go test ./node/api -run App` |
+| 自定义应用商店 | `/api/v2/custom/app/*`、`/api/v2/core/xpack/sync/app/install` | 自定义商店配置、同步任务和多节点安装兼容入口 | `go test ./node/api -run App` |
 
 ## 进行中
 
-实现扫描器当前结果：`implemented 311`、`partial 69`、`compatibility 137`、`pending 312`、`missing 2`。剩余接口按以下域逐条替换占位实现；统一前缀处理器已依据源码证据纳入统计。
+实现扫描器当前结果：`implemented 428`、`partial 228`、`compatibility 138`、`pending 37`、`missing 0`（基于 Core/Agent 全源码扫描，生成时间以报告为准）。隐藏初始化文件中的路由也已纳入去重统计。逐路由证据清单见 [`function-checklist-generated.md`](./function-checklist-generated.md)。剩余接口按以下域逐条替换占位实现；不得以兼容占位或固定空列表宣称完成。
 
 - 主机与系统：主机列表、连接测试、系统信息、命令历史和终端。
 - 文件：分享、回收站、压缩/解压、上传下载、权限和内容搜索。
