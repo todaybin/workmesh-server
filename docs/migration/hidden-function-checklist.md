@@ -3,6 +3,12 @@
 
 # 隐藏功能迁移清单
 
+## 2026-08-30 仪表盘采集
+
+| 功能名称 | 旧源码入口 | 新源码入口 | 数据来源 | 测试 | 状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 主机网络与挂载点采集 | `apps/workmesh-node/agent/api/v2/dashboard.go` | `node/api/dashboard.go:dashboardNetwork`、`dashboardDisks` | `/proc/net/dev`、`/proc/mounts` | `node/api/dashboard_test.go` | implemented | 非 Linux 环境无内核接口时返回 supported=false；硬件加速器需驱动适配 |
+
 本清单覆盖旧 `apps/workmesh-node/core` 与 `agent` 中不一定表现为 HTTP 路由的能力。当前路由清单为 871 条（包含 helper 注册、公共备份账号空路径和去品牌化静态入口）；本文件用于防止初始化钩子、后台作业、中间件和协议升级能力在迁移时遗漏。
 
 状态定义：

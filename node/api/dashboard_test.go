@@ -41,3 +41,34 @@ func TestDashboardCurrentPathParameters(t *testing.T) {
 		t.Fatalf("status = %d, want 200", res.Code)
 	}
 }
+
+func TestDashboardNetworkAndDisks(t *testing.T) {
+	network := dashboardNetwork()
+	if _, ok := network["bytesSent"]; !ok {
+		t.Fatal("network bytesSent field missing")
+	}
+	if _, ok := network["bytesRecv"]; !ok {
+		t.Fatal("network bytesRecv field missing")
+	}
+	if _, ok := network["supported"]; !ok {
+		t.Fatal("network supported field missing")
+	}
+	disks := dashboardDisks()
+	if disks == nil {
+		t.Fatal("disk data must be initialized")
+	}
+	for _, disk := range disks {
+		if disk["mount"] == nil || disk["device"] == nil {
+			t.Fatalf("disk entry missing identity: %#v", disk)
+		}
+	}
+}
+
+func TestDashboardAcceleratorsExplainUnavailable(t *testing.T) {
+	for _, kind := range []string{"gpu", "npu", "xpu"} {
+		items := dashboardAccelerators(kind)
+		if len(items) != 1 || items[0]["available"] != false || items[0]["reason"] == "" {
+			t.Fatalf("unexpected %s capability: %#v", kind, items)
+		}
+	}
+}

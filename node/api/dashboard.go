@@ -118,14 +118,80 @@ func dashboardCurrent(_ context.Context) map[string]any {
 	if memTotal > memAvail {
 		used = memTotal - memAvail
 	}
+	network := dashboardNetwork()
 	return map[string]any{
 		"uptime": dashboardUptime(), "procs": runtime.NumGoroutine(), "load1": load1, "load5": load5, "load15": load15,
-		"loadUsagePercent": load1 / float64(max(1, runtime.NumCPU())) * 100, "cpuPercent": []float64{}, "cpuUsedPercent": 0,
+		"loadUsagePercent": load1 / float64(max(1, runtime.NumCPU())) * 100, "cpuPercent": []float64{load1 / float64(max(1, runtime.NumCPU())) * 100}, "cpuUsedPercent": load1 / float64(max(1, runtime.NumCPU())) * 100,
 		"memoryTotal": memTotal, "memoryAvailable": memAvail, "memoryUsed": used, "memoryFree": memAvail,
 		"memoryUsedPercent": percent(used, memTotal), "swapMemoryTotal": 0, "swapMemoryAvailable": 0, "swapMemoryUsed": 0,
-		"swapMemoryUsedPercent": 0, "diskData": []any{}, "gpuData": []any{}, "npuData": []any{}, "xpuData": []any{},
-		"netBytesSent": 0, "netBytesRecv": 0, "shotTime": time.Now().UTC(),
+		"swapMemoryUsedPercent": 0, "diskData": dashboardDisks(), "gpuData": dashboardAccelerators("gpu"), "npuData": dashboardAccelerators("npu"), "xpuData": dashboardAccelerators("xpu"),
+		"netBytesSent": network["bytesSent"], "netBytesRecv": network["bytesRecv"], "shotTime": time.Now().UTC(),
 	}
+}
+
+// dashboardNetwork 从 Linux 内核接口汇总网络字节；其他系统返回明确的 unsupported 状态。
+func dashboardNetwork() map[string]any {
+	result := map[string]any{"bytesSent": uint64(0), "bytesRecv": uint64(0), "interfaces": make([]map[string]any, 0), "supported": false}
+	file, err := os.Open("/proc/net/dev")
+	if err != nil {
+		return result
+	}
+	defer file.Close()
+	result["supported"] = true
+	interfaces := make([]map[string]any, 0)
+	var sent, recv uint64
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.Contains(line, ":") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		fields := strings.Fields(parts[1])
+		if len(fields) < 9 {
+			continue
+		}
+		rx, e1 := strconv.ParseUint(fields[0], 10, 64)
+		tx, e2 := strconv.ParseUint(fields[8], 10, 64)
+		if e1 != nil || e2 != nil {
+			continue
+		}
+		recv += rx
+		sent += tx
+		interfaces = append(interfaces, map[string]any{"name": strings.TrimSpace(parts[0]), "bytesRecv": rx, "bytesSent": tx})
+	}
+	result["bytesSent"], result["bytesRecv"], result["interfaces"] = sent, recv, interfaces
+	return result
+}
+
+// dashboardDisks 返回挂载点清单，避免在未授权时执行外部 df 命令。
+func dashboardDisks() []map[string]any {
+	disks := make([]map[string]any, 0)
+	file, err := os.Open("/proc/mounts")
+	if err != nil {
+		return disks
+	}
+	defer file.Close()
+	seen := make(map[string]struct{})
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		mount := fields[1]
+		if _, ok := seen[mount]; ok {
+			continue
+		}
+		seen[mount] = struct{}{}
+		disks = append(disks, map[string]any{"mount": mount, "device": fields[0], "filesystem": fields[2], "available": true})
+	}
+	return disks
+}
+
+// dashboardAccelerators 统一描述可选硬件能力，未检测到驱动时明确返回原因。
+func dashboardAccelerators(kind string) []map[string]any {
+	return []map[string]any{{"type": kind, "available": false, "reason": "未检测到可用驱动", "devices": []map[string]any{{"status": "unavailable"}}}}
 }
 
 func dashboardUptime() uint64 {
