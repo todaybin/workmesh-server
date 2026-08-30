@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"strconv"
 	"strings"
 	"time"
@@ -94,16 +96,44 @@ func handleProcessByID(w http.ResponseWriter, r *http.Request) {
 		processError(w, 400, errors.New("进程 ID 无效"))
 		return
 	}
-	data := map[string]any{"pid": pid, "name": "", "cmd": "", "user": "", "memory": 0, "percent": 0}
+	data := map[string]any{"pid": pid, "name": "", "cmd": "", "user": "", "memory": int64(0), "percent": 0.0}
 	if raw, e := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline"); e == nil {
 		data["cmd"] = strings.ReplaceAll(string(raw), "\x00", " ")
-		data["name"] = strings.Fields(data["cmd"].(string))[0]
+		fields := strings.Fields(data["cmd"].(string))
+		if len(fields) > 0 {
+			data["name"] = fields[0]
+		}
+		readProcessDetails(pid, data)
 	}
 	if data["cmd"] == "" {
 		processError(w, 404, errors.New("进程不存在或不可访问"))
 		return
 	}
 	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": data})
+}
+
+// readProcessDetails 从 procfs 读取进程内存和用户，失败时保留可解释的默认值。
+func readProcessDetails(pid int, data map[string]any) {
+	status, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/status")
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(status), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch strings.TrimSuffix(fields[0], ":") {
+		case "VmRSS":
+			if kb, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+				data["memory"] = kb * 1024
+			}
+		case "Uid":
+			if uid, err := user.LookupId(fields[1]); err == nil {
+				data["user"] = uid.Username
+			}
+		}
+	}
 }
 
 func handleProcessStop(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +161,8 @@ func handleProcessStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleProcessListening(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "ss", "-lntup")
 	output, err := cmd.Output()
 	if err != nil {
@@ -139,7 +170,7 @@ func handleProcessListening(w http.ResponseWriter, r *http.Request) {
 		output, err = cmd.Output()
 	}
 	if err != nil {
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": []any{}})
+		wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "LISTENING_COMMAND_UNAVAILABLE"}, "message": "ss 和 netstat 均不可用"})
 		return
 	}
 	lines := strings.Split(string(output), "\n")

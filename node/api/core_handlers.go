@@ -45,7 +45,7 @@ func registerCoreAuthExtras(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/core/auth/saml2/finish", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotImplemented, errors.New("SAML2 未启用"))
 	})
-	mux.HandleFunc("GET /api/v2/core/auth/passkey/list", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, []any{}) })
+	mux.HandleFunc("GET /api/v2/core/auth/passkey/list", handleCorePasskeyList)
 	mux.HandleFunc("POST /api/v2/core/auth/api/generate", handleCoreAPIGenerate)
 	mux.HandleFunc("POST /api/v2/core/auth/api/update", handleCoreAPIUpdate)
 	mux.HandleFunc("POST /api/v2/core/auth/current/update", handleCoreCurrentUpdate)
@@ -56,15 +56,79 @@ func registerCoreAuthExtras(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/core/auth/mfa/bind", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, nil) })
 	mux.HandleFunc("POST /api/v2/core/auth/mfa/close", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, nil) })
 	mux.HandleFunc("POST /api/v2/core/auth/mfalogin", handleCoreLogin)
-	mux.HandleFunc("POST /api/v2/core/auth/passkey/begin", func(w http.ResponseWriter, _ *http.Request) {
-		coreJSON(w, map[string]any{"sessionId": coreToken(), "publicKey": map[string]any{}})
-	})
-	mux.HandleFunc("POST /api/v2/core/auth/passkey/del", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, nil) })
+	mux.HandleFunc("POST /api/v2/core/auth/passkey/begin", handleCorePasskeyBegin)
+	mux.HandleFunc("POST /api/v2/core/auth/passkey/del", handleCorePasskeyDelete)
 	mux.HandleFunc("POST /api/v2/core/auth/passkey/finish", handleCoreLogin)
-	mux.HandleFunc("POST /api/v2/core/auth/passkey/register/begin", func(w http.ResponseWriter, _ *http.Request) {
-		coreJSON(w, map[string]any{"sessionId": coreToken(), "publicKey": map[string]any{}})
-	})
-	mux.HandleFunc("POST /api/v2/core/auth/passkey/register/finish", handleCoreLogin)
+	mux.HandleFunc("POST /api/v2/core/auth/passkey/register/begin", handleCorePasskeyBegin)
+	mux.HandleFunc("POST /api/v2/core/auth/passkey/register/finish", handleCorePasskeyRegisterFinish)
+}
+
+func handleCorePasskeyList(w http.ResponseWriter, r *http.Request) {
+	if _, err := localCore.Current(coreSessionID(r)); err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	coreJSON(w, localCore.ListPasskeys())
+}
+
+func handleCorePasskeyBegin(w http.ResponseWriter, r *http.Request) {
+	authSession := coreSessionID(r)
+	challenge, err := localCore.BeginPasskeyRegistration(authSession)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	coreJSON(w, map[string]any{"sessionId": challenge, "publicKey": map[string]any{"challenge": challenge, "timeout": 300000, "rp": map[string]string{"name": "WorkMesh"}}})
+}
+
+func handleCorePasskeyDelete(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.URL.Query().Get("id"))
+	if id == "" {
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := decodeJSON(r, &body); err == nil {
+			id = strings.TrimSpace(body.ID)
+		}
+	}
+	if id == "" {
+		writeError(w, http.StatusBadRequest, errors.New("Passkey id 不能为空"))
+		return
+	}
+	if err := localCore.DeletePasskey(coreSessionID(r), id); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	coreJSON(w, nil)
+}
+
+func handleCorePasskeyRegisterFinish(w http.ResponseWriter, r *http.Request) {
+	authSession := coreSessionID(r)
+	challengeID := strings.TrimSpace(r.Header.Get("Passkey-Session"))
+	var body struct {
+		SessionID    string `json:"sessionId"`
+		CredentialID string `json:"credentialId"`
+		Name         string `json:"name"`
+	}
+	if r.Body != nil {
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	if challengeID == "" {
+		challengeID = strings.TrimSpace(body.SessionID)
+	}
+	item, err := localCore.FinishPasskeyRegistration(authSession, challengeID, body.CredentialID, body.Name)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, service.ErrUnauthenticated) {
+			status = http.StatusUnauthorized
+		}
+		writeError(w, status, err)
+		return
+	}
+	coreJSON(w, item)
 }
 
 func coreJSON(w http.ResponseWriter, value any) {

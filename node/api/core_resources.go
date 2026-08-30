@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -24,7 +25,7 @@ type coreResourceStore struct {
 	updated time.Time
 }
 
-var coreResources = coreResourceStore{items: map[string][]map[string]any{}}
+var coreResources = coreResourceStore{items: make(map[string][]map[string]any)}
 
 func registerCoreResourceRoutes(mux *http.ServeMux) {
 	// 脚本运行必须先经过受保护的专用处理器，不能落入普通资源 CRUD。
@@ -57,32 +58,36 @@ func handleScriptRun(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusUnauthorized, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "COMMAND_AUTH_REQUIRED"}})
 		return
 	}
-	command := strings.TrimSpace(r.URL.Query().Get("command"))
-	if command == "" {
-		command = strings.TrimSpace(r.URL.Query().Get("script"))
+	scriptID := strings.TrimSpace(r.URL.Query().Get("script_id"))
+	if scriptID == "" {
+		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_ID_REQUIRED"}})
+		return
 	}
-	if command == "" {
-		var body struct {
-			Command string `json:"command"`
-			Script  string `json:"script"`
-		}
-		if r.Body != nil {
-			_ = json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body)
-		}
-		command, _ = strings.CutPrefix(strings.TrimSpace(body.Command), "")
-		if command == "" {
-			command = strings.TrimSpace(body.Script)
+	var command string
+	coreResources.mu.RLock()
+	for _, item := range coreResources.items["script"] {
+		if fmt.Sprint(item["id"]) == scriptID {
+			if value, ok := item["script"].(string); ok {
+				command = strings.TrimSpace(value)
+			}
+			if command == "" {
+				if value, ok := item["content"].(string); ok {
+					command = strings.TrimSpace(value)
+				}
+			}
+			break
 		}
 	}
+	coreResources.mu.RUnlock()
 	if command == "" || len(command) > 64<<10 {
-		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "COMMAND_REQUIRED"}})
+		wmhttp.JSON(w, http.StatusNotFound, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_NOT_FOUND"}})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	output, err := cmd.CombinedOutput()
-	data := map[string]any{"command": command, "output": string(output), "exitCode": 0, "timedOut": errors.Is(ctx.Err(), context.DeadlineExceeded)}
+	data := map[string]any{"scriptId": scriptID, "output": string(output), "exitCode": 0, "timedOut": errors.Is(ctx.Err(), context.DeadlineExceeded)}
 	if err != nil {
 		data["exitCode"] = 1
 		if exitErr, ok := err.(*exec.ExitError); ok {
