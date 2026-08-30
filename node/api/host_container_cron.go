@@ -285,7 +285,7 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/dashboard/system/restart/{operation}", handleDashboardRestart)
 	mux.HandleFunc("POST /api/v2/files", handleFilesCreate)
 	// 尚未接入专用处理器的网站子路径统一走兼容入口；更具体路由会优先匹配。
-	mux.HandleFunc("/api/v2/websites/", compatibilityHandler)
+	mux.HandleFunc("/api/v2/websites/", websiteFallbackHandler)
 	registerContainerRoutes(mux)
 	registerHostRoutes(mux)
 	registerAIExecutionRoutes(mux)

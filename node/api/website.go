@@ -77,6 +77,36 @@ func proxyFunctionalPath(target string, next http.Handler) http.HandlerFunc {
 	}
 }
 
+// websiteFallbackHandler 为尚未拥有专用业务动作的网站路径提供真实状态查询。
+// 写操作必须由专用路由处理，兜底接口拒绝未知动作，避免伪造成功。
+func websiteFallbackHandler(w http.ResponseWriter, r *http.Request) {
+	svc := service.NewWebsiteService("")
+	if r.Method == http.MethodGet {
+		idText := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v2/websites/"), "/")
+		if idText == "" {
+			items := svc.List("", 0, 100)
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
+			return
+		}
+		digits := strings.FieldsFunc(idText, func(r rune) bool { return r < '0' || r > '9' })
+		if len(digits) > 0 {
+			id, err := strconv.ParseUint(digits[0], 10, 32)
+			if err != nil || id == 0 {
+				writeError(w, http.StatusBadRequest, errors.New("WEBSITE_ID_INVALID"))
+				return
+			}
+			item, getErr := svc.Get(uint(id))
+			if getErr != nil {
+				writeError(w, http.StatusNotFound, getErr)
+				return
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
+			return
+		}
+	}
+	writeError(w, http.StatusNotImplemented, errors.New("WEBSITE_OPERATION_REQUIRES_EXPLICIT_ROUTE"))
+}
+
 // isFunctionalDomainRoute 让 legacy 路由过滤器跳过已经实现的占位契约。
 func isWebsiteFunctionalRoute(pattern string) bool {
 	parts := strings.SplitN(pattern, " ", 2)
