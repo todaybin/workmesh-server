@@ -113,3 +113,37 @@ func TestWebsiteAdvancedRouteValidation(t *testing.T) {
 		t.Fatalf("不存在网站应返回 404，实际 %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestWebsiteConfigAliasesPersist(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerWebsiteFunctionalRoutes(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := call(http.MethodPost, "/api/v2/websites", `{"primaryDomain":"aliases.example"}`); rec.Code != http.StatusOK {
+		t.Fatalf("创建网站失败: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, item := range []struct{ path, cfg string }{
+		{"/api/v2/websites/dns/update", `{"records":[{"type":"A","value":"127.0.0.1"}]}`},
+		{"/api/v2/websites/cors/update", `{"enabled":true,"origins":["https://example.com"]}`},
+		{"/api/v2/websites/lbs/create", `{"upstreams":[{"address":"127.0.0.1:8080"}]}`},
+		{"/api/v2/websites/proxy/clear", `{"enabled":false}`},
+	} {
+		body := `{"websiteID":1,"config":` + item.cfg + `}`
+		if rec := call(http.MethodPost, item.path, body); rec.Code != http.StatusOK {
+			t.Fatalf("配置写入 %s 失败: %d %s", item.path, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := call(http.MethodPost, "/api/v2/websites/dns/search", `{"websiteID":1}`); rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte("127.0.0.1")) {
+		t.Fatalf("DNS 查询失败: %d %s", rec.Code, rec.Body.String())
+	}
+	monitor := call(http.MethodPost, "/api/v2/websites/monitor/config/site/update", `{"websiteID":1,"enabled":false}`)
+	if monitor.Code != http.StatusOK {
+		t.Fatalf("监控配置更新失败: %d %s", monitor.Code, monitor.Body.String())
+	}
+}

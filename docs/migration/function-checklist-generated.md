@@ -3,8 +3,8 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T08:36:09.583Z。
-共 871 条接口：implemented 740、partial 53、pending 78。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T09:02:16.688Z。
+共 871 条接口：implemented 810、partial 13、pending 48。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
 
@@ -189,18 +189,18 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/api/v2/core/auth/captcha` | apps/workmesh-server/node/api/legacy_routes.go | public | memory | missing | - |
 | implemented | GET | `/api/v2/core/auth/current` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | - |
-| partial | GET | `/api/v2/core/auth/passkey/list` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | GET | `/api/v2/core/auth/passkey/list` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | GET | `/api/v2/core/auth/setting` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | - |
 | implemented | GET | `/api/v2/core/auth/welcome` | apps/workmesh-server/node/api/legacy_routes.go | public | memory | missing | - |
-| partial | POST | `/api/v2/core/auth/api/generate` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/core/auth/api/update` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/core/auth/api/generate` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/auth/api/update` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/auth/current/update` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/auth/expired/reset` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/auth/login` | apps/workmesh-server/node/api/legacy_routes.go | public | memory | missing | - |
 | implemented | POST | `/api/v2/core/auth/logout` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | - |
 | implemented | POST | `/api/v2/core/auth/mfa` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/auth/mfa/bind` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
-| implemented | POST | `/api/v2/core/auth/mfa/close` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/auth/mfa/close` | apps/workmesh-server/node/api/core_handlers.go | required | external | present | - |
 | implemented | POST | `/api/v2/core/auth/mfalogin` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/auth/passkey/begin` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/auth/passkey/del` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
@@ -377,13 +377,13 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | GET | `/api/v2/dashboard/app/launcher` | apps/workmesh-server/node/api/legacy_routes.go | unknown | external | missing | - |
+| implemented | GET | `/api/v2/dashboard/app/launcher` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/dashboard/base/:ioOption/:netOption` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
-| implemented | GET | `/api/v2/dashboard/base/os` | apps/workmesh-server/node/api/legacy_routes.go | unknown | external | missing | - |
+| implemented | GET | `/api/v2/dashboard/base/os` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/dashboard/current/:ioOption/:netOption` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
-| implemented | GET | `/api/v2/dashboard/current/node` | apps/workmesh-server/node/api/legacy_routes.go | unknown | external | missing | - |
-| implemented | GET | `/api/v2/dashboard/current/top/cpu` | apps/workmesh-server/node/api/legacy_routes.go | unknown | external | missing | - |
-| implemented | GET | `/api/v2/dashboard/current/top/mem` | apps/workmesh-server/node/api/legacy_routes.go | unknown | external | missing | - |
+| implemented | GET | `/api/v2/dashboard/current/node` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
+| implemented | GET | `/api/v2/dashboard/current/top/cpu` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
+| implemented | GET | `/api/v2/dashboard/current/top/mem` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/dashboard/quick/option` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/dashboard/app/launcher/option` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/dashboard/app/launcher/show` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
@@ -482,63 +482,63 @@
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/api/v2/files/download` | apps/workmesh-server/node/api/files_routes.go | required | memory | present | - |
-| partial | GET | `/api/v2/files/recycle/status` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | GET | `/api/v2/files/share/check` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | GET | `/api/v2/files/share/download` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | GET | `/api/v2/files/share/info` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | GET | `/api/v2/files/share/qrcode` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | GET | `/api/v2/files/wget/process` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | GET | `/api/v2/files/wget/process/keys` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/ai-search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/batch/check` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/batch/del` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/batch/role` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/check` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/chunkdownload` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/chunkupload` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/chunkupload/stop` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/compress` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/compress/stop` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
+| implemented | GET | `/api/v2/files/recycle/status` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | GET | `/api/v2/files/share/check` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | GET | `/api/v2/files/share/download` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | GET | `/api/v2/files/share/info` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | GET | `/api/v2/files/share/qrcode` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | GET | `/api/v2/files/wget/process` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | GET | `/api/v2/files/wget/process/keys` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/ai-search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/batch/check` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/batch/del` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/batch/role` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/check` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/chunkdownload` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/chunkupload` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/chunkupload/stop` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/compress` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/compress/stop` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
 | implemented | POST | `/api/v2/files/content` | apps/workmesh-server/node/api/files_routes.go | unknown | memory | present | - |
-| partial | POST | `/api/v2/files/convert` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/convert/log` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/decompress` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/decompress/stop` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| implemented | POST | `/api/v2/files/del` | apps/workmesh-server/node/api/files_routes.go | required | memory | present | - |
-| partial | POST | `/api/v2/files/depth/size` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/favorite` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/favorite/del` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/favorite/search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/history/content` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/history/del` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/history/restore` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/history/search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/mode` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/mount` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/files/convert` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/convert/log` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/decompress` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/decompress/stop` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/del` | apps/workmesh-server/node/api/files_routes.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/files/depth/size` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/favorite` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/favorite/del` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/favorite/search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/history/content` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/history/del` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/history/restore` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/history/search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/mode` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/mount` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
 | implemented | POST | `/api/v2/files/move` | apps/workmesh-server/node/api/files_routes.go | required | memory | present | - |
-| partial | POST | `/api/v2/files/move/stop` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/owner` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/preview` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/read/:type` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/recycle/clear` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/recycle/reduce` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/recycle/search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/remark` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/remarks` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/files/move/stop` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/owner` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/preview` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/read/:type` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/recycle/clear` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/recycle/reduce` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/recycle/search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/remark` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/remarks` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
 | implemented | POST | `/api/v2/files/rename` | apps/workmesh-server/node/api/files_routes.go | required | memory | present | - |
 | implemented | POST | `/api/v2/files/save` | apps/workmesh-server/node/api/files_routes.go | required | memory | present | - |
 | implemented | POST | `/api/v2/files/search` | apps/workmesh-server/node/api/files_routes.go | required | memory | present | - |
-| partial | POST | `/api/v2/files/share/create` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/share/del` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/share/detail` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/share/search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/files/share/create` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/share/del` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/share/detail` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/share/search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
 | implemented | POST | `/api/v2/files/size` | apps/workmesh-server/node/api/files_routes.go | required | memory | present | - |
 | implemented | POST | `/api/v2/files/tree` | apps/workmesh-server/node/api/files_routes.go | required | memory | present | - |
 | implemented | POST | `/api/v2/files/upload` | apps/workmesh-server/node/api/files_routes.go | required | memory | present | - |
-| partial | POST | `/api/v2/files/upload/search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/user/group` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/wget` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/files/wget/stop` | apps/workmesh-server/node/api/files_routes.go | required | database | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/files/upload/search` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/user/group` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/wget` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
+| implemented | POST | `/api/v2/files/wget/stop` | apps/workmesh-server/node/api/files_routes.go | required | database | present | - |
 
 ## global
 
@@ -690,7 +690,7 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| partial | GET | `/api/v2/process/:pid` | apps/workmesh-server/node/api/process.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | GET | `/api/v2/process/:pid` | apps/workmesh-server/node/api/process.go | required | memory | present | - |
 | implemented | GET | `/api/v2/process/ws` | apps/workmesh-server/node/api/process.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/process/listening` | apps/workmesh-server/node/api/process.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/process/stop` | apps/workmesh-server/node/api/process.go | unknown | memory | present | - |
@@ -759,7 +759,7 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| partial | GET | `/api/v2/core/script/run` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | GET | `/api/v2/core/script/run` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/script/del` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/script/search` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/script/sync` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
@@ -795,7 +795,7 @@
 | implemented | POST | `/api/v2/core/settings/ssl/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/terminal/search` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/terminal/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/core/settings/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/core/settings/update` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/upgrade` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/upgrade/notes` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/settings/description/save` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
@@ -935,29 +935,29 @@
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/api/v2/websites/:id` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | GET | `/api/v2/websites/:id/config/:type` | apps/workmesh-server/node/api/website.go | required | database | present | - |
-| implemented | GET | `/api/v2/websites/:id/https` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| pending | GET | `/api/v2/websites/:id/lbs` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | GET | `/api/v2/websites/ca/:id` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | GET | `/api/v2/websites/cors/:id` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| partial | GET | `/api/v2/websites/:id/config/:type` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
+| partial | GET | `/api/v2/websites/:id/https` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
+| partial | GET | `/api/v2/websites/:id/lbs` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
+| partial | GET | `/api/v2/websites/ca/:id` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
+| partial | GET | `/api/v2/websites/cors/:id` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
 | pending | GET | `/api/v2/websites/databases` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | GET | `/api/v2/websites/default/html/:type` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| implemented | GET | `/api/v2/websites/domains/:websiteId` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| partial | GET | `/api/v2/websites/domains/:websiteId` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
 | implemented | GET | `/api/v2/websites/list` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| pending | GET | `/api/v2/websites/monitor/config/global` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | GET | `/api/v2/websites/proxy/config/:id` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | GET | `/api/v2/websites/realip/config/:id` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | GET | `/api/v2/websites/resource/:id` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | GET | `/api/v2/websites/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| partial | GET | `/api/v2/websites/proxy/config/:id` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
+| partial | GET | `/api/v2/websites/realip/config/:id` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
+| partial | GET | `/api/v2/websites/resource/:id` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
 | implemented | GET | `/api/v2/websites/rewrite/custom` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
-| implemented | GET | `/api/v2/websites/ssl/:id` | apps/workmesh-server/node/api/ssl.go | unknown | database | missing | - |
+| partial | GET | `/api/v2/websites/ssl/:id` | apps/workmesh-server/node/api/ssl.go | required | database | present | 检测到固定空列表响应 |
 | implemented | GET | `/api/v2/websites/ssl/website/:websiteId` | apps/workmesh-server/node/api/ssl.go | unknown | database | missing | - |
 | implemented | GET | `/api/v2/websites/waf/access-lists` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | GET | `/api/v2/websites/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | GET | `/api/v2/websites/waf/sites/:id/rules` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | GET | `/api/v2/websites/waf/standard-rules` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | GET | `/api/v2/websites/waf/status` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/websites` | apps/workmesh-server/node/api/host_container_cron.go | unknown | database | present | - |
-| implemented | POST | `/api/v2/websites/:id/https` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites` | apps/workmesh-server/node/api/ssl.go | unknown | database | present | - |
+| partial | POST | `/api/v2/websites/:id/https` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
 | pending | POST | `/api/v2/websites/acme/del` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/acme/search` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/acme/update` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
@@ -976,45 +976,45 @@
 | implemented | POST | `/api/v2/websites/check` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/config` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/config/update` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
-| pending | POST | `/api/v2/websites/cors/update` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/websites/cors/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | pending | POST | `/api/v2/websites/crosssite` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/databases` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/default/html/update` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/default/server` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/websites/default/html/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/default/server` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/del` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/dir` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/dir/permission` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/dir/update` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
-| pending | POST | `/api/v2/websites/dns/del` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/dns/search` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/dns/update` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| partial | POST | `/api/v2/websites/dns/del` | apps/workmesh-server/node/api/website.go | unknown | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/websites/dns/search` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/dns/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/domains` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/domains/del` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/domains/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | pending | POST | `/api/v2/websites/exec/composer` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/group/change` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/lbs/create` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/websites/lbs/create` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | pending | POST | `/api/v2/websites/lbs/del` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/lbs/file` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/lbs/update` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/websites/lbs/file` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/lbs/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/leech` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/leech/update` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | pending | POST | `/api/v2/websites/log/operate` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/log/search` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/monitor/config/global` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/monitor/config/site` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/monitor/config/site/update` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/websites/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/config/site` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/config/site/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | pending | POST | `/api/v2/websites/monitor/logs/clear` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/monitor/logs/detail` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/monitor/logs/search` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/monitor/logs/stat` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/monitor/qps` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/monitor/rank` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/monitor/stat` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/monitor/trend` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/monitor/visitors` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/monitor/visitors/loc` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/monitor/websites` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/websites/monitor/qps` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/rank` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/stat` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/trend` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/visitors` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/visitors/loc` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/websites` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/nginx/update` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/operate` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/options` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
@@ -1024,9 +1024,9 @@
 | pending | POST | `/api/v2/websites/proxies/file` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/proxies/status` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/proxies/update` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/proxy/clear` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/proxy/config` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/realip/config` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/websites/proxy/clear` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/proxy/config` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/websites/realip/config` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/websites/redirect` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/redirect/file` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/redirect/update` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
@@ -1045,7 +1045,7 @@
 | implemented | POST | `/api/v2/websites/ssl/update` | apps/workmesh-server/node/api/ssl.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/websites/ssl/upload` | apps/workmesh-server/node/api/ssl.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/websites/ssl/upload/file` | apps/workmesh-server/node/api/ssl.go | unknown | memory | missing | - |
-| pending | POST | `/api/v2/websites/stream/update` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/websites/stream/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | pending | POST | `/api/v2/websites/templates/del` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/templates/get` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
 | pending | POST | `/api/v2/websites/templates/outputs` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
@@ -1091,7 +1091,7 @@
 | implemented | GET | `/api/v2/xpack/monitor/status` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
 | implemented | GET | `/api/v2/xpack/waf/access-lists` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
 | implemented | GET | `/api/v2/xpack/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
-| implemented | GET | `/api/v2/xpack/waf/sites/:id/rules` | apps/workmesh-server/node/api/website.go | required | database | present | - |
+| partial | GET | `/api/v2/xpack/waf/sites/:id/rules` | apps/workmesh-server/node/api/website.go | required | database | present | 检测到固定空列表响应 |
 | implemented | GET | `/api/v2/xpack/waf/standard-rules` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | - |
 | implemented | GET | `/api/v2/xpack/waf/status` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | - |
 | implemented | POST | `/api/v2/xpack/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
@@ -1109,9 +1109,9 @@
 | implemented | POST | `/api/v2/xpack/monitor/visitors/loc` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
 | implemented | POST | `/api/v2/xpack/monitor/websites` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
 | implemented | POST | `/api/v2/xpack/waf/access-lists` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
-| implemented | POST | `/api/v2/xpack/waf/attack/stat` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/waf/attack/stat` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/xpack/waf/block/search` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/xpack/waf/global` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | - |
+| implemented | POST | `/api/v2/xpack/waf/global` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
 | implemented | POST | `/api/v2/xpack/waf/log/search` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/xpack/waf/relation/stat` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/xpack/waf/rules` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |

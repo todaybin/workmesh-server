@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/todaybin/workmesh-server/node/model"
 	"github.com/todaybin/workmesh-server/node/service"
@@ -27,6 +28,31 @@ func registerWebsiteFunctionalRoutes(mux *http.ServeMux) {
 
 // registerWebsiteAdvancedRoutes 注册站点运行、域名、HTTPS 和配置管理接口。
 func registerWebsiteAdvancedRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
+	// 网站监控契约映射到统一 analytics 采集器，配置与查询均使用同一持久化状态源。
+	for _, item := range []struct{ path, target string }{
+		{"/api/v2/websites/monitor/config/global", "/api/v2/global"},
+		{"/api/v2/websites/monitor/config/site", "/api/v2/config/site"},
+		{"/api/v2/websites/monitor/config/site/update", "/api/v2/config/site/update"},
+		{"/api/v2/websites/monitor/qps", "/api/v2/qps"},
+		{"/api/v2/websites/monitor/rank", "/api/v2/rank"},
+		{"/api/v2/websites/monitor/stat", "/api/v2/stat"},
+		{"/api/v2/websites/monitor/trend", "/api/v2/trend"},
+		{"/api/v2/websites/monitor/visitors", "/api/v2/visitors"},
+		{"/api/v2/websites/monitor/visitors/loc", "/api/v2/visitors/loc"},
+		{"/api/v2/websites/monitor/websites", "/api/v2/rank"},
+	} {
+		target := item.target
+		mux.HandleFunc("POST "+item.path, func(w http.ResponseWriter, r *http.Request) {
+			clone := r.Clone(r.Context())
+			clone.URL.Path = target
+			analyticsHandler(w, clone)
+		})
+	}
+	mux.HandleFunc("GET /api/v2/websites/monitor/config/global", func(w http.ResponseWriter, r *http.Request) {
+		clone := r.Clone(r.Context())
+		clone.URL.Path = "/api/v2/global"
+		analyticsHandler(w, clone)
+	})
 	mux.HandleFunc("POST /api/v2/websites/operate", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			ID        uint   `json:"id"`
@@ -100,6 +126,24 @@ func registerDomainRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 	mux.HandleFunc("GET /api/v2/websites/{first}/{second}", func(w http.ResponseWriter, r *http.Request) {
 		if r.PathValue("first") == "domains" {
 			list(w, r)
+			return
+		}
+		if r.PathValue("first") == "cors" {
+			id, err := parseID(r.PathValue("second"))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			cfg, err := svc.GetConfig(id, "cors")
+			if errors.Is(err, os.ErrNotExist) {
+				writeError(w, http.StatusNotFound, err)
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": cfg})
 			return
 		}
 		if r.PathValue("second") == "https" {
@@ -199,6 +243,92 @@ func registerWebsiteConfigRoutes(mux *http.ServeMux, svc *service.WebsiteService
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
 	}
 	mux.HandleFunc("GET /api/v2/websites/{id}/config/{type}", get)
+	// 为旧客户端保留的专用配置查询路由，均读取 WebsiteService 持久化配置。
+	for _, item := range []struct {
+		path string
+		typ  string
+	}{
+		{"/api/v2/websites/proxy/config/{id}", "proxy"},
+		{"/api/v2/websites/realip/config/{id}", "realip"},
+	} {
+		typ := item.typ
+		mux.HandleFunc("GET "+item.path, func(w http.ResponseWriter, r *http.Request) {
+			id, err := parseID(r.PathValue("id"))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			cfg, err := svc.GetConfig(id, typ)
+			if errors.Is(err, os.ErrNotExist) {
+				writeError(w, http.StatusNotFound, err)
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": cfg})
+		})
+	}
+	// DNS/CORS/LBS/代理等站点配置写操作统一落入带类型隔离的持久化配置存储。
+	for _, item := range []struct{ path, typ string }{
+		{"/api/v2/websites/cors/update", "cors"},
+		{"/api/v2/websites/dns/update", "dns"},
+		{"/api/v2/websites/lbs/create", "lbs"},
+		{"/api/v2/websites/lbs/update", "lbs"},
+		{"/api/v2/websites/lbs/file", "lbs-file"},
+		{"/api/v2/websites/proxy/clear", "proxy"},
+		{"/api/v2/websites/stream/update", "stream"},
+		{"/api/v2/websites/default/server", "default-server"},
+		{"/api/v2/websites/default/html/update", "default-html"},
+	} {
+		typ := item.typ
+		mux.HandleFunc("POST "+item.path, func(w http.ResponseWriter, r *http.Request) {
+			websiteConfigWriteType(svc, typ, w, r)
+		})
+	}
+	mux.HandleFunc("POST /api/v2/websites/dns/search", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			WebsiteID uint `json:"websiteID"`
+			WebsiteId uint `json:"websiteId"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if in.WebsiteID == 0 {
+			in.WebsiteID = in.WebsiteId
+		}
+		cfg, err := svc.GetConfig(in.WebsiteID, "dns")
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": cfg})
+	})
+	mux.HandleFunc("POST /api/v2/websites/dns/del", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			WebsiteID uint `json:"websiteID"`
+			WebsiteId uint `json:"websiteId"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if in.WebsiteID == 0 {
+			in.WebsiteID = in.WebsiteId
+		}
+		_, err := svc.UpdateConfig(in.WebsiteID, "dns", map[string]any{"records": []any{}, "deleted": true, "updatedAt": time.Now().UTC()})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200})
+	})
 	mux.HandleFunc("POST /api/v2/websites/config", func(w http.ResponseWriter, r *http.Request) { websiteConfigWrite(svc, w, r) })
 	mux.HandleFunc("POST /api/v2/websites/config/update", func(w http.ResponseWriter, r *http.Request) { websiteConfigWrite(svc, w, r) })
 	mux.HandleFunc("POST /api/v2/websites/nginx/update", func(w http.ResponseWriter, r *http.Request) { websiteConfigWrite(svc, w, r) })

@@ -284,8 +284,12 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/dashboard/current/{ioOption}/{netOption}", handleDashboardCurrent)
 	mux.HandleFunc("POST /api/v2/dashboard/system/restart/{operation}", handleDashboardRestart)
 	mux.HandleFunc("POST /api/v2/files", handleFilesCreate)
-	// 尚未接入专用处理器的网站子路径统一走兼容入口；更具体路由会优先匹配。
-	mux.HandleFunc("/api/v2/websites/{rest...}", websiteFallbackHandler)
+	/*
+		// 尚未接入专用处理器的网站子路径统一走兼容入口；更具体路由会优先匹配。
+		mux.HandleFunc("/api/v2/websites/{rest...}", websiteFallbackHandler)
+		// 网站接口由 website.go 中的专用处理器注册；不再注册无界总兜底。
+		// 网站接口由 website.go 中的专用处理器注册；不再注册无界总兜底。
+	*/
 	registerContainerRoutes(mux)
 	registerHostRoutes(mux)
 	registerAIExecutionRoutes(mux)

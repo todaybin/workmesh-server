@@ -20,6 +20,15 @@
 
 # WorkMesh 功能迁移清单
 
+## 2026-08-30 网站配置别名批次
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 网站 HTTPS/LBS/CORS 配置查询 | `apps/workmesh-node/agent/router/ro_website.go` | `GET /api/v2/websites/:id/https`, `GET /api/v2/websites/:id/lbs`, `GET /api/v2/websites/cors/:id` | `node/api/website.go:registerDomainRoutes/registerWebsiteConfigRoutes` | GET 双段动态分发 | 节点会话 | WebsiteService 配置 | `website-configs.json` 原子保存 | `node/api/website_test.go` | `go test ./node/api -run Website` | 待双节点部署 | implemented | 无 |
+| 网站代理与真实 IP 配置查询 | `apps/workmesh-node/agent/router/ro_website.go` | `GET /api/v2/websites/proxy/config/:id`, `GET /api/v2/websites/realip/config/:id` | `node/api/website.go:registerWebsiteConfigRoutes` | GET 指定配置 | 节点会话 | WebsiteService 配置 | `website-configs.json` | `node/api/website_test.go` | `go test ./node/api -run WebsiteConfigAliases` | 待双节点部署 | implemented | 无 |
+| 网站 DNS/CORS/LBS/代理/流配置更新 | `apps/workmesh-node/agent/router/ro_website.go` | `POST /api/v2/websites/dns/update`, `/cors/update`, `/lbs/create`, `/lbs/update`, `/lbs/file`, `/proxy/clear`, `/stream/update` | `node/api/website.go:registerWebsiteAdvancedRoutes` | POST 配置写入 | 节点会话、资源归属校验 | 请求 JSON | `website-configs.json` 按类型隔离 | `node/api/website_test.go:TestWebsiteConfigAliasesPersist` | `go test ./node/api -run WebsiteConfigAliases` | 待双节点部署 | implemented | DNS 记录解析器待后续增强 |
+| 网站 DNS 查询与删除 | `apps/workmesh-node/agent/router/ro_website.go` | `POST /api/v2/websites/dns/search`, `/dns/del` | `node/api/website.go:registerWebsiteAdvancedRoutes` | POST | 节点会话、网站 ID 校验 | WebsiteService 配置 | `website-configs.json` | `node/api/website_test.go` | `go test ./node/api -run WebsiteConfigAliases` | 待双节点部署 | implemented | 删除采用标记并保留审计字段 |
+| 网站监控配置与统计别名 | `apps/workmesh-node/agent/router/ro_website.go` | `GET/POST /api/v2/websites/monitor/config/*`, `/monitor/{stat,qps,rank,trend,visitors}` | `node/api/website.go:registerWebsiteAdvancedRoutes`、`node/api/analytics.go` | GET/POST | 节点会话 | analytics 状态采集 | `domains.json` 设置区 | `node/api/website_test.go:TestWebsiteConfigAliasesPersist` | `go test ./node/api -run WebsiteConfigAliases` | 待双节点部署 | implemented | 统计采集器接入真实访问日志后增强 |
+
 本清单以旧 `apps/workmesh-node/core` 与 `agent` 的 863 条路由为基线（含隐藏 helper 注册和去品牌化静态入口）。状态必须以真实副作用或端到端响应确认，不能仅以路由注册作为完成依据。
 
 非路由的初始化、后台作业、中间件、国际化、日志、任务和协议升级能力见 [`hidden-function-checklist.md`](./hidden-function-checklist.md)，两份清单必须同步维护。

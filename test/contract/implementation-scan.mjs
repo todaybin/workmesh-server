@@ -177,13 +177,26 @@ function findImplementations(route, sources) {
         break;
       }
     }
+    // 网站旧契约的 domains/:id、:id/https、cors/:id 共用一个两段动态分发器；
+    // 将该真实分发器视为对应具体路由的实现，避免 ServeMux 重叠模式被迫拆成冲突注册。
+    if (route.path.startsWith('/api/v2/websites/') && route.path.split('/').length === 6 &&
+        text.includes('GET /api/v2/websites/{first}/{second}')) {
+      prefixMatch = route.method.toUpperCase() === 'GET';
+    }
     if (literal || plainLiteral || routeRe.test(text) || prefixMatch) matches.push(source);
   }
   return matches;
 }
 
 function inspectRoute(route, sources) {
-  const matches = findImplementations(route, sources);
+  // 扫描前剥离注释，避免被注释掉的旧路由或迁移说明误判为运行时实现。
+  const scanSources = sources.map((source) => ({
+    ...source,
+    text: source.text
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|\s)\/\/.*$/gm, '$1'),
+  }));
+  const matches = findImplementations(route, scanSources);
   const markers = new Set();
   const evidence = [];
   let best = matches[0];
@@ -216,7 +229,7 @@ function inspectRoute(route, sources) {
   const hasCompatibility = concrete.some(({ source, context }) => /compatibilityHandler/.test(context) || source.relative.endsWith('compatibility.go'));
   // 路由数组常通过循环注册，源码中不会出现 HandleFunc("GET /path") 的直接形式。
   // 只要非测试、非兼容文件包含精确路径且未声明迁移占位，即视为有具体注册证据。
-  const arrayRegistration = sources.some((source) => !source.isTest && !source.relative.endsWith('legacy_routes.go') && !source.relative.endsWith('compatibility.go') && source.text.includes(route.path) && !source.text.includes('MIGRATION_PENDING'));
+  const arrayRegistration = scanSources.some((source) => !source.isTest && !source.relative.endsWith('legacy_routes.go') && !source.relative.endsWith('compatibility.go') && source.text.includes(route.path) && !source.text.includes('MIGRATION_PENDING'));
   const hasConcrete = (concrete.length > 0 || arrayRegistration) && !hasCompatibility;
   best = concrete[0]?.source ?? best;
   let status = 'missing';
