@@ -17,6 +17,8 @@ go run ./cmd/workmesh-server
 
 默认监听 `:9999`。可通过 `WORKMESH_SERVER_ADDR`、`WORKMESH_DATA_DIR`、`WORKMESH_NODE_ID`、`WORKMESH_NODE_ROLE`、`WORKMESH_GATEWAY_URL`、`WORKMESH_GATEWAY_ID`、`WORKMESH_GATEWAY_SECRET`、`WORKMESH_GATEWAY_USERNAME` 和 `WORKMESH_GATEWAY_PASSWORD` 配置。Gateway 用户名和密码仅用于启动时换取短期 JWT，不写入日志或响应。首次运行会在数据目录写入节点状态文件，敏感凭据不得写入日志或普通配置。
 
+任务隔离执行需要额外配置已签名的运行时 CLI：`WORKMESH_TASK_CLI`（绝对路径）、`WORKMESH_TASK_CLI_SHA256`（CLI 文件的 64 位小写 SHA256 摘要）和可选的 `WORKMESH_TASK_TOKEN`（节点写操作令牌）。服务启动后按摘要缓存 Provider，HTTP 请求只能提交固定的 `task` 操作和 `argv` 参数，不经过 Shell；缺少 CLI 或摘要、摘要校验失败时，`/api/v2/workmesh/tasks/*` 返回 `503 TASK_PROVIDER_UNAVAILABLE`，不会伪造任务成功，也不会回退到宿主命令执行。任务工作区还必须位于 `WORKMESH_AGENT_WORKSPACE_ROOT`（如配置）范围内，且镜像必须使用固定 `sha256:` 摘要。
+
 ## 验证
 
 ```powershell
