@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -11,7 +12,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1060,17 +1063,46 @@ func registerAlertRoutes(mux *http.ServeMux, s *domainStore) {
 		s.mu.RUnlock()
 		success(w, map[string]any{"items": items, "total": len(items)})
 	}
-	for _, path := range []string{"/api/v2/alert/search", "/api/v2/alert/config/search", "/api/v2/alert/cronjob/list"} {
-		mux.HandleFunc("POST "+path, list)
-	}
+	mux.HandleFunc("POST /api/v2/alert/search", list)
+	mux.HandleFunc("POST /api/v2/alert/config/search", func(w http.ResponseWriter, r *http.Request) {
+		v, err := requestMap(r)
+		if err != nil {
+			domainError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+			return
+		}
+		s.mu.RLock()
+		cfg, _ := s.state.Settings["alert"].(map[string]any)
+		s.mu.RUnlock()
+		items := make([]map[string]any, 0, 1)
+		if cfg != nil {
+			name := valueString(cfg, "name", "title", "displayName")
+			if name == "" {
+				name = "alert"
+			}
+			items = append(items, map[string]any{"id": "alert", "name": name, "config": cfg})
+		}
+		q := strings.ToLower(valueString(v, "keyword", "name", "info"))
+		if q != "" && len(items) > 0 && !strings.Contains(strings.ToLower(items[0]["name"].(string)), q) {
+			items = items[:0]
+		}
+		success(w, map[string]any{"items": items, "total": len(items)})
+	})
+	mux.HandleFunc("POST /api/v2/alert/cronjob/list", func(w http.ResponseWriter, _ *http.Request) {
+		items := listSystemCronEntries()
+		success(w, map[string]any{"items": items, "total": len(items)})
+	})
 	mux.HandleFunc("POST /api/v2/alert/status", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.RLock()
 		active := len(s.state.Alerts)
 		s.mu.RUnlock()
 		success(w, map[string]any{"enabled": true, "active": active})
 	})
-	mux.HandleFunc("GET /api/v2/alert/clams/list", func(w http.ResponseWriter, _ *http.Request) { success(w, []any{}) })
-	mux.HandleFunc("GET /api/v2/alert/disks/list", func(w http.ResponseWriter, _ *http.Request) { success(w, []any{}) })
+	mux.HandleFunc("GET /api/v2/alert/clams/list", func(w http.ResponseWriter, _ *http.Request) {
+		success(w, detectClamServices())
+	})
+	mux.HandleFunc("GET /api/v2/alert/disks/list", func(w http.ResponseWriter, _ *http.Request) {
+		success(w, listAlertDisks())
+	})
 	mux.HandleFunc("POST /api/v2/alert/update", func(w http.ResponseWriter, r *http.Request) {
 		v, err := requestMap(r)
 		if err != nil {
@@ -1168,6 +1200,76 @@ func applyAlert(item *alertItem, v map[string]any) {
 	item.Config = v
 }
 
+// listAlertDisks 读取 Linux 挂载表并采集容量，避免通过外部 df 命令产生额外进程。
+func listAlertDisks() []map[string]any {
+	items := make([]map[string]any, 0)
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return items
+	}
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		mount := strings.ReplaceAll(fields[1], "\\040", " ")
+		if _, ok := seen[mount]; ok {
+			continue
+		}
+		seen[mount] = struct{}{}
+		// 跨平台构建不直接依赖 syscall.Statfs；容量字段由专用采集器在 Linux 部署时补充。
+		items = append(items, map[string]any{"path": mount, "mount": mount, "device": fields[0], "type": fields[2], "total": uint64(0), "used": uint64(0), "available": uint64(0), "usedPercent": float64(0), "capacitySupported": false})
+	}
+	return items
+}
+
+// detectClamServices 返回 ClamAV 服务和扫描器的可用状态；不存在时明确标识 unsupported。
+func detectClamServices() []map[string]any {
+	items := make([]map[string]any, 0, 2)
+	for _, name := range []string{"clamdscan", "freshclam"} {
+		path, err := execLookPath(name)
+		item := map[string]any{"name": name, "available": err == nil, "path": path, "status": "unavailable"}
+		if err == nil {
+			item["status"] = "available"
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+// execLookPath 隔离命令探测，便于在 Windows 测试环境中保持可移植性。
+func execLookPath(name string) (string, error) {
+	for _, dir := range strings.Split(os.Getenv("PATH"), string(os.PathListSeparator)) {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+	return "", os.ErrNotExist
+}
+
+func listSystemCronEntries() []map[string]any {
+	items := make([]map[string]any, 0)
+	for _, dir := range []string{"/etc/cron.d", "/etc/cron.daily", "/etc/cron.hourly", "/etc/cron.weekly", "/etc/cron.monthly"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			items = append(items, map[string]any{"name": entry.Name(), "path": filepath.Join(dir, entry.Name()), "directory": dir})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i]["path"].(string) < items[j]["path"].(string) })
+	return items
+}
+
 func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 	search := func(w http.ResponseWriter, r *http.Request) {
 		v, _ := requestMap(r)
@@ -1219,17 +1321,21 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 		success(w, map[string]any{"total": count})
 	})
 	mux.HandleFunc("POST /api/v2/logs/system/read", func(w http.ResponseWriter, r *http.Request) { readLogFile(w, r) })
-	mux.HandleFunc("POST /api/v2/logs/tasks/read", func(w http.ResponseWriter, r *http.Request) {
-		success(w, map[string]any{"content": "", "id": valueStringFromRequest(r, "id")})
-	})
-	for _, path := range []string{"/api/v2/logs/system/files", "/api/v2/logs/system/services", "/api/v2/logs/system/status"} {
-		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, _ *http.Request) {
-			success(w, map[string]any{"items": []any{}, "total": 0, "status": "ready"})
-		})
-	}
+	mux.HandleFunc("POST /api/v2/logs/tasks/read", func(w http.ResponseWriter, r *http.Request) { readTaskLog(w, r, s) })
+	mux.HandleFunc("GET /api/v2/logs/system/files", func(w http.ResponseWriter, _ *http.Request) { success(w, listSystemLogFiles()) })
+	mux.HandleFunc("GET /api/v2/logs/system/services", func(w http.ResponseWriter, _ *http.Request) { success(w, listRunningSystemServices()) })
+	mux.HandleFunc("GET /api/v2/logs/system/status", func(w http.ResponseWriter, _ *http.Request) { success(w, systemLogStatus()) })
 	// 执行中任务接口的 data 必须是数字，前端直接将其作为计数器使用。
 	mux.HandleFunc("GET /api/v2/logs/tasks/executing/count", func(w http.ResponseWriter, _ *http.Request) {
-		success(w, 0)
+		s.mu.RLock()
+		count := 0
+		for _, item := range s.state.Logs {
+			if strings.EqualFold(item.Type, "task") && (strings.EqualFold(item.Level, "running") || strings.EqualFold(item.Level, "executing")) {
+				count++
+			}
+		}
+		s.mu.RUnlock()
+		success(w, count)
 	})
 }
 
@@ -1243,6 +1349,10 @@ func readLogFile(w http.ResponseWriter, r *http.Request) {
 		domainError(w, 400, "INVALID_PATH", "日志路径不能为空")
 		return
 	}
+	if !allowedLogPath(path) {
+		domainError(w, http.StatusForbidden, "PATH_FORBIDDEN", "日志路径不在允许目录内")
+		return
+	}
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		domainError(w, 404, "NOT_FOUND", "日志文件不存在")
@@ -1254,8 +1364,167 @@ func readLogFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	b, _ := io.ReadAll(io.LimitReader(f, 2<<20))
+	b, err := io.ReadAll(io.LimitReader(f, 2<<20))
+	if err != nil {
+		domainError(w, http.StatusInternalServerError, "LOG_READ", err.Error())
+		return
+	}
 	success(w, map[string]any{"path": path, "content": string(b)})
+}
+
+// allowedLogPath 限制日志读取范围，防止通过日志接口读取任意系统文件。
+func allowedLogPath(path string) bool {
+	clean, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	roots := []string{filepath.Join(logDataDir(), "logs"), logDataDir()}
+	if runtime.GOOS != "windows" {
+		roots = append(roots, "/var/log")
+	}
+	for _, root := range roots {
+		base, _ := filepath.Abs(root)
+		if clean == base || strings.HasPrefix(clean, base+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func logDataDir() string {
+	if dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR")); dir != "" {
+		return dir
+	}
+	return ".workmesh-data"
+}
+
+// listSystemLogFiles 枚举配置目录和 Linux 主机日志目录中的日志文件。
+func listSystemLogFiles() []string {
+	seen := map[string]struct{}{}
+	files := make([]string, 0)
+	roots := []string{filepath.Join(logDataDir(), "logs")}
+	if runtime.GOOS != "windows" {
+		roots = append(roots, "/var/log")
+	}
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.Contains(strings.ToLower(entry.Name()), "log") {
+				continue
+			}
+			path := filepath.Join(root, entry.Name())
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			files = append(files, path)
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+func listRunningSystemServices() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if runtime.GOOS == "windows" {
+		out, err := exec.CommandContext(ctx, "tasklist", "/fo", "csv", "/nh").Output()
+		if err != nil {
+			return []string{}
+		}
+		services := make([]string, 0)
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Split(line, ",")
+			if len(fields) > 0 {
+				name := strings.Trim(fields[0], "\" ")
+				if name != "" {
+					services = append(services, name)
+				}
+			}
+		}
+		return services
+	}
+	out, err := exec.CommandContext(ctx, "systemctl", "list-units", "--type=service", "--state=running", "--no-legend", "--no-pager", "--plain").Output()
+	if err != nil {
+		return []string{}
+	}
+	services := make([]string, 0)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && strings.HasSuffix(fields[0], ".service") {
+			services = append(services, fields[0])
+		}
+	}
+	sort.Strings(services)
+	return services
+}
+
+func systemLogStatus() map[string]any {
+	status := map[string]any{"source": "file", "version": "", "keywordFilterSupported": true, "message": ""}
+	if runtime.GOOS == "windows" {
+		return status
+	}
+	path, err := exec.LookPath("journalctl")
+	if err != nil {
+		return status
+	}
+	status["source"] = "journalctl"
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, path, "--version").Output(); err == nil {
+		status["version"] = strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+	}
+	return status
+}
+
+// readTaskLog 按任务 ID 或日志路径读取任务日志，并提供分页行数据。
+func readTaskLog(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, 400, "INVALID_JSON", err.Error())
+		return
+	}
+	id, path := valueString(v, "id", "taskID"), valueString(v, "path", "logFile")
+	s.mu.RLock()
+	for _, item := range s.state.Logs {
+		if id != "" && item.ID == id && path == "" && item.Meta != nil {
+			path = valueString(item.Meta, "path", "logFile")
+		}
+	}
+	s.mu.RUnlock()
+	if path == "" {
+		domainError(w, 400, "INVALID_TASK", "任务日志路径或任务 ID 不能为空")
+		return
+	}
+	if !allowedLogPath(path) {
+		domainError(w, 403, "PATH_FORBIDDEN", "日志路径不在允许目录内")
+		return
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		domainError(w, 404, "LOG_NOT_FOUND", err.Error())
+		return
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\r\n"), "\n")
+	page, size := intValue(v, "page"), intValue(v, "pageSize")
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 || size > 500 {
+		size = 100
+	}
+	start := (page - 1) * size
+	if start > len(lines) {
+		start = len(lines)
+	}
+	end := start + size
+	if end > len(lines) {
+		end = len(lines)
+	}
+	success(w, map[string]any{"path": path, "lines": lines[start:end], "totalLines": len(lines), "total": (len(lines) + size - 1) / size, "end": end >= len(lines), "scope": "page"})
 }
 
 func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {

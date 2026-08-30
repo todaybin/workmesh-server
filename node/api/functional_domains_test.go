@@ -92,6 +92,51 @@ func TestFunctionalLogValidation(t *testing.T) {
 	}
 }
 
+func TestAlertDiskAndClamDiscovery(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerBackupAlertLogSettingsRoutes(mux)
+	for _, path := range []string{"/api/v2/alert/disks/list", "/api/v2/alert/clams/list"} {
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", path, res.Code)
+		}
+		var envelope struct {
+			Code int              `json:"code"`
+			Data []map[string]any `json:"data"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.Code != 200 || envelope.Data == nil {
+			t.Fatalf("%s returned invalid data: %#v", path, envelope)
+		}
+	}
+}
+
+func TestAlertConfigSearchAndCronListAreDynamic(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerBackupAlertLogSettingsRoutes(mux)
+	update := httptest.NewRequest(http.MethodPost, "/api/v2/alert/config/update", bytes.NewBufferString(`{"name":"mail"}`))
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, update)
+	if res.Code != http.StatusOK {
+		t.Fatalf("config update status = %d", res.Code)
+	}
+	search := httptest.NewRecorder()
+	mux.ServeHTTP(search, httptest.NewRequest(http.MethodPost, "/api/v2/alert/config/search", bytes.NewBufferString(`{"keyword":"mail"}`)))
+	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), "mail") {
+		t.Fatalf("config search did not return persisted config: %s", search.Body.String())
+	}
+	cron := httptest.NewRecorder()
+	mux.ServeHTTP(cron, httptest.NewRequest(http.MethodPost, "/api/v2/alert/cronjob/list", nil))
+	if cron.Code != http.StatusOK || !strings.Contains(cron.Body.String(), `"code":200`) {
+		t.Fatalf("cron list failed: %s", cron.Body.String())
+	}
+}
+
 // TestBackupAccountAndRecordLifecycle 覆盖账号、记录、上传和恢复的端到端最小闭环。
 func TestBackupAccountAndRecordLifecycle(t *testing.T) {
 	dataDir := t.TempDir()
