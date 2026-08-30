@@ -1,6 +1,7 @@
 <template>
     <LayoutContent :title="$t('menu.multiNode')" v-loading="loading">
         <template #rightToolBar>
+            <el-button type="primary" :icon="Plus" @click="openAddDialog">添加节点</el-button>
             <TableRefresh @search="loadNodes" />
         </template>
         <template #main>
@@ -84,10 +85,39 @@
             </el-tabs>
         </template>
     </LayoutContent>
+    <el-dialog v-model="addVisible" title="添加部署节点" width="520px" destroy-on-close>
+        <el-form ref="formRef" :model="form" :rules="rules" label-width="96px">
+            <el-form-item label="节点 ID" prop="nodeId">
+                <el-input v-model="form.nodeId" autocomplete="off" placeholder="例如 node-secondary" />
+            </el-form-item>
+            <el-form-item label="节点名称" prop="name">
+                <el-input v-model="form.name" autocomplete="off" placeholder="可选" />
+            </el-form-item>
+            <el-form-item label="服务地址" prop="addr">
+                <el-input v-model="form.addr" autocomplete="url" placeholder="http://host:9999" />
+            </el-form-item>
+            <el-form-item label="节点角色" prop="role">
+                <el-select v-model="form.role" class="w-full">
+                    <el-option label="主节点" value="primary" />
+                    <el-option label="次节点" value="secondary" />
+                </el-select>
+            </el-form-item>
+            <el-form-item label="描述" prop="description">
+                <el-input v-model="form.description" type="textarea" :rows="2" maxlength="200" show-word-limit />
+            </el-form-item>
+        </el-form>
+        <template #footer>
+            <el-button @click="addVisible = false">取消</el-button>
+            <el-button type="primary" :loading="saving" @click="submitAdd">保存</el-button>
+        </template>
+    </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
+import { ElMessage } from 'element-plus';
+import { Plus } from '@element-plus/icons-vue';
+import { addNode } from '@/api/modules/setting';
 import { listNodes } from '@/utils/node';
 import { useGlobalStore } from '@/composables/useGlobalStore';
 
@@ -95,6 +125,18 @@ const { globalStore, currentNode } = useGlobalStore();
 const loading = ref(false);
 const nodes = ref<any[]>([]);
 const activeTab = ref('dashboard');
+const addVisible = ref(false);
+const saving = ref(false);
+const formRef = ref();
+const form = reactive({ nodeId: '', name: '', addr: '', role: 'secondary' as 'primary' | 'secondary', description: '' });
+const rules = {
+    nodeId: [{ required: true, message: '请输入节点 ID', trigger: 'blur' }],
+    addr: [
+        { required: true, message: '请输入节点服务地址', trigger: 'blur' },
+        { pattern: /^https?:\/\/[^\s/]+(?::\d{1,5})?\/?$/, message: '请输入有效的 HTTP(S) 地址', trigger: 'blur' },
+    ],
+    role: [{ required: true, message: '请选择节点角色', trigger: 'change' }],
+};
 const isOnline = (node: any) =>
     ['online', 'Online', '正常', 'running', 'active'].includes(node.status) ||
     node.status === 1 ||
@@ -116,4 +158,27 @@ const selectNode = (node: { name: string; addr: string }) => {
 };
 
 onMounted(loadNodes);
+
+const openAddDialog = () => {
+    form.nodeId = '';
+    form.name = '';
+    form.addr = '';
+    form.role = 'secondary';
+    form.description = '';
+    addVisible.value = true;
+};
+
+const submitAdd = async () => {
+    const valid = await formRef.value?.validate().catch(() => false);
+    if (!valid) return;
+    saving.value = true;
+    try {
+        await addNode({ ...form });
+        ElMessage.success('节点已添加');
+        addVisible.value = false;
+        await loadNodes();
+    } finally {
+        saving.value = false;
+    }
+};
 </script>

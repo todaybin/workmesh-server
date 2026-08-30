@@ -15,6 +15,9 @@ export const updateNodeFavorite = (id: number, isFavorite: boolean) => {
 export const listAllSimpleNodes = () => {
     return http.get<Array<Setting.SimpleNodeItem>>(`/core/nodes/simple/all`);
 };
+export const addNode = (param: Setting.NodeCreate) => {
+    return http.post<Setting.NodeItem>(`/core/nodes/add`, param);
+};
 // agent
 export const loadBaseDir = (node?: string) => {
     const query = node ? `?operateNode=${node}` : '';

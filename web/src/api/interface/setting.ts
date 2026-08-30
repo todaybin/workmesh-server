@@ -275,6 +275,13 @@ export namespace Setting {
         isFavorite?: boolean;
         name: string;
     }
+    export interface NodeCreate {
+        nodeId: string;
+        name?: string;
+        addr: string;
+        role: 'primary' | 'secondary';
+        description?: string;
+    }
     export interface SimpleNodeItem {
         id: number;
         name: string;
