@@ -26,6 +26,8 @@ import (
 // CronjobService 保存计划任务定义并提供调度、执行和记录能力。
 type CronjobService struct {
 	mu       sync.RWMutex
+	startMu  sync.Mutex
+	started  bool
 	items    map[string]model.Cronjob
 	cmd      CommandService
 	records  map[string][]model.CommandResult
@@ -360,7 +362,19 @@ func executeDirectoryBackup(ctx context.Context, source string) (model.CommandRe
 
 // Start 启动单实例计划任务轮询器，服务重启后会从持久化任务状态继续运行。
 func (s *CronjobService) Start(parent context.Context) {
+	s.startMu.Lock()
+	if s.started {
+		s.startMu.Unlock()
+		return
+	}
+	s.started = true
+	s.startMu.Unlock()
 	go func() {
+		defer func() {
+			s.startMu.Lock()
+			s.started = false
+			s.startMu.Unlock()
+		}()
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		s.runDue(parent)

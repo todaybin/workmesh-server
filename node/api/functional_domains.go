@@ -894,8 +894,12 @@ func handleBackupUpload(w http.ResponseWriter, r *http.Request, _ *domainStore) 
 }
 
 func handleBackupBuckets(w http.ResponseWriter, r *http.Request, s *domainStore) {
-	v, _ := requestMap(r)
-	typ := valueString(v, "type")
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+		return
+	}
+	typ := strings.ToLower(valueString(v, "type"))
 	if typ == "local" || typ == "" {
 		entries, _ := os.ReadDir(backupDataDir())
 		buckets := make([]map[string]any, 0)
@@ -907,8 +911,112 @@ func handleBackupBuckets(w http.ResponseWriter, r *http.Request, s *domainStore)
 		success(w, buckets)
 		return
 	}
-	// 云端 Bucket 必须通过账号提供商 API 获取；未配置端点时不能以空列表冒充成功。
-	domainError(w, http.StatusServiceUnavailable, "BACKUP_PROVIDER_UNAVAILABLE", "备份提供商未配置 Bucket 查询端点")
+	id, name := valueID(v, "id", "accountId"), valueString(v, "name", "accountName")
+	s.mu.RLock()
+	account := findBackupAccount(s.state.BackupAccounts, id, name)
+	if account == nil {
+		s.mu.RUnlock()
+		if id == "" && name == "" {
+			domainError(w, http.StatusServiceUnavailable, "BACKUP_PROVIDER_UNAVAILABLE", "备份账号未配置 Bucket 查询端点")
+			return
+		}
+		domainError(w, http.StatusNotFound, "NOT_FOUND", "备份账号不存在")
+		return
+	}
+	accountCopy := *account
+	s.mu.RUnlock()
+	var vars map[string]any
+	if err := json.Unmarshal([]byte(accountCopy.Vars), &vars); err != nil || vars == nil {
+		vars = map[string]any{}
+	}
+	endpoint := valueString(vars, "buckets_url", "bucket_url", "endpoint")
+	if endpoint == "" {
+		domainError(w, http.StatusServiceUnavailable, "BACKUP_PROVIDER_UNAVAILABLE", "备份账号未配置 Bucket 查询端点")
+		return
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.RawQuery != "" {
+		domainError(w, http.StatusBadRequest, "BACKUP_PROVIDER_URL_INVALID", "Bucket 查询端点必须是无查询凭据的 HTTP(S) 地址")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		domainError(w, http.StatusBadRequest, "BACKUP_PROVIDER_REQUEST", err.Error())
+		return
+	}
+	if token := valueString(vars, "access_token", "token"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		domainError(w, http.StatusBadGateway, "BACKUP_PROVIDER_FAILED", fmt.Sprintf("Bucket 查询失败: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		domainError(w, http.StatusBadGateway, "BACKUP_PROVIDER_READ", err.Error())
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		domainError(w, http.StatusBadGateway, "BACKUP_PROVIDER_FAILED", fmt.Sprintf("Bucket 端点返回 HTTP %d", resp.StatusCode))
+		return
+	}
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		domainError(w, http.StatusBadGateway, "BACKUP_PROVIDER_RESPONSE_INVALID", "Bucket 端点返回的 JSON 无效")
+		return
+	}
+	items := normalizeBuckets(payload, typ)
+	if items == nil {
+		domainError(w, http.StatusBadGateway, "BACKUP_PROVIDER_RESPONSE_INVALID", "Bucket 端点未返回列表")
+		return
+	}
+	success(w, items)
+}
+
+// normalizeBuckets 将常见云厂商列表响应转换为统一 DTO；不接受无限制嵌套结构。
+func normalizeBuckets(payload any, typ string) []map[string]any {
+	var raw []any
+	switch value := payload.(type) {
+	case []any:
+		raw = value
+	case map[string]any:
+		for _, key := range []string{"buckets", "items", "data"} {
+			if list, ok := value[key].([]any); ok {
+				raw = list
+				break
+			}
+		}
+	default:
+		return nil
+	}
+	if len(raw) > 500 {
+		raw = raw[:500]
+	}
+	items := make([]map[string]any, 0, len(raw))
+	for _, entry := range raw {
+		if text, ok := entry.(string); ok && strings.TrimSpace(text) != "" {
+			items = append(items, map[string]any{"name": strings.TrimSpace(text), "type": typ})
+			continue
+		}
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := valueString(obj, "name", "bucket", "id")
+		if name == "" {
+			continue
+		}
+		item := map[string]any{"name": name, "type": typ}
+		if region := valueString(obj, "region", "location"); region != "" {
+			item["region"] = region
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func handleBackupConnCheck(w http.ResponseWriter, r *http.Request, s *domainStore) {

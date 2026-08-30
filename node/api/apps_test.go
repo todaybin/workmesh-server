@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -31,6 +32,29 @@ func TestAppInstallAndList(t *testing.T) {
 	mux.ServeHTTP(list, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/search", nil))
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "demo") {
 		t.Fatalf("list body=%s", list.Body.String())
+	}
+}
+
+func TestAppInstalledCheckUsesEnvironmentProbe(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	binDir := t.TempDir()
+	name, content := "mysqld", "#!/bin/sh\nprintf 'mysqld 8.4.0'\n"
+	perm := os.FileMode(0o755)
+	if runtime.GOOS == "windows" {
+		name, content, perm = "mysqld.cmd", "@echo mysqld 8.4.0\r\n", 0o644
+	}
+	if err := os.WriteFile(filepath.Join(binDir, name), []byte(content), perm); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	resetAppStoreForTest()
+	defer resetAppStoreForTest()
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/check", strings.NewReader(`{"key":"mysql","name":"mysql"}`)))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"isExist":true`) || !strings.Contains(rec.Body.String(), `"version":"8.4.0"`) {
+		t.Fatalf("environment probe contract mismatch: %d %s", rec.Code, rec.Body.String())
 	}
 }
 

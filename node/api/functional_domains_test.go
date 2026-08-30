@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -62,6 +63,32 @@ func TestBackupCloudEndpointsDoNotFakeSuccess(t *testing.T) {
 	mux.ServeHTTP(okRefresh, httptest.NewRequest(http.MethodPost, "/api/v2/backups/refresh/token", bytes.NewReader(okBody)))
 	if okRefresh.Code != http.StatusOK || !bytes.Contains(okRefresh.Body.Bytes(), []byte(`"success"`)) {
 		t.Fatalf("oauth refresh=%d %s", okRefresh.Code, okRefresh.Body.String())
+	}
+}
+
+func TestBackupBucketsUsesConfiguredProviderEndpoint(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer access-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"buckets":[{"name":"primary","region":"cn"},"archive"]}`))
+	}))
+	defer provider.Close()
+	mux := http.NewServeMux()
+	registerBackupAlertLogSettingsRoutes(mux)
+	vars := `{"buckets_url":"` + provider.URL + `","access_token":"access-token"}`
+	create := httptest.NewRecorder()
+	mux.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v2/backups", strings.NewReader(`{"name":"provider","type":"s3","vars":`+strconv.Quote(vars)+`}`)))
+	if create.Code != http.StatusOK {
+		t.Fatalf("create account=%d %s", create.Code, create.Body.String())
+	}
+	buckets := httptest.NewRecorder()
+	mux.ServeHTTP(buckets, httptest.NewRequest(http.MethodPost, "/api/v2/backups/buckets", strings.NewReader(`{"type":"s3","name":"provider"}`)))
+	if buckets.Code != http.StatusOK || !strings.Contains(buckets.Body.String(), `"primary"`) || !strings.Contains(buckets.Body.String(), `"archive"`) {
+		t.Fatalf("provider buckets=%d %s", buckets.Code, buckets.Body.String())
 	}
 }
 

@@ -158,6 +158,13 @@
 
 每完成一批接口，必须同时更新 `function-checklist-generated.md`、本节状态、测试文件和部署验证记录；扫描器报告中的 `partial`、`compatibility` 不得直接改写为完成。
 
+## 2026-08-31 系统环境探测
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 完成条件 |
+|---|---|---|---|---|
+| [x] | 应用安装、版本和运行状态探测 | `apps/workmesh-node/agent/app/api/v2/app_install.go:CheckAppInstalled`、`agent/app/service/nginx.go`、`database*.go` | `node/service/environment.go:ProbeApplication`、`node/api/apps.go:handleAppPost`；OpenResty/MySQL/PostgreSQL/Redis/Docker 使用受限探针，3-10 秒超时，返回 `isExist/isActive/status/version/error` | 已安装与未安装明确区分；daemon 不可用返回 stopped；无固定空数据；模拟二进制与 API 契约测试通过 |
+| [x] | 云端备份 Bucket 标准接口 | `apps/workmesh-node/agent/cron/job/backup.go`、备份提供商适配器 | `node/api/functional_domains.go:handleBackupBuckets`、`normalizeBuckets`；从账号 Vars 读取显式 HTTPS 端点，Bearer 鉴权、15 秒超时、2 MiB 响应和 500 项上限 | 配置端点返回真实 Bucket 列表；错误、未配置和非法 URL 明确失败；不返回固定空列表；`TestBackupBucketsUsesConfiguredProviderEndpoint` 通过 |
+
 1. 每勾选一项，必须在本表“新实现/证据”列写入代码路径、测试命令或部署记录。
 2. `[~]` 和 `[ ]` 项不得在发布说明中描述为“完整迁移”；必须关联缺口任务和责任人。
 3. 路由逐项状态以 [`function-checklist-generated.md`](./function-checklist-generated.md) 为准；隐藏能力与路由存在交叉时，两份清单都必须更新。
@@ -291,3 +298,11 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | [x] | Ollama/MCP 资源状态操作不伪造记录 | `apps/workmesh-node/agent/app/api/v2/ai.go`、`mcp_server.go` | `node/api/ai_execution.go:handleAIResourceOperation`；资源 ID/名称必填，不存在返回 404，状态原子写入 | `node/api/ai_execution_test.go:TestAIResourceOperationsRequireExistingResource` |
 
 | [x] | Docker CLI/daemon 状态 DTO 探测 | node/service/docker.go、node/api/host_container_cron.go | GET /api/v2/containers/docker/status 返回 isExist/isActive/version/error，10 秒超时并区分未安装与 daemon 不可用 | node/api/hosts_containers_test.go:TestDockerStatusContract |
+
+## 2026-08-31 AI 错误本地化与实时通道协议补齐
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新项目证据 | 完成条件 |
+|---|---|---|---|---|
+| [x] | AI 错误按请求语言本地化 | `apps/workmesh-node/core/i18n`、`agent/app/api/v2/ai.go` | `node/api/errors.go:localizeErrorMessage` 与 `aiHandler` 的 Accept-Language 包装；稳定错误码映射到 12 个服务端语言包 | `TestAIErrorUsesRequestLocale` 验证英文请求不返回固定中文，未知语言回退中文 |
+| [x] | SSE 事件编号与断线续传游标 | `apps/workmesh-node/agent/app/api/v2/container.go:ContainerStreamLogs` | `node/api/container_log_stream.go:containerSSEWriter` 输出 `id`，解析 `Last-Event-ID` 并延续序号，保留心跳与取消 | `TestContainerSSELastEventIDContinuesSequence`、容器日志流回归测试 |
+| [x] | WebSocket 控制帧和正常关闭握手 | `apps/workmesh-node/agent/app/api/v2/terminal.go`、`core/app/api/v2/process.go` | `node/api/websocket_stream.go:closeWithCode/readFrame` 校验控制帧上限、掩码、关闭码；终端回送 Close/Pong | `TestWebSocketRejectsInvalidControlFrames`、`TestWebSocketCloseFrameIncludesCode` |

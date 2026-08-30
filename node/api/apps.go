@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/todaybin/workmesh-server/node/service"
 )
 
 // appRecord 保存一个已安装应用及其运行参数；应用目录记录使用相同结构以减少常驻内存。
@@ -601,7 +604,21 @@ func handleAppPost(w http.ResponseWriter, s *appStore, path string, body map[str
 		s.mu.RLock()
 		_, item := findApp(s.state.Apps, id)
 		s.mu.RUnlock()
-		appOK(w, map[string]any{"name": id, "version": item.Version, "isExist": item.ID != "", "status": item.Status, "appInstallId": item.ID, "containerName": item.Config["containerName"]})
+		// 对核心运行环境使用本机探测器，避免仅依赖历史登记记录导致“已安装”被误报。
+		probe := service.ProbeApplication(context.Background(), appValue(body, "key", "app", "type"), id)
+		if probe.App == "" {
+			probe.App = id
+		}
+		// 未知应用（或容器化应用没有宿主二进制）仍保留已登记记录作为可信状态来源。
+		if item.ID != "" && !probe.IsExist && (probe.Error == "未配置该应用的本机探测器" || appValue(item.Config, "containerName") != "") {
+			probe.IsExist, probe.IsActive, probe.Status = true, item.Status == "running", item.Status
+			probe.Version = item.Version
+		}
+		data := map[string]any{"name": id, "version": probe.Version, "isExist": probe.IsExist, "isActive": probe.IsActive, "status": probe.Status, "app": probe.App, "appInstallId": item.ID, "containerName": item.Config["containerName"]}
+		if probe.Error != "" {
+			data["error"] = probe.Error
+		}
+		appOK(w, data)
 	case "installed/loadport":
 		id := appValue(body, "name", "key")
 		s.mu.RLock()

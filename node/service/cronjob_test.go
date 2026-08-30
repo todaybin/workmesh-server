@@ -57,3 +57,28 @@ func TestCronjobRejectsUnsafeCommand(t *testing.T) {
 		t.Fatal("包含 shell 控制字符的命令必须拒绝")
 	}
 }
+
+func TestCronjobStartIsIdempotent(t *testing.T) {
+	s := NewCronjobService()
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Start(ctx)
+	s.Start(ctx)
+	s.startMu.Lock()
+	started := s.started
+	s.startMu.Unlock()
+	if !started {
+		t.Fatal("调度器首次启动后应保持运行状态")
+	}
+	cancel()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		s.startMu.Lock()
+		running := s.started
+		s.startMu.Unlock()
+		if !running {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("调度器取消后未释放运行标记")
+}
