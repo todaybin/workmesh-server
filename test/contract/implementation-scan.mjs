@@ -265,10 +265,11 @@ function inspectRoute(route, sources) {
   const hasConcrete = concrete.length > 0 && !hasCompatibility;
   best = concrete[0]?.source ?? best;
   let status = 'missing';
-  if (hasCompatibility) status = 'compatibility';
+  // 明确的未实现标记优先级最高，不能被同文件中的通用路由或其他处理器掩盖。
+  if (markers.has('migration_pending') || markers.has('status_not_implemented')) status = 'pending';
+  else if (hasCompatibility) status = 'compatibility';
   else if (hasConcrete) status = 'implemented';
   else if (markers.has('legacy_concrete_handler')) status = 'implemented';
-  else if (markers.has('migration_pending') || markers.has('status_not_implemented')) status = 'pending';
   else if (markers.has('legacy_route')) status = 'compatibility';
   const routeKey = `${route.method} ${route.path}`;
   if (/\[\](?:any|map\[[^\]]+\][^\]]+)?\s*\{\s*\}/.test(concreteText) && !dynamicEmptyResponseRoutes.has(routeKey)) {

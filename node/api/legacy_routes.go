@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const migrationPendingMessage = "该接口正在迁移"
+const migrationPendingMessage = "该功能暂不可用"
 
 // RegisterLegacyCompatibilityRoutes 为所有旧公开契约提供统一入口。
 // 业务域迁移完成前返回结构化错误，避免前端出现 404；已迁移路由由专用处理器注册。
