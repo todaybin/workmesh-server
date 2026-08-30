@@ -274,6 +274,73 @@ func sanitizeAIMap(source map[string]any) map[string]any {
 	return result
 }
 
+// aiChannelItems 返回已知渠道及其绑定状态；状态来源于渠道配置和 Agent 绑定记录。
+func aiChannelItems(s *executionState) []map[string]any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return aiChannelItemsLocked(s)
+}
+
+func aiChannelItemsLocked(s *executionState) []map[string]any {
+	names := []string{"feishu", "telegram", "discord", "wecom", "dingtalk", "qqbot", "weixin"}
+	items := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		accountIDs := make([]string, 0)
+		for key, config := range s.data.Configs {
+			if !strings.Contains(key, "/channel/"+name+"/") {
+				continue
+			}
+			id := aiID(config, "accountId", "id")
+			if id != "" {
+				accountIDs = append(accountIDs, id)
+			}
+		}
+		for _, agent := range s.data.Agents {
+			if channels, ok := agent["channels"].([]any); ok {
+				for _, raw := range channels {
+					if channel, ok := raw.(string); ok && strings.EqualFold(channel, name) {
+						if id := aiID(agent, "id"); id != "" {
+							accountIDs = append(accountIDs, id)
+						}
+					}
+				}
+			}
+		}
+		items = append(items, map[string]any{"name": name, "bound": len(accountIDs) > 0, "accountIds": uniqueStrings(accountIDs)})
+	}
+	return items
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+// aiDeleteReferences 检查账号或 Agent 被其他对象引用的情况，供删除确认页面展示。
+func aiDeleteReferences(s *executionState, body map[string]any) []map[string]any {
+	wanted := aiID(body, "id", "agentId", "accountId")
+	if wanted == "" {
+		return []map[string]any{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	refs := make([]map[string]any, 0)
+	for _, agent := range s.data.Agents {
+		if aiID(agent, "accountId", "providerAccountId") == wanted {
+			refs = append(refs, map[string]any{"type": "agent", "id": agent["id"], "name": agent["name"]})
+		}
+	}
+	return refs
+}
+
 func collectionFor(s *aiPersistentData, path string) *[]map[string]any {
 	switch {
 	case strings.HasPrefix(path, "ollama/"):
@@ -352,11 +419,12 @@ func handleAIPost(w http.ResponseWriter, s *executionState, path string, body ma
 		return
 	}
 	if path == "agents/agent/list" {
-		aiOK(w, []map[string]any{})
+		// Agent 列表必须来自持久化状态，不能因为尚未创建 Agent 就固定返回空数组。
+		aiOK(w, aiItems(s, path))
 		return
 	}
 	if path == "agents/agent/channels" {
-		aiOK(w, []map[string]any{{"name": "feishu", "bound": false, "accountIds": []string{}}, {"name": "telegram", "bound": false, "accountIds": []string{}}, {"name": "discord", "bound": false, "accountIds": []string{}}, {"name": "wecom", "bound": false, "accountIds": []string{}}, {"name": "dingtalk", "bound": false, "accountIds": []string{}}, {"name": "qqbot", "bound": false, "accountIds": []string{}}})
+		aiOK(w, aiChannelItems(s))
 		return
 	}
 	if strings.HasPrefix(path, "domain/") || strings.HasPrefix(path, "mcp/domain/") {
@@ -393,7 +461,7 @@ func handleAIPost(w http.ResponseWriter, s *executionState, path string, body ma
 		return
 	}
 	if strings.HasSuffix(path, "/delete/check") {
-		aiOK(w, []map[string]any{})
+		aiOK(w, aiDeleteReferences(s, body))
 		return
 	}
 	if strings.HasSuffix(path, "/search") || strings.HasSuffix(path, "/list") || strings.HasSuffix(path, "/counts") || strings.HasSuffix(path, "/overview") || strings.HasSuffix(path, "/status/sync") || strings.HasSuffix(path, "/models") || strings.HasSuffix(path, "/models/discover") || strings.HasSuffix(path, "/channels") {
@@ -476,7 +544,18 @@ func handleAICollectionQuery(w http.ResponseWriter, s *executionState, path stri
 		return
 	}
 	if strings.HasSuffix(path, "/overview") {
-		aiOK(w, map[string]any{"snapshot": map[string]any{"containerStatus": "unknown", "appVersion": "", "defaultModel": "", "channelCount": 0, "skillCount": 0, "jobCount": 0, "sessionCount": 0}})
+		s.mu.RLock()
+		channelCount := len(aiChannelItemsLocked(s))
+		sessionCount := 0
+		for _, sessions := range s.data.Sessions {
+			sessionCount += len(sessions)
+		}
+		taskCount := len(s.tasks)
+		agentCount := len(s.data.Agents)
+		accountCount := len(s.data.Accounts)
+		skillCount := len(s.data.Skills)
+		s.mu.RUnlock()
+		aiOK(w, map[string]any{"snapshot": map[string]any{"containerStatus": "unknown", "appVersion": "workmesh-server", "defaultModel": "", "agentCount": agentCount, "accountCount": accountCount, "channelCount": channelCount, "skillCount": skillCount, "jobCount": taskCount, "sessionCount": sessionCount}})
 		return
 	}
 	if strings.HasSuffix(path, "/channels") || strings.HasSuffix(path, "/status/sync") || strings.HasSuffix(path, "/models/discover") {

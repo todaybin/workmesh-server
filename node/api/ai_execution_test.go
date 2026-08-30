@@ -81,3 +81,34 @@ func TestAIMcpAndDomainOperations(t *testing.T) {
 		t.Fatalf("domain bind: %d %s", domain.Code, domain.Body.String())
 	}
 }
+
+func TestAIAgentCollectionQueriesUsePersistedState(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	create := httptest.NewRecorder()
+	mux.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents", strings.NewReader(`{"id":"agent-1","name":"demo-agent","accountId":"account-1","channels":["feishu"]}`)))
+	if create.Code != http.StatusOK {
+		t.Fatalf("create agent: %d %s", create.Code, create.Body.String())
+	}
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/agent/list", strings.NewReader(`{"page":1,"pageSize":20}`)))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "agent-1") {
+		t.Fatalf("agent list: %d %s", list.Code, list.Body.String())
+	}
+	channels := httptest.NewRecorder()
+	mux.ServeHTTP(channels, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/agent/channels", strings.NewReader(`{}`)))
+	if channels.Code != http.StatusOK || !strings.Contains(channels.Body.String(), `"bound":true`) {
+		t.Fatalf("channel binding: %d %s", channels.Code, channels.Body.String())
+	}
+	overview := httptest.NewRecorder()
+	mux.ServeHTTP(overview, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/overview", strings.NewReader(`{}`)))
+	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), `"agentCount":1`) {
+		t.Fatalf("overview: %d %s", overview.Code, overview.Body.String())
+	}
+	refs := httptest.NewRecorder()
+	mux.ServeHTTP(refs, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/delete/check", strings.NewReader(`{"accountId":"account-1"}`)))
+	if refs.Code != http.StatusOK || !strings.Contains(refs.Body.String(), "agent-1") {
+		t.Fatalf("delete references: %d %s", refs.Code, refs.Body.String())
+	}
+}

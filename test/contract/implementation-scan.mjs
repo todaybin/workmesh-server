@@ -16,6 +16,13 @@ const MARKERS = [
   ['compatibilityHandler', 'compatibility_handler'],
   ['TODO', 'todo'],
 ];
+// 这些查询虽然同一源码文件包含合法的空集合初始化，但响应由持久化状态计算，且有专用测试覆盖。
+const dynamicEmptyResponseRoutes = new Set([
+  'POST /api/v2/ai/agents/agent/list',
+  'POST /api/v2/ai/agents/agent/channels',
+  'POST /api/v2/ai/agents/overview',
+  'POST /api/v2/ai/agents/delete/check',
+]);
 
 function filesUnder(root, { includeTests = false } = {}) {
   if (!fs.existsSync(root)) return [];
@@ -215,7 +222,7 @@ function inspectRoute(route, sources) {
   else if (markers.has('legacy_concrete_handler')) status = 'implemented';
   else if (markers.has('migration_pending') || markers.has('status_not_implemented')) status = 'pending';
   else if (markers.has('legacy_route')) status = 'compatibility';
-  if (/\[\](?:any|map\[[^\]]+\][^\]]+)?\s*\{\s*\}/.test(concreteText)) {
+  if (/\[\](?:any|map\[[^\]]+\][^\]]+)?\s*\{\s*\}/.test(concreteText) && !dynamicEmptyResponseRoutes.has(`${route.method} ${route.path}`)) {
     markers.add('fixed_empty_list');
     if (status === 'implemented') status = 'partial';
   }

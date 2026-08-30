@@ -3,8 +3,8 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T05:34:43.700Z。
-共 870 条接口：implemented 471、partial 230、compatibility 169。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T05:49:38.487Z。
+共 870 条接口：implemented 475、partial 226、compatibility 169。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
 
@@ -36,10 +36,10 @@
 | partial | POST | `/api/v2/ai/accounts/verify` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/agent/bind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/agent/channels` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/ai/agents/agent/channels` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 | partial | POST | `/api/v2/ai/agents/agent/create` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/agent/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/agent/list` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/ai/agents/agent/list` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 | partial | POST | `/api/v2/ai/agents/agent/md/list` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/agent/md/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/agent/unbind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
@@ -66,7 +66,7 @@
 | partial | POST | `/api/v2/ai/agents/config-file/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/config-file/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/delete/check` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/ai/agents/delete/check` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 | partial | POST | `/api/v2/ai/agents/hermes/chat/sessions` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/hermes/chat/sessions/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/hermes/chat/sessions/rename` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
@@ -74,7 +74,7 @@
 | partial | POST | `/api/v2/ai/agents/model/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/other/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/other/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/overview` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/ai/agents/overview` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 | partial | POST | `/api/v2/ai/agents/plugin/check` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/plugin/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/ai/agents/plugin/uninstall` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
