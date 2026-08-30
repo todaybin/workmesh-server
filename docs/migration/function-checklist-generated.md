@@ -1124,3 +1124,10 @@
 | 功能 | 来源 | 新实现 | 覆盖 | 状态 |
 | --- | --- | --- | --- | --- |
 | Core/Agent 后端语言包与前端语言入口 | `apps/workmesh-node/core/i18n`、`apps/workmesh-node/agent/i18n`、旧 frontend | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 12 种语言；后端每种 1037 键；前端键结构和菜单入口通过 `i18n-scan.mjs` | implemented |
+
+## 系统环境与备份增量
+
+| 功能 | 新实现 | 测试 | 状态 |
+| --- | --- | --- | --- |
+| OpenResty、MySQL、PostgreSQL、Redis、Docker 安装与运行探测 | `node/service/environment.go`、`node/api/apps.go` | `TestProbeApplicationMissingAndUnknown`、`TestProbeApplicationBinaryAndTCPStatus`、`TestAppInstalledCheckUsesEnvironmentProbe` | implemented |
+| 云端备份 Bucket 标准端点查询 | `node/api/functional_domains.go:handleBackupBuckets`、`normalizeBuckets` | `TestBackupCloudEndpointsDoNotFakeSuccess`、`TestBackupBucketsUsesConfiguredProviderEndpoint` | implemented |
