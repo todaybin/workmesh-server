@@ -7,6 +7,7 @@
 | xpack 监控/WAF 别名 | `apps/workmesh-node/agent/router/ro_website.go` | `node/api/website.go` | GET/POST `/api/v2/xpack/monitor/*`、`/api/v2/xpack/waf/*` | 节点会话 | analytics、网站 WAF 服务 | 网站配置文件 | `node/api/website_test.go` | implemented | 外部 OpenResty 可用性依赖部署环境 |
 | 网站负载均衡与资源查询 | `apps/workmesh-node/agent/app/api/v2/website.go` | `node/api/website.go`、`node/api/website_extensions.go` | GET `/api/v2/websites/:id/lbs`、`/api/v2/websites/resource/:id` | 节点会话 | 网站配置与域名记录 | 网站状态文件 | `node/api/website_test.go` | implemented | 数据库资源关联需凭据后接入 |
 | 文件分片、历史与高级操作 | `apps/workmesh-node/agent/app/api/v2/file.go` | `node/api/files_routes.go` | POST `/api/v2/files/chunkupload`、`history/*`、`depth/size`、`mode`、`read/:type`、`share/detail`、`mount`、`user/group` | 节点会话 | 本地文件系统 | 原子文件与 file-aux 状态 | `node/api/files_routes_test.go` | implemented | Windows owner 修改明确不支持 |
+| 媒体文件转换 | `apps/workmesh-node/agent/app/api/v2/file.go:ConvertFile` | `node/api/files_routes.go` | POST `/api/v2/files/convert`、`/convert/log` | 节点会话 | 配置的媒体转换器与本地文件 | 输出由转换器写入 | `node/api/files_routes_test.go` | partial | `convert/log` 尚未持久化转换日志；未配置转换器时返回 503 |
 
 ## 2026-08-30 数据服务与 OpenResty 真实运行时补齐
 

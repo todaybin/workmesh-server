@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	osuser "os/user"
 	"path/filepath"
 	"regexp"
@@ -81,6 +82,7 @@ type fileAdvancedRequest struct {
 	Offset            int64    `json:"offset"`
 	FileSize          int64    `json:"fileSize"`
 	Overwrite         bool     `json:"overwrite"`
+	DeleteSource      bool     `json:"deleteSource"`
 }
 
 // fileWgetProcess 保存远程下载任务状态；状态仅保留有限字段，避免无界内存增长。
@@ -720,7 +722,7 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
 	case "compress/stop", "decompress/stop", "move/stop":
-		fileError(w, http.StatusNotImplemented, errors.New("该异步任务未启动或已完成"))
+		fileError(w, http.StatusNotFound, errors.New("异步文件任务不存在或已完成"))
 	case "chunkupload/stop":
 		id := strings.TrimSpace(req.UploadID)
 		if id == "" {
@@ -998,6 +1000,35 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"users": users, "groups": groups}})
+	case "convert":
+		converter := strings.TrimSpace(os.Getenv("WORKMESH_MEDIA_CONVERTER"))
+		if converter == "" {
+			fileError(w, http.StatusServiceUnavailable, errors.New("未配置媒体转换器，请设置 WORKMESH_MEDIA_CONVERTER"))
+			return
+		}
+		input, err := cleanFilePath(req.Path)
+		if err != nil || strings.TrimSpace(req.Dst) == "" {
+			if err == nil {
+				err = errors.New("path 和 dst 不能为空")
+			}
+			fileError(w, http.StatusBadRequest, err)
+			return
+		}
+		output, err := cleanFilePath(req.Dst)
+		if err != nil {
+			fileError(w, http.StatusBadRequest, err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+		defer cancel()
+		if result := exec.CommandContext(ctx, converter, input, output).Run(); result != nil {
+			fileError(w, http.StatusBadGateway, fmt.Errorf("媒体转换失败: %w", result))
+			return
+		}
+		if req.DeleteSource {
+			_ = os.Remove(input)
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": output, "converted": true}})
 	default:
 		if operationPath == "read" {
 			// 继续复用 read 分页逻辑，路径参数 type 仅用于客户端展示。

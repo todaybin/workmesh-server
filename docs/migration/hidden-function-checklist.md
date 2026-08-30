@@ -7,6 +7,7 @@
 | xpack 监控/WAF 别名方法路由 | `apps/workmesh-node/agent/router/ro_website.go` | `node/api/website.go` | implemented | 修复 ServeMux 方法模式拼接，别名进入真实 analytics/WAF 处理器 |
 | 网站资源与负载均衡查询 | `apps/workmesh-node/agent/app/service/website.go` | `node/api/website.go`、`website_extensions.go` | implemented | 读取网站配置、域名并返回资源列表 |
 | 文件 owner、挂载点、用户组查询 | `apps/workmesh-node/agent/app/api/v2/file.go` | `node/api/files_routes.go` | implemented | Linux 使用 os/user 与 Chown，Windows 返回明确不支持 |
+| 媒体文件转换任务 | `apps/workmesh-node/agent/app/service/file.go:Convert` | `node/api/files_routes.go` | partial | 通过受控 `WORKMESH_MEDIA_CONVERTER` 执行并设置超时，转换日志查询仍待持久化 |
 <!-- Copyright (c) 2026 WorkMesh contributors -->
 
 ## 2026-08-30 核心认证与执行入口
