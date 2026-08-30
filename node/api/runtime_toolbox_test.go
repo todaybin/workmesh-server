@@ -29,6 +29,23 @@ func TestRuntimeAndSSHRoutes(t *testing.T) {
 	if ssh.Code != http.StatusOK || strings.Contains(ssh.Body.String(), "secret") {
 		t.Fatalf("ssh response leaked or failed: %s", ssh.Body.String())
 	}
+	for _, path := range []string{"/api/v2/runtimes/php/php-82/extensions", "/api/v2/runtimes/php/php-82/config", "/api/v2/runtimes/php/php-82/container", "/api/v2/runtimes/php/php-82/fpm/config", "/api/v2/runtimes/php/php-82/fpm/status"} {
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
+		if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "php-82") {
+			t.Fatalf("runtime detail %s status=%d body=%s", path, res.Code, res.Body.String())
+		}
+	}
+	missing := httptest.NewRecorder()
+	mux.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/api/v2/runtimes/php/missing/extensions", nil))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing runtime status=%d body=%s", missing.Code, missing.Body.String())
+	}
+	supervisor := httptest.NewRecorder()
+	mux.ServeHTTP(supervisor, httptest.NewRequest(http.MethodGet, "/api/v2/runtimes/supervisor/process/web", nil))
+	if supervisor.Code != http.StatusOK || !strings.Contains(supervisor.Body.String(), "not_configured") {
+		t.Fatalf("supervisor status=%d body=%s", supervisor.Code, supervisor.Body.String())
+	}
 }
 
 func TestToolboxGetDataUsesHostState(t *testing.T) {

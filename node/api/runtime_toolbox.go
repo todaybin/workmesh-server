@@ -259,22 +259,49 @@ func registerRuntimeSubroutes(mux *http.ServeMux, s *runtimeStore) {
 			runtimeOK(w, map[string]any{"status": "accepted", "path": r.URL.Path})
 			return
 		}
-		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v2/runtimes/php/"), "/")
+		parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v2/runtimes/php/"), "/"), "/")
 		if len(parts) >= 2 && parts[0] != "" {
-			id := parts[len(parts)-1]
-			if parts[1] == "extensions" {
-				runtimeOK(w, map[string]any{"id": parts[0], "extensions": []string{}})
+			id := parts[0]
+			s.mu.RLock()
+			var rec *runtimeRecord
+			for i := range s.state.Runtimes {
+				if s.state.Runtimes[i].ID == id {
+					copy := s.state.Runtimes[i]
+					rec = &copy
+					break
+				}
+			}
+			s.mu.RUnlock()
+			if rec == nil {
+				runtimeErr(w, 404, "runtime not found")
 				return
 			}
-			if parts[0] == "config" || parts[0] == "container" || parts[0] == "fpm" {
-				runtimeOK(w, map[string]any{"id": id, "status": "ready"})
+			if parts[1] == "extensions" {
+				exts := append([]string(nil), rec.Extensions...)
+				runtimeOK(w, map[string]any{"id": id, "extensions": exts, "total": len(exts), "status": rec.Status})
+				return
+			}
+			if parts[1] == "config" || parts[1] == "container" || parts[1] == "fpm" {
+				runtimeOK(w, map[string]any{"id": id, "type": rec.Type, "version": rec.Version, "status": rec.Status, "running": rec.Status == "running"})
 				return
 			}
 		}
 		runtimeErr(w, 404, "运行时路径不存在")
 	})
 	mux.HandleFunc("/api/v2/runtimes/supervisor/process/", func(w http.ResponseWriter, r *http.Request) {
-		runtimeOK(w, map[string]any{"id": filepath.Base(r.URL.Path), "status": "ready"})
+		id := filepath.Base(r.URL.Path)
+		if id == "." || id == "/" || id == "" {
+			runtimeErr(w, 400, "process id is required")
+			return
+		}
+		s.mu.RLock()
+		value := s.state.Settings["supervisor:"+id]
+		s.mu.RUnlock()
+		if value == nil {
+			runtimeOK(w, map[string]any{"id": id, "status": "not_configured"})
+			return
+		}
+		runtimeOK(w, map[string]any{"id": id, "status": "ready", "config": value})
 	})
 }
 
