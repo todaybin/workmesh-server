@@ -1,6 +1,13 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <!-- Copyright (c) 2026 WorkMesh contributors -->
 
+## 2026-08-30 日志后台能力
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | system 日志文件枚举与服务探测 | `apps/workmesh-node/agent/app/service/logs.go` | `node/api/functional_domains.go:listSystemLogFiles/listRunningSystemServices`，外部命令 5 秒超时 | 日志目录和 systemctl/tasklist 均有明确降级 |
+| [x] | 任务日志分页与路径安全 | `apps/workmesh-node/agent/app/service/task.go:ReadByLine` | `node/api/functional_domains.go:readTaskLog`，路径白名单、单页 500 行 | 正常读取、分页、越权 403 测试通过 |
+| [x] | 执行中任务计数 | `apps/workmesh-node/agent/app/service/task.go:CountExecutingTask` | `node/api/functional_domains.go:registerLogRoutes`，从持久化日志状态统计 | 写入 running/executing 后计数准确 |
+
 # 隐藏功能迁移清单
 
 ## 2026-08-30 仪表盘采集

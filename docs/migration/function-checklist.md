@@ -1,6 +1,16 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <!-- Copyright (c) 2026 WorkMesh contributors -->
 
+## 2026-08-30 日志读取批次
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 系统日志文件枚举 | `apps/workmesh-node/agent/app/service/logs.go:ListSystemLogFile` | `GET /api/v2/logs/system/files` | `apps/workmesh-server/node/api/functional_domains.go:listSystemLogFiles` | `GET /api/v2/logs/system/files` | 节点会话鉴权 | `WORKMESH_DATA_DIR/logs`、Linux `/var/log` | 无状态读取 | `node/api/logs_runtime_test.go` | `go test ./node/api -run SystemLog` | 待制品部署 | implemented | 仅枚举日志文件 |
+| 系统日志服务状态 | `apps/workmesh-node/agent/app/service/logs.go:GetSystemLogStatus` | `GET /api/v2/logs/system/status` | `apps/workmesh-server/node/api/functional_domains.go:systemLogStatus` | `GET /api/v2/logs/system/status` | 节点会话鉴权 | `journalctl --version` 或文件降级 | 无状态读取 | `node/api/logs_runtime_test.go` | `go test ./node/api -run SystemLog` | 待制品部署 | implemented | 无 journalctl 时返回 file 状态 |
+| 运行中系统服务 | `apps/workmesh-node/agent/app/service/logs.go:ListRunningServices` | `GET /api/v2/logs/system/services` | `apps/workmesh-server/node/api/functional_domains.go:listRunningSystemServices` | `GET /api/v2/logs/system/services` | 节点会话鉴权 | `systemctl` 或 Windows `tasklist`，5 秒超时 | 无状态读取 | `node/api/logs_runtime_test.go` | `go test ./node/api -run SystemLog` | 待制品部署 | implemented | 命令不可用时返回空集合 |
+| 主机系统日志读取 | `apps/workmesh-node/agent/app/service/logs.go:ReadSystemLog` | `POST /api/v2/logs/system/read` | `apps/workmesh-server/node/api/functional_domains.go:readLogFile` | `POST /api/v2/logs/system/read` | 节点会话鉴权 | 允许目录内日志文件，单次最多 2 MiB | 无状态读取 | `node/api/logs_runtime_test.go` | `go test ./node/api -run SystemLog` | 待制品部署 | implemented | journalctl 过滤参数待扩展 |
+| 任务日志分页读取 | `apps/workmesh-node/agent/app/service/task.go:ReadByLine` | `POST /api/v2/logs/tasks/read` | `apps/workmesh-server/node/api/functional_domains.go:readTaskLog` | `POST /api/v2/logs/tasks/read` | 节点会话鉴权 | 任务日志路径，分页最多 500 行 | 无状态读取 | `node/api/logs_runtime_test.go` | `go test ./node/api -run SystemLog` | 待制品部署 | implemented | 任务仓库接入待任务域完成 |
+| 执行中任务计数 | `apps/workmesh-node/agent/app/service/task.go:CountExecutingTask` | `GET /api/v2/logs/tasks/executing/count` | `apps/workmesh-server/node/api/functional_domains.go:registerLogRoutes` | `GET /api/v2/logs/tasks/executing/count` | 节点会话鉴权 | domains.json 中 running/executing 任务日志 | `domains.json` | `node/api/logs_runtime_test.go` | `go test ./node/api -run SystemLog` | 待制品部署 | implemented | 可切换任务仓库实时计数 |
+
 # WorkMesh 功能迁移清单
 
 本清单以旧 `apps/workmesh-node/core` 与 `agent` 的 863 条路由为基线（含隐藏 helper 注册和去品牌化静态入口）。状态必须以真实副作用或端到端响应确认，不能仅以路由注册作为完成依据。
@@ -69,6 +79,20 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 前端添加部署节点 | `apps/workmesh-node/agent/views/setting/node` | 节点管理页面 | `web/src/views/advanced/multi-node/index.vue`、`web/src/api/modules/setting.ts` | `POST /api/v2/core/nodes/add`、`POST /api/v2/core/nodes/list` | 登录会话、CSRF（前端请求拦截器注入） | 表单节点 ID、名称、HTTP(S) 地址、角色 | `WORKMESH_DATA_DIR/nodes.json` 原子写入 | `control/api/link_test.go`、生产构建 | `npm.cmd run type-check`、`npm.cmd run build:pro`、`go test ./control/api` | 公网主节点添加/列表/删除验收通过；新前端待授权部署 | implemented | 云端 Gateway 注册仍需真实凭据；添加动作不代替云端授权 |
+
+## 2026-08-30 工具箱主机信息批次
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 工具箱系统用户、时区、Fail2ban、FTP 状态 | `apps/workmesh-node/agent/api/v2/toolbox.go` | `/api/v2/toolbox/*` | `node/api/runtime_toolbox.go:toolboxGetData` | `GET /api/v2/toolbox/device/users`、`GET /api/v2/toolbox/device/zone/options`、`GET /api/v2/toolbox/fail2ban/base`、`GET /api/v2/toolbox/fail2ban/load/conf`、`GET /api/v2/toolbox/ftp/base` | 节点会话鉴权（由上层中间件执行） | `/etc/passwd`、`/etc/fail2ban/jail.local`、`time.Local`、`runtime.json` | FTP 配置写入 `WORKMESH_DATA_DIR/runtime.json` | `node/api/runtime_toolbox_test.go` | `go test ./node/api -run Toolbox`、`go vet ./...` | 待下一批制品部署 | implemented | 非 Linux 主机无系统配置文件时返回 supported/installed 状态，不执行外部命令 |
+
+## 2026-08-30 告警发现批次
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 告警磁盘列表 | `apps/workmesh-node/agent/app/service/alert.go:GetDisks` | `GET /api/v2/alert/disks/list` | `node/api/functional_domains.go:listAlertDisks` | `GET /api/v2/alert/disks/list` | 节点会话鉴权（上层中间件） | `/proc/mounts` 挂载点清单；跨平台容量字段显式标记 `capacitySupported` | 无状态采集 | `node/api/functional_domains_test.go:TestAlertDiskAndClamDiscovery` | `go test ./node/api -run AlertDisk` | 本地 HTTP 单测 | implemented | Windows 无 `/proc` 时返回空集合，Linux 容量采集可由专用采集器扩展 |
+| ClamAV 服务发现 | `apps/workmesh-node/agent/app/service/alert.go:GetClams` | `GET /api/v2/alert/clams/list` | `node/api/functional_domains.go:detectClamServices` | `GET /api/v2/alert/clams/list` | 节点会话鉴权（上层中间件） | PATH 中 `clamdscan`、`freshclam` 可执行文件探测 | 无状态采集 | `node/api/functional_domains_test.go:TestAlertDiskAndClamDiscovery` | `go test ./node/api -run AlertDisk` | 本地 HTTP 单测 | implemented | 未引入 ClamAV 管理 SDK，服务启停仍由运行时工具域负责 |
+| 告警配置与系统计划任务搜索 | `apps/workmesh-node/agent/app/api/v2/alert.go` | `POST /api/v2/alert/config/search`、`POST /api/v2/alert/cronjob/list` | `node/api/functional_domains.go` | 同左 | 节点会话鉴权（上层中间件） | `domains.json` 告警配置、`/etc/cron.*` 目录 | 配置沿用 `domains.json` 原子写入；cron 只读 | `node/api/functional_domains_test.go:TestAlertConfigSearchAndCronListAreDynamic` | `go test ./node/api -run AlertConfig` | 本地 HTTP 单测 | implemented | 未接入系统级 cron 编辑和执行，写操作仍由计划任务域负责 |
 
 ## 2026-08-30 AI 账户与沙盒批次
 
