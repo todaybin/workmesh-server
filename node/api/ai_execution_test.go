@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,7 +12,24 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/todaybin/workmesh-server/node/service/taskruntime"
 )
+
+type routeTaskBackend struct{}
+
+func (routeTaskBackend) Create(context.Context, taskruntime.TaskSpec) (string, error) {
+	return "sandbox-route", nil
+}
+func (routeTaskBackend) Start(context.Context, string) error   { return nil }
+func (routeTaskBackend) Cancel(context.Context, string) error  { return nil }
+func (routeTaskBackend) Destroy(context.Context, string) error { return nil }
+func (routeTaskBackend) Exec(context.Context, string, []string) (taskruntime.TaskExecResult, error) {
+	return taskruntime.TaskExecResult{ExitCode: 0, Stdout: "ok"}, nil
+}
+func (routeTaskBackend) Collect(context.Context, string) (taskruntime.TaskExecResult, error) {
+	return taskruntime.TaskExecResult{ExitCode: 0, Stdout: "collected"}, nil
+}
 
 func TestAIProviderAndSandboxStatus(t *testing.T) {
 	mux := http.NewServeMux()
@@ -190,5 +208,55 @@ func TestAIAgentCollectionQueriesUsePersistedState(t *testing.T) {
 	mux.ServeHTTP(refs, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/delete/check", strings.NewReader(`{"accountId":"account-1"}`)))
 	if refs.Code != http.StatusOK || !strings.Contains(refs.Body.String(), "agent-1") {
 		t.Fatalf("delete references: %d %s", refs.Code, refs.Body.String())
+	}
+}
+
+func TestWorkMeshTaskRoutesUseIsolatedProvider(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	t.Setenv("WORKMESH_TASK_TOKEN", "task-token")
+	provider, err := taskruntime.NewTaskProvider(routeTaskBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetTaskProvider(provider)
+	t.Cleanup(func() { SetTaskProvider(nil) })
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	valid := `{"taskId":"route-task","imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","worktree":"/srv/workmesh/project","entrypoint":["/opt/workmesh/task-bootstrap"]}`
+	unauthorized := httptest.NewRecorder()
+	mux.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/create", strings.NewReader(valid)))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorized.Code)
+	}
+	request := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/"+path, strings.NewReader(body))
+		req.Header.Set("X-WorkMesh-Token", "task-token")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, req)
+		return response
+	}
+	created := request("create", valid)
+	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), "sandbox-route") {
+		t.Fatalf("create = %d %s", created.Code, created.Body.String())
+	}
+	duplicate := request("create", valid)
+	if duplicate.Code != http.StatusBadRequest || !strings.Contains(duplicate.Body.String(), "已存在") {
+		t.Fatalf("duplicate = %d %s", duplicate.Code, duplicate.Body.String())
+	}
+	started := request("start", `{"taskId":"route-task"}`)
+	if started.Code != http.StatusOK || !strings.Contains(started.Body.String(), "route-task") {
+		t.Fatalf("start = %d %s", started.Code, started.Body.String())
+	}
+	executed := request("exec", `{"taskId":"route-task","argv":["run"]}`)
+	if executed.Code != http.StatusOK || !strings.Contains(executed.Body.String(), "ok") {
+		t.Fatalf("exec = %d %s", executed.Code, executed.Body.String())
+	}
+	collected := request("collect", `{"taskId":"route-task"}`)
+	if collected.Code != http.StatusOK || !strings.Contains(collected.Body.String(), "collected") {
+		t.Fatalf("collect = %d %s", collected.Code, collected.Body.String())
+	}
+	unknown := request("start", `{"taskId":"missing"}`)
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown task status = %d", unknown.Code)
 	}
 }

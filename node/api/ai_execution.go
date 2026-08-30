@@ -21,8 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/todaybin/workmesh-server/node/model"
-	"github.com/todaybin/workmesh-server/node/service"
+	"github.com/todaybin/workmesh-server/node/service/taskruntime"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -39,6 +38,7 @@ type aiPersistentData struct {
 	Plugins   []map[string]any            `json:"plugins"`
 	Skills    []map[string]any            `json:"skills"`
 	Sandboxes []map[string]any            `json:"sandboxes"`
+	Tasks     []map[string]any            `json:"tasks"`
 }
 
 type executionState struct {
@@ -51,6 +51,64 @@ type executionState struct {
 var aiState executionState
 var aiStateInit sync.Mutex
 
+// taskProviderState 按进程缓存受控任务 Provider，避免每个请求重复校验 CLI 摘要。
+// 生产环境必须通过 WORKMESH_TASK_CLI 和 WORKMESH_TASK_CLI_SHA256 显式启用。
+var taskProviderState struct {
+	sync.Mutex
+	provider *taskruntime.TaskProvider
+	command  string
+	digest   string
+}
+
+// SetTaskProvider 为集成测试或启动装配注入真实隔离任务 Provider。
+func SetTaskProvider(provider *taskruntime.TaskProvider) {
+	taskProviderState.Lock()
+	taskProviderState.provider = provider
+	taskProviderState.command = ""
+	taskProviderState.digest = ""
+	taskProviderState.Unlock()
+}
+
+func getTaskProvider() *taskruntime.TaskProvider {
+	command := strings.TrimSpace(os.Getenv("WORKMESH_TASK_CLI"))
+	digest := strings.TrimSpace(os.Getenv("WORKMESH_TASK_CLI_SHA256"))
+	taskProviderState.Lock()
+	defer taskProviderState.Unlock()
+	if taskProviderState.provider != nil && taskProviderState.command == "" && taskProviderState.digest == "" {
+		return taskProviderState.provider
+	}
+	if command == "" || digest == "" {
+		return nil
+	}
+	if taskProviderState.provider != nil && taskProviderState.command == command && taskProviderState.digest == digest {
+		return taskProviderState.provider
+	}
+	backend, err := taskruntime.NewCLITaskBackend(command, digest, 30*time.Minute, 8<<20)
+	if err != nil {
+		return nil
+	}
+	provider, err := taskruntime.NewTaskProvider(backend)
+	if err != nil {
+		return nil
+	}
+	taskProviderState.provider = provider
+	taskProviderState.command = command
+	taskProviderState.digest = digest
+	// CLI 后端可复用重启前的沙盒句柄；无效记录由 Provider 的状态校验忽略。
+	s := getAIState()
+	s.mu.RLock()
+	handles := make([]taskruntime.TaskHandle, 0, len(s.data.Tasks))
+	for _, item := range s.data.Tasks {
+		handles = append(handles, taskruntime.TaskHandle{
+			TaskID: aiID(item, "taskId", "id"), SandboxID: aiString(item, "sandboxId"), ImageDigest: aiString(item, "imageDigest"),
+			SandboxType: aiString(item, "sandboxType"), Backend: aiString(item, "backend"), State: taskruntime.TaskState(aiString(item, "status")),
+		})
+	}
+	s.mu.RUnlock()
+	provider.Restore(handles)
+	return provider
+}
+
 func getAIState() *executionState {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
@@ -62,7 +120,7 @@ func getAIState() *executionState {
 	if aiState.path == path && aiState.tasks != nil {
 		return &aiState
 	}
-	data := aiPersistentData{Domains: make(map[string]map[string]any), Configs: make(map[string]map[string]any), Sessions: make(map[string][]map[string]any), Sandboxes: make([]map[string]any, 0)}
+	data := aiPersistentData{Domains: make(map[string]map[string]any), Configs: make(map[string]map[string]any), Sessions: make(map[string][]map[string]any), Sandboxes: make([]map[string]any, 0), Tasks: make([]map[string]any, 0)}
 	if content, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(content, &data)
 	}
@@ -78,7 +136,13 @@ func getAIState() *executionState {
 	if data.Sandboxes == nil {
 		data.Sandboxes = make([]map[string]any, 0)
 	}
-	aiState = executionState{path: path, data: data, tasks: map[string]map[string]any{}}
+	tasks := make(map[string]map[string]any, len(data.Tasks))
+	for _, item := range data.Tasks {
+		if id := aiID(item, "taskId", "id"); id != "" {
+			tasks[id] = cloneMap(item)
+		}
+	}
+	aiState = executionState{path: path, data: data, tasks: tasks}
 	return &aiState
 }
 
@@ -1132,42 +1196,179 @@ func taskHandler(w http.ResponseWriter, r *http.Request) {
 		aiError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "任务接口只允许 POST")
 		return
 	}
-	var body struct {
-		ID      string   `json:"id"`
-		Program string   `json:"program"`
-		Args    []string `json:"args"`
-	}
-	if r.Body != nil {
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-			aiError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
-			return
-		}
-	}
-	if body.ID == "" {
-		body.ID = aiNewID("task")
-	}
-	s := getAIState()
-	s.mu.Lock()
-	if path == "create" || path == "start" {
-		s.tasks[body.ID] = map[string]any{"id": body.ID, "status": "created", "createdAt": time.Now().UTC()}
-	}
-	task := s.tasks[body.ID]
-	if task == nil {
-		task = map[string]any{"id": body.ID, "status": "unknown"}
-	}
-	if path == "cancel" || path == "destroy" {
-		task["status"] = path + "ed"
-	}
-	s.mu.Unlock()
-	if path == "exec" {
-		token := os.Getenv("WORKMESH_TASK_TOKEN")
-		if token == "" || r.Header.Get("X-WorkMesh-Token") != token {
-			aiError(w, http.StatusUnauthorized, "TASK_AUTH_REQUIRED", "任务执行需要令牌")
-			return
-		}
-		result, err := (service.CommandService{}).Execute(r.Context(), model.CommandRequest{Program: body.Program, Args: body.Args})
-		writeCommandResult(w, result, err)
+	// 若部署配置了任务令牌，则所有写操作均要求相同的节点凭据；未配置时
+	// Provider 仍会因未装配返回 503，不会把请求降级为宿主命令执行。
+	if token := strings.TrimSpace(os.Getenv("WORKMESH_TASK_TOKEN")); token != "" && r.Header.Get("X-WorkMesh-Token") != token {
+		aiError(w, http.StatusUnauthorized, "TASK_AUTH_REQUIRED", "任务操作需要 X-WorkMesh-Token")
 		return
 	}
-	aiOK(w, task)
+	provider := getTaskProvider()
+	if provider == nil {
+		aiError(w, http.StatusServiceUnavailable, "TASK_PROVIDER_UNAVAILABLE", "任务隔离 Provider 未配置或 CLI 摘要校验失败")
+		return
+	}
+	if path == "create" {
+		var req struct {
+			TaskID         string                    `json:"taskId"`
+			ImageDigest    string                    `json:"imageDigest"`
+			Worktree       string                    `json:"worktree"`
+			Entrypoint     []string                  `json:"entrypoint"`
+			TimeoutSeconds int                       `json:"timeoutSeconds"`
+			RuntimePolicy  taskruntime.RuntimePolicy `json:"runtimePolicy"`
+		}
+		if err := decodeTaskJSON(w, r, &req); err != nil {
+			aiError(w, http.StatusBadRequest, "INVALID_TASK_REQUEST", err.Error())
+			return
+		}
+		timeout := 30 * time.Minute
+		if req.TimeoutSeconds > 0 {
+			timeout = time.Duration(req.TimeoutSeconds) * time.Second
+		}
+		if timeout > 30*time.Minute {
+			aiError(w, http.StatusBadRequest, "TASK_TIMEOUT_INVALID", "timeoutSeconds 不能超过 1800")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		handle, err := provider.Create(ctx, taskruntime.TaskSpec{TaskID: strings.TrimSpace(req.TaskID), ImageDigest: strings.TrimSpace(req.ImageDigest), Worktree: strings.TrimSpace(req.Worktree), Entrypoint: req.Entrypoint, Timeout: timeout, RuntimePolicy: req.RuntimePolicy})
+		cancel()
+		if err != nil {
+			aiError(w, http.StatusBadRequest, "TASK_CREATE_FAILED", err.Error())
+			return
+		}
+		if err := persistTaskHandle(handle); err != nil {
+			aiError(w, http.StatusInternalServerError, "TASK_STATE_SAVE_FAILED", err.Error())
+			return
+		}
+		aiOK(w, handle)
+		return
+	}
+	var req struct {
+		TaskID string   `json:"taskId"`
+		Argv   []string `json:"argv"`
+	}
+	if err := decodeTaskJSON(w, r, &req); err != nil {
+		aiError(w, http.StatusBadRequest, "INVALID_TASK_REQUEST", err.Error())
+		return
+	}
+	id := strings.TrimSpace(req.TaskID)
+	if id == "" {
+		aiError(w, http.StatusBadRequest, "TASK_ID_REQUIRED", "taskId 不能为空")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+	defer cancel()
+	switch path {
+	case "start":
+		if err := provider.Start(ctx, id); err != nil {
+			taskError(w, "TASK_START_FAILED", err)
+			return
+		}
+		if err := updatePersistedTask(id, "running"); err != nil {
+			aiError(w, http.StatusInternalServerError, "TASK_STATE_SAVE_FAILED", err.Error())
+			return
+		}
+		aiOK(w, map[string]string{"taskId": id})
+	case "exec":
+		result, err := provider.Exec(ctx, id, req.Argv)
+		if err != nil {
+			taskError(w, "TASK_EXEC_FAILED", err)
+			return
+		}
+		aiOK(w, result)
+	case "collect":
+		result, err := provider.Collect(ctx, id)
+		if err != nil {
+			taskError(w, "TASK_COLLECT_FAILED", err)
+			return
+		}
+		if err := updatePersistedTask(id, "completed"); err != nil {
+			aiError(w, http.StatusInternalServerError, "TASK_STATE_SAVE_FAILED", err.Error())
+			return
+		}
+		aiOK(w, result)
+	case "cancel":
+		if err := provider.Cancel(ctx, id); err != nil {
+			taskError(w, "TASK_CANCEL_FAILED", err)
+			return
+		}
+		if err := updatePersistedTask(id, "cancelled"); err != nil {
+			aiError(w, http.StatusInternalServerError, "TASK_STATE_SAVE_FAILED", err.Error())
+			return
+		}
+		aiOK(w, map[string]string{"taskId": id})
+	case "destroy":
+		if err := provider.Destroy(ctx, id); err != nil {
+			taskError(w, "TASK_DESTROY_FAILED", err)
+			return
+		}
+		if err := updatePersistedTask(id, "destroyed"); err != nil {
+			aiError(w, http.StatusInternalServerError, "TASK_STATE_SAVE_FAILED", err.Error())
+			return
+		}
+		aiOK(w, map[string]string{"taskId": id})
+	default:
+		aiError(w, http.StatusNotFound, "TASK_OPERATION_NOT_FOUND", "未知任务操作: "+path)
+	}
+}
+
+func decodeTaskJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	if r.Body == nil {
+		return errors.New("请求体不能为空")
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return errors.New("请求只能包含一个 JSON 对象")
+	}
+	return nil
+}
+
+func taskError(w http.ResponseWriter, code string, err error) {
+	status := http.StatusBadRequest
+	if strings.Contains(err.Error(), "不存在") {
+		status = http.StatusNotFound
+	}
+	aiError(w, status, code, err.Error())
+}
+
+func persistTaskHandle(handle taskruntime.TaskHandle) error {
+	s := getAIState()
+	s.mu.Lock()
+	item := map[string]any{"taskId": handle.TaskID, "sandboxId": handle.SandboxID, "imageDigest": handle.ImageDigest, "sandboxType": handle.SandboxType, "backend": handle.Backend, "status": string(handle.State), "createdAt": time.Now().UTC().Format(time.RFC3339), "updatedAt": time.Now().UTC().Format(time.RFC3339)}
+	s.tasks[handle.TaskID] = item
+	upsertPersistentTaskLocked(s, item)
+	err := s.saveLocked()
+	s.mu.Unlock()
+	return err
+}
+
+func updatePersistedTask(id, status string) error {
+	s := getAIState()
+	s.mu.Lock()
+	item := s.tasks[id]
+	if item == nil {
+		item = map[string]any{"taskId": id}
+	}
+	item["status"] = status
+	item["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+	s.tasks[id] = item
+	upsertPersistentTaskLocked(s, item)
+	err := s.saveLocked()
+	s.mu.Unlock()
+	return err
+}
+
+func upsertPersistentTaskLocked(s *executionState, item map[string]any) {
+	id := aiID(item, "taskId", "id")
+	for i, existing := range s.data.Tasks {
+		if aiID(existing, "taskId", "id") == id {
+			s.data.Tasks[i] = cloneMap(item)
+			return
+		}
+	}
+	s.data.Tasks = append(s.data.Tasks, cloneMap(item))
 }
