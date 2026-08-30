@@ -107,3 +107,41 @@ func TestToolboxGetDataUsesHostState(t *testing.T) {
 		t.Fatalf("ftp response missing state: %#v", ftp)
 	}
 }
+
+func TestToolboxDeviceDNSAndFTPState(t *testing.T) {
+	root := filepath.Join(".tmp", "toolbox-device-test")
+	_ = os.RemoveAll(root)
+	defer os.RemoveAll(root)
+	t.Setenv("WORKMESH_DATA_DIR", root)
+	t.Setenv("WORKMESH_FAIL2BAN_CONFIG", filepath.Join(root, "fail2ban.local"))
+	mux := http.NewServeMux()
+	RegisterRuntimeToolboxRoutes(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, req)
+		return res
+	}
+	if res := call(http.MethodPost, "/api/v2/toolbox/device/base", `{}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"hostname"`) {
+		t.Fatalf("设备基础信息失败: %d %s", res.Code, res.Body.String())
+	}
+	if res := call(http.MethodPost, "/api/v2/toolbox/device/check/dns", `{"host":"localhost"}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"resolved":true`) {
+		t.Fatalf("DNS 探测失败: %d %s", res.Code, res.Body.String())
+	}
+	if res := call(http.MethodPost, "/api/v2/toolbox/device/check/dns", `{"host":"../etc/passwd"}`); res.Code != http.StatusBadRequest {
+		t.Fatalf("非法 DNS 主机名应拒绝: %d %s", res.Code, res.Body.String())
+	}
+	if res := call(http.MethodPost, "/api/v2/toolbox/ftp", `{"name":"测试 FTP","host":"ftp.example","username":"deploy","password":"secret"}`); res.Code != http.StatusOK || strings.Contains(res.Body.String(), "secret") {
+		t.Fatalf("FTP 创建失败或泄漏密码: %d %s", res.Code, res.Body.String())
+	}
+	if res := call(http.MethodPost, "/api/v2/toolbox/ftp/search", `{"keyword":"ftp.example"}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "ftp.example") {
+		t.Fatalf("FTP 搜索失败: %d %s", res.Code, res.Body.String())
+	}
+	if res := call(http.MethodPost, "/api/v2/toolbox/fail2ban/update", `{"content":"[sshd]\nenabled=true"}`); res.Code != http.StatusOK {
+		t.Fatalf("Fail2ban 配置保存失败: %d %s", res.Code, res.Body.String())
+	}
+	if res := call(http.MethodPost, "/api/v2/toolbox/fail2ban/search", `{"keyword":"sshd"}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "sshd") {
+		t.Fatalf("Fail2ban 配置检索失败: %d %s", res.Code, res.Body.String())
+	}
+}

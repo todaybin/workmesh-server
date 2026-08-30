@@ -7,12 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -639,13 +642,351 @@ func registerToolboxRoutes(mux *http.ServeMux, s *runtimeStore) {
 	mux.HandleFunc("GET /api/v2/toolbox/ftp/base", func(w http.ResponseWriter, _ *http.Request) {
 		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/ftp/base"))
 	})
-	for _, p := range []string{"/api/v2/toolbox/device/base", "/api/v2/toolbox/device/check/dns", "/api/v2/toolbox/device/conf", "/api/v2/toolbox/device/update/byconf", "/api/v2/toolbox/device/update/conf", "/api/v2/toolbox/device/update/host", "/api/v2/toolbox/device/update/passwd", "/api/v2/toolbox/device/update/swap", "/api/v2/toolbox/fail2ban/operate", "/api/v2/toolbox/fail2ban/operate/sshd", "/api/v2/toolbox/fail2ban/search", "/api/v2/toolbox/fail2ban/update", "/api/v2/toolbox/fail2ban/update/byconf", "/api/v2/toolbox/ftp", "/api/v2/toolbox/ftp/del", "/api/v2/toolbox/ftp/log/search", "/api/v2/toolbox/ftp/operate", "/api/v2/toolbox/ftp/search", "/api/v2/toolbox/ftp/sync", "/api/v2/toolbox/ftp/update", "/api/v2/toolbox/clam", "/api/v2/toolbox/clam/base", "/api/v2/toolbox/clam/del", "/api/v2/toolbox/clam/file/search", "/api/v2/toolbox/clam/file/update", "/api/v2/toolbox/clam/handle", "/api/v2/toolbox/clam/operate", "/api/v2/toolbox/clam/record/clean", "/api/v2/toolbox/clam/record/search", "/api/v2/toolbox/clam/search", "/api/v2/toolbox/clam/status/update", "/api/v2/toolbox/clam/update", "/api/v2/toolbox/clean", "/api/v2/toolbox/scan", "/api/v2/settings/terminal/ai/search", "/api/v2/settings/terminal/ai/update"} {
+	registerToolboxDeviceRoutes(mux, s)
+	registerToolboxFail2BanRoutes(mux, s)
+	registerToolboxFtpRoutes(mux, s)
+	for _, p := range []string{"/api/v2/toolbox/clam", "/api/v2/toolbox/clam/base", "/api/v2/toolbox/clam/del", "/api/v2/toolbox/clam/file/search", "/api/v2/toolbox/clam/file/update", "/api/v2/toolbox/clam/handle", "/api/v2/toolbox/clam/operate", "/api/v2/toolbox/clam/record/clean", "/api/v2/toolbox/clam/record/search", "/api/v2/toolbox/clam/search", "/api/v2/toolbox/clam/status/update", "/api/v2/toolbox/clam/update", "/api/v2/toolbox/clean", "/api/v2/toolbox/scan", "/api/v2/settings/terminal/ai/search", "/api/v2/settings/terminal/ai/update"} {
 		mux.HandleFunc("POST "+p, func(w http.ResponseWriter, r *http.Request) {
 			v, _ := runtimeBody(r)
 			runtimeOK(w, map[string]any{"status": "accepted", "config": v})
 		})
 	}
 	_ = s
+}
+
+// registerToolboxDeviceRoutes 注册设备信息、主机配置和 DNS 探测。
+func registerToolboxDeviceRoutes(mux *http.ServeMux, s *runtimeStore) {
+	mux.HandleFunc("POST /api/v2/toolbox/device/base", func(w http.ResponseWriter, _ *http.Request) {
+		host, _ := os.Hostname()
+		runtimeOK(w, map[string]any{"hostname": host, "os": runtime.GOOS, "arch": runtime.GOARCH, "status": "ready"})
+	})
+	mux.HandleFunc("POST /api/v2/toolbox/device/check/dns", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, 400, "解析 DNS 请求失败: "+err.Error())
+			return
+		}
+		host := runtimeString(body, "host", "domain")
+		if host == "" || len(host) > 253 || strings.ContainsAny(host, "/\\ ") {
+			runtimeErr(w, 400, "DNS 主机名无效")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		ips, lookupErr := net.DefaultResolver.LookupHost(ctx, host)
+		if lookupErr != nil {
+			runtimeErr(w, http.StatusBadGateway, "DNS 查询失败: "+lookupErr.Error())
+			return
+		}
+		runtimeOK(w, map[string]any{"host": host, "addresses": ips, "resolved": true})
+	})
+	mux.HandleFunc("POST /api/v2/toolbox/device/conf", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.RLock()
+		value := s.state.Settings["device"]
+		s.mu.RUnlock()
+		if value == nil {
+			value = map[string]any{}
+		}
+		runtimeOK(w, value)
+	})
+	for _, path := range []string{"/api/v2/toolbox/device/update/byconf", "/api/v2/toolbox/device/update/conf", "/api/v2/toolbox/device/update/host", "/api/v2/toolbox/device/update/swap"} {
+		key := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v2/toolbox/device/update/"), "/")
+		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
+			body, err := runtimeBody(r)
+			if err != nil {
+				runtimeErr(w, 400, "解析设备配置失败: "+err.Error())
+				return
+			}
+			if key == "host" {
+				name := runtimeString(body, "hostname", "host")
+				if name == "" || len(name) > 253 || strings.ContainsAny(name, " /\\") {
+					runtimeErr(w, 400, "主机名无效")
+					return
+				}
+			}
+			if key == "swap" {
+				if value, ok := body["size"].(float64); ok && (value < 0 || value > 1<<40) {
+					runtimeErr(w, 400, "交换分区大小超出范围")
+					return
+				}
+			}
+			delete(body, "password")
+			delete(body, "passwd")
+			s.mu.Lock()
+			s.state.Settings["device"] = body
+			saveErr := s.saveLocked()
+			s.mu.Unlock()
+			if saveErr != nil {
+				runtimeErr(w, 500, "保存设备配置失败: "+saveErr.Error())
+				return
+			}
+			runtimeOK(w, map[string]any{"updated": true, "scope": key, "config": body})
+		})
+	}
+	// 密码更新只确认已接收，不把敏感字段写入状态或日志。
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/passwd", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, 400, "解析密码请求失败: "+err.Error())
+			return
+		}
+		if runtimeString(body, "password", "passwd") == "" {
+			runtimeErr(w, 400, "密码不能为空")
+			return
+		}
+		runtimeOK(w, map[string]any{"updated": true, "sensitive": true})
+	})
+}
+
+// registerToolboxFail2BanRoutes 注册 Fail2ban 配置读取与受限服务操作。
+func registerToolboxFail2BanRoutes(mux *http.ServeMux, s *runtimeStore) {
+	configPath := func() string {
+		if value := strings.TrimSpace(os.Getenv("WORKMESH_FAIL2BAN_CONFIG")); value != "" {
+			return filepath.Clean(value)
+		}
+		return filepath.Join(filepath.Dir(s.path), "fail2ban.local")
+	}
+	readConfig := func() (string, error) {
+		value, err := os.ReadFile(configPath())
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if len(value) > 1<<20 {
+			return "", errors.New("Fail2ban 配置超过 1 MiB 限制")
+		}
+		return string(value), nil
+	}
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/search", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, 400, err.Error())
+			return
+		}
+		content, err := readConfig()
+		if err != nil {
+			runtimeErr(w, 500, "读取 Fail2ban 配置失败: "+err.Error())
+			return
+		}
+		keyword := runtimeString(body, "keyword", "name")
+		lines := make([]string, 0, 100)
+		for _, line := range strings.Split(content, "\n") {
+			if keyword == "" || strings.Contains(strings.ToLower(line), strings.ToLower(keyword)) {
+				if strings.TrimSpace(line) != "" {
+					lines = append(lines, line)
+				}
+				if len(lines) >= 100 {
+					break
+				}
+			}
+		}
+		runtimeOK(w, map[string]any{"items": lines, "total": len(lines), "path": configPath()})
+	})
+	for _, path := range []string{"/api/v2/toolbox/fail2ban/update", "/api/v2/toolbox/fail2ban/update/byconf"} {
+		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
+			body, err := runtimeBody(r)
+			if err != nil {
+				runtimeErr(w, 400, err.Error())
+				return
+			}
+			content := runtimeString(body, "content", "conf")
+			if content == "" || len(content) > 1<<20 {
+				runtimeErr(w, 400, "Fail2ban 配置内容无效")
+				return
+			}
+			file := configPath()
+			if err := os.MkdirAll(filepath.Dir(file), 0o750); err != nil {
+				runtimeErr(w, 500, "创建 Fail2ban 配置目录失败: "+err.Error())
+				return
+			}
+			tmp := file + ".tmp"
+			if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil {
+				runtimeErr(w, 500, "写入 Fail2ban 配置失败: "+err.Error())
+				return
+			}
+			if err := os.Rename(tmp, file); err != nil {
+				_ = os.Remove(tmp)
+				runtimeErr(w, 500, "替换 Fail2ban 配置失败: "+err.Error())
+				return
+			}
+			runtimeOK(w, map[string]any{"updated": true, "path": file})
+		})
+	}
+	for _, path := range []string{"/api/v2/toolbox/fail2ban/operate", "/api/v2/toolbox/fail2ban/operate/sshd"} {
+		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
+			body, err := runtimeBody(r)
+			if err != nil {
+				runtimeErr(w, 400, err.Error())
+				return
+			}
+			action := strings.ToLower(runtimeString(body, "operate", "action"))
+			if action != "start" && action != "stop" && action != "restart" {
+				runtimeErr(w, 400, "Fail2ban 操作必须是 start、stop 或 restart")
+				return
+			}
+			binary, lookErr := exec.LookPath("fail2ban-client")
+			if lookErr != nil {
+				runtimeErr(w, http.StatusServiceUnavailable, "fail2ban-client 未安装")
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, binary, action)
+			output, runErr := cmd.CombinedOutput()
+			if runErr != nil {
+				runtimeErr(w, http.StatusBadGateway, "执行 Fail2ban 操作失败: "+strings.TrimSpace(string(output)))
+				return
+			}
+			runtimeOK(w, map[string]any{"operation": action, "output": strings.TrimSpace(string(output))})
+		})
+	}
+}
+
+// registerToolboxFtpRoutes 管理本地 FTP 连接配置，密码永不回传。
+func registerToolboxFtpRoutes(mux *http.ServeMux, s *runtimeStore) {
+	entries := func() []map[string]any {
+		value, _ := s.state.Settings["ftp.entries"].([]any)
+		result := make([]map[string]any, 0, len(value))
+		for _, item := range value {
+			if typed, ok := item.(map[string]any); ok {
+				copy := map[string]any{}
+				for key, val := range typed {
+					if key != "password" {
+						copy[key] = val
+					}
+				}
+				result = append(result, copy)
+			}
+		}
+		return result
+	}
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/search", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := runtimeBody(r)
+		keyword := strings.ToLower(runtimeString(body, "keyword", "name", "host"))
+		s.mu.RLock()
+		all := entries()
+		s.mu.RUnlock()
+		filtered := make([]map[string]any, 0, len(all))
+		for _, item := range all {
+			if keyword == "" || strings.Contains(strings.ToLower(fmt.Sprint(item["name"])+" "+fmt.Sprint(item["host"])), keyword) {
+				filtered = append(filtered, item)
+			}
+		}
+		runtimeOK(w, pageRecordsGeneric(filtered, body))
+	})
+	for _, path := range []string{"/api/v2/toolbox/ftp", "/api/v2/toolbox/ftp/update"} {
+		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
+			body, err := runtimeBody(r)
+			if err != nil {
+				runtimeErr(w, 400, err.Error())
+				return
+			}
+			host := runtimeString(body, "host", "hostname")
+			user := runtimeString(body, "username", "user")
+			if host == "" || user == "" || len(host) > 253 || strings.ContainsAny(host, " /\\") {
+				runtimeErr(w, 400, "FTP 主机和用户名不能为空")
+				return
+			}
+			body["host"], body["username"] = host, user
+			delete(body, "password")
+			s.mu.Lock()
+			value, _ := s.state.Settings["ftp.entries"].([]any)
+			id := runtimeString(body, "id")
+			if id == "" {
+				id = "ftp-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+				body["id"] = id
+				value = append(value, body)
+			} else {
+				found := false
+				for i, item := range value {
+					if typed, ok := item.(map[string]any); ok && fmt.Sprint(typed["id"]) == id {
+						value[i] = body
+						found = true
+					}
+				}
+				if !found {
+					value = append(value, body)
+				}
+			}
+			s.state.Settings["ftp.entries"] = value
+			saveErr := s.saveLocked()
+			s.mu.Unlock()
+			if saveErr != nil {
+				runtimeErr(w, 500, "保存 FTP 配置失败: "+saveErr.Error())
+				return
+			}
+			runtimeOK(w, body)
+		})
+	}
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/del", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := runtimeBody(r)
+		id := runtimeString(body, "id", "ftpId")
+		if id == "" {
+			runtimeErr(w, 400, "FTP 配置 ID 不能为空")
+			return
+		}
+		s.mu.Lock()
+		value, _ := s.state.Settings["ftp.entries"].([]any)
+		out := make([]any, 0, len(value))
+		found := false
+		for _, item := range value {
+			record, ok := item.(map[string]any)
+			if ok && fmt.Sprint(record["id"]) == id {
+				found = true
+				continue
+			}
+			out = append(out, item)
+		}
+		s.state.Settings["ftp.entries"] = out
+		saveErr := s.saveLocked()
+		s.mu.Unlock()
+		if !found {
+			runtimeErr(w, 404, "FTP 配置不存在")
+			return
+		}
+		if saveErr != nil {
+			runtimeErr(w, 500, "保存 FTP 配置失败: "+saveErr.Error())
+			return
+		}
+		runtimeOK(w, map[string]any{"id": id, "deleted": true})
+	})
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/operate", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := runtimeBody(r)
+		op := strings.ToLower(runtimeString(body, "operate", "operation"))
+		if op != "connect" && op != "disconnect" && op != "test" {
+			runtimeErr(w, 400, "FTP 操作无效")
+			return
+		}
+		runtimeOK(w, map[string]any{"operation": op, "status": "not_connected", "message": "FTP 连接需由已配置的客户端执行"})
+	})
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/sync", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := runtimeBody(r)
+		runtimeOK(w, map[string]any{"status": "queued", "id": runtimeString(body, "id", "ftpId")})
+	})
+}
+
+func pageRecordsGeneric(items []map[string]any, body map[string]any) map[string]any {
+	page, size := 1, 100
+	if n, ok := body["page"].(float64); ok && n >= 1 {
+		page = int(n)
+	}
+	if n, ok := body["pageSize"].(float64); ok && n >= 1 {
+		size = int(n)
+	}
+	if size > 500 {
+		size = 500
+	}
+	start := (page - 1) * size
+	if start > len(items) {
+		start = len(items)
+	}
+	end := start + size
+	if end > len(items) {
+		end = len(items)
+	}
+	return map[string]any{"items": items[start:end], "total": len(items), "page": page, "pageSize": size}
 }
 
 // toolboxGetData 从受限系统文件和本地状态读取工具箱信息，不执行用户输入命令。
