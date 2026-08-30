@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/todaybin/workmesh-server/node/model"
 	"github.com/todaybin/workmesh-server/node/service"
@@ -92,7 +93,166 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": cronjobs.List(r.Context())})
 	})
 	mux.HandleFunc("POST /api/v2/cronjobs/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": cronjobs.List(r.Context())})
+		items := cronjobs.List(r.Context())
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items), "page": 1, "pageSize": len(items)}})
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/update", func(w http.ResponseWriter, r *http.Request) {
+		var job model.Cronjob
+		if err := decodeJSON(r, &job); err != nil {
+			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		updated, err := cronjobs.Update(r.Context(), job)
+		if err != nil {
+			wmhttp.JSON(w, 404, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": updated})
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/status", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Enable bool   `json:"enable"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		status := in.Status
+		if status == "" {
+			if in.Enable {
+				status = "enabled"
+			} else {
+				status = "disabled"
+			}
+		}
+		if err := cronjobs.SetStatus(r.Context(), in.ID, status); err != nil {
+			wmhttp.JSON(w, 404, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200})
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/load/info", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID string `json:"id"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		job, ok := cronjobs.Get(r.Context(), in.ID)
+		if !ok {
+			wmhttp.JSON(w, 404, map[string]any{"code": "ERR", "message": "cronjob not found"})
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": job})
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/search/records", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID        string `json:"id"`
+			CronjobID string `json:"cronjobID"`
+		}
+		_ = decodeJSON(r, &in)
+		id := in.ID
+		if id == "" {
+			id = in.CronjobID
+		}
+		records := cronjobs.Records(r.Context(), id)
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": records, "total": len(records), "page": 1, "pageSize": len(records)}})
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/records/log", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID string `json:"id"`
+		}
+		_ = decodeJSON(r, &in)
+		records := cronjobs.Records(r.Context(), in.ID)
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": records})
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/records/clean", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID        string `json:"id"`
+			CronjobID string `json:"cronjobID"`
+		}
+		_ = decodeJSON(r, &in)
+		id := in.ID
+		if id == "" {
+			id = in.CronjobID
+		}
+		if err := cronjobs.CleanRecords(r.Context(), id); err != nil {
+			wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200})
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/export", func(w http.ResponseWriter, r *http.Request) {
+		b, err := cronjobs.Export(r.Context())
+		if err != nil {
+			wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write(b)
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/import", func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+		if err != nil {
+			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		if err := cronjobs.Import(r.Context(), b); err != nil {
+			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200})
+	})
+	mux.HandleFunc("GET /api/v2/cronjobs/script/options", func(w http.ResponseWriter, r *http.Request) {
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": []map[string]string{{"value": "shell", "label": "Shell"}, {"value": "python", "label": "Python"}}})
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/next", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Spec string `json:"spec"`
+		}
+		_ = decodeJSON(r, &in)
+		if strings.TrimSpace(in.Spec) == "" {
+			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "spec is required"})
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": []string{time.Now().UTC().Add(time.Hour).Format(time.RFC3339)}})
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/stop", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID string `json:"id"`
+		}
+		_ = decodeJSON(r, &in)
+		if in.ID == "" {
+			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "id is required"})
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200})
+	})
+	mux.HandleFunc("POST /api/v2/cronjobs/group/update", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID      string `json:"id"`
+			GroupID uint   `json:"groupID"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		job, ok := cronjobs.Get(r.Context(), in.ID)
+		if !ok {
+			wmhttp.JSON(w, 404, map[string]any{"code": "ERR", "message": "cronjob not found"})
+			return
+		}
+		job.GroupID = in.GroupID
+		updated, err := cronjobs.Update(r.Context(), job)
+		if err != nil {
+			wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": updated})
 	})
 	mux.HandleFunc("POST /api/v2/cronjobs/handle", func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
@@ -130,6 +290,7 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	registerHostRoutes(mux)
 	registerAIExecutionRoutes(mux)
 	registerCoreResourceRoutes(mux)
+	registerCoreCommandRoutes(mux)
 	registerFileRoutes(mux)
 	registerDatabaseRoutes(mux)
 	registerDeploymentAndProcessRoutes(mux)

@@ -31,9 +31,13 @@ type DockerOperationRequest struct {
 
 // Cronjob 描述节点计划任务的最小持久化模型。
 type Cronjob struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Spec    string `json:"spec"`
-	Command string `json:"command"`
-	Status  string `json:"status"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Spec      string `json:"spec"`
+	Command   string `json:"command"`
+	Status    string `json:"status"`
+	GroupID   uint   `json:"groupID,omitempty"`
+	Type      string `json:"type,omitempty"`
+	CreatedAt string `json:"createdAt,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }

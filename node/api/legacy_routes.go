@@ -21,7 +21,7 @@ type routeRegistrar interface {
 type legacyFilterMux struct{ mux *http.ServeMux }
 
 func (m legacyFilterMux) HandleFunc(pattern string, handler http.HandlerFunc) {
-	if isBackupAlertLogSettingsRoute(pattern) || isWebsiteFunctionalRoute(pattern) || isContainerRoute(pattern) || isHostRoute(pattern) || isAIExecutionRoute(pattern) || isCoreResourceRoute(pattern) || isFileRoute(pattern) || isDatabaseRoute(pattern) || isDeploymentProcessRoute(pattern) || isRuntimeToolboxRoute(pattern) || isAppRoute(pattern) || isSitesRoute(pattern) {
+	if isBackupAlertLogSettingsRoute(pattern) || isWebsiteFunctionalRoute(pattern) || isContainerRoute(pattern) || isHostRoute(pattern) || isAIExecutionRoute(pattern) || isCoreResourceRoute(pattern) || isCoreCommandRoute(pattern) || isFileRoute(pattern) || isDatabaseRoute(pattern) || isDeploymentProcessRoute(pattern) || isRuntimeToolboxRoute(pattern) || isAppRoute(pattern) || isSitesRoute(pattern) {
 		return
 	}
 	if isCoreAuthRoute(pattern) {
