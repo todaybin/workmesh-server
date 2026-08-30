@@ -138,6 +138,9 @@ func TestToolboxDeviceDNSAndFTPState(t *testing.T) {
 	if res := call(http.MethodPost, "/api/v2/toolbox/ftp/search", `{"keyword":"ftp.example"}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "ftp.example") {
 		t.Fatalf("FTP 搜索失败: %d %s", res.Code, res.Body.String())
 	}
+	if res := call(http.MethodPost, "/api/v2/toolbox/ftp/log/search", `{"page":1,"pageSize":20}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "create_or_update") {
+		t.Fatalf("FTP 日志查询失败: %d %s", res.Code, res.Body.String())
+	}
 	if res := call(http.MethodPost, "/api/v2/toolbox/fail2ban/update", `{"content":"[sshd]\nenabled=true"}`); res.Code != http.StatusOK {
 		t.Fatalf("Fail2ban 配置保存失败: %d %s", res.Code, res.Body.String())
 	}

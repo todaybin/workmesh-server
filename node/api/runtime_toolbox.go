@@ -846,6 +846,16 @@ func registerToolboxFail2BanRoutes(mux *http.ServeMux, s *runtimeStore) {
 
 // registerToolboxFtpRoutes 管理本地 FTP 连接配置，密码永不回传。
 func registerToolboxFtpRoutes(mux *http.ServeMux, s *runtimeStore) {
+	// FTP 日志写入共享运行时状态，限制最多保留 1000 条，避免无界增长。
+	appendLog := func(action, id, detail string) {
+		record := map[string]any{"id": "ftp-log-" + strconv.FormatInt(time.Now().UnixNano(), 10), "action": action, "ftpId": id, "detail": detail, "createdAt": time.Now().UTC().Format(time.RFC3339Nano)}
+		value, _ := s.state.Settings["ftp.logs"].([]any)
+		value = append(value, record)
+		if len(value) > 1000 {
+			value = value[len(value)-1000:]
+		}
+		s.state.Settings["ftp.logs"] = value
+	}
 	entries := func() []map[string]any {
 		value, _ := s.state.Settings["ftp.entries"].([]any)
 		result := make([]map[string]any, 0, len(value))
@@ -911,12 +921,22 @@ func registerToolboxFtpRoutes(mux *http.ServeMux, s *runtimeStore) {
 				}
 			}
 			s.state.Settings["ftp.entries"] = value
+			logs, _ := s.state.Settings["ftp.logs"].([]any)
+			logs = append(logs, map[string]any{"id": "ftp-log-" + strconv.FormatInt(time.Now().UnixNano(), 10), "action": path[strings.LastIndex(path, "/")+1:], "resourceId": id, "createdAt": time.Now().UTC()})
+			if len(logs) > 1000 {
+				logs = logs[len(logs)-1000:]
+			}
+			s.state.Settings["ftp.logs"] = logs
 			saveErr := s.saveLocked()
 			s.mu.Unlock()
 			if saveErr != nil {
 				runtimeErr(w, 500, "保存 FTP 配置失败: "+saveErr.Error())
 				return
 			}
+			s.mu.Lock()
+			appendLog("create_or_update", id, host)
+			_ = s.saveLocked()
+			s.mu.Unlock()
 			runtimeOK(w, body)
 		})
 	}
@@ -940,6 +960,14 @@ func registerToolboxFtpRoutes(mux *http.ServeMux, s *runtimeStore) {
 			out = append(out, item)
 		}
 		s.state.Settings["ftp.entries"] = out
+		if found {
+			logs, _ := s.state.Settings["ftp.logs"].([]any)
+			logs = append(logs, map[string]any{"id": "ftp-log-" + strconv.FormatInt(time.Now().UnixNano(), 10), "action": "delete", "resourceId": id, "createdAt": time.Now().UTC()})
+			if len(logs) > 1000 {
+				logs = logs[len(logs)-1000:]
+			}
+			s.state.Settings["ftp.logs"] = logs
+		}
 		saveErr := s.saveLocked()
 		s.mu.Unlock()
 		if !found {
@@ -950,6 +978,10 @@ func registerToolboxFtpRoutes(mux *http.ServeMux, s *runtimeStore) {
 			runtimeErr(w, 500, "保存 FTP 配置失败: "+saveErr.Error())
 			return
 		}
+		s.mu.Lock()
+		appendLog("delete", id, "")
+		_ = s.saveLocked()
+		s.mu.Unlock()
 		runtimeOK(w, map[string]any{"id": id, "deleted": true})
 	})
 	mux.HandleFunc("POST /api/v2/toolbox/ftp/operate", func(w http.ResponseWriter, r *http.Request) {
@@ -959,11 +991,38 @@ func registerToolboxFtpRoutes(mux *http.ServeMux, s *runtimeStore) {
 			runtimeErr(w, 400, "FTP 操作无效")
 			return
 		}
+		s.mu.Lock()
+		appendLog(op, runtimeString(body, "id", "ftpId"), "client_operation")
+		_ = s.saveLocked()
+		s.mu.Unlock()
 		runtimeOK(w, map[string]any{"operation": op, "status": "not_connected", "message": "FTP 连接需由已配置的客户端执行"})
 	})
 	mux.HandleFunc("POST /api/v2/toolbox/ftp/sync", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := runtimeBody(r)
 		runtimeOK(w, map[string]any{"status": "queued", "id": runtimeString(body, "id", "ftpId")})
+	})
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/log/search", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, 400, "解析 FTP 日志查询失败: "+err.Error())
+			return
+		}
+		keyword := strings.ToLower(runtimeString(body, "keyword", "action", "resourceId"))
+		s.mu.RLock()
+		stored, _ := s.state.Settings["ftp.logs"].([]any)
+		logs := make([]map[string]any, 0, len(stored))
+		for _, item := range stored {
+			record, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if keyword != "" && !strings.Contains(strings.ToLower(fmt.Sprint(record["action"])+" "+fmt.Sprint(record["resourceId"])), keyword) {
+				continue
+			}
+			logs = append(logs, cloneRuntimeMap(record))
+		}
+		s.mu.RUnlock()
+		runtimeOK(w, pageRecordsGeneric(logs, body))
 	})
 }
 
@@ -987,6 +1046,14 @@ func pageRecordsGeneric(items []map[string]any, body map[string]any) map[string]
 		end = len(items)
 	}
 	return map[string]any{"items": items[start:end], "total": len(items), "page": page, "pageSize": size}
+}
+
+func cloneRuntimeMap(source map[string]any) map[string]any {
+	result := make(map[string]any, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 // toolboxGetData 从受限系统文件和本地状态读取工具箱信息，不执行用户输入命令。
