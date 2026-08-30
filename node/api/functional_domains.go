@@ -24,10 +24,20 @@ import (
 // domainState 是备份、告警、日志和设置共用的轻量持久化状态。
 // 使用单文件原子写入，避免为低频控制面功能常驻数据库连接。
 type domainState struct {
-	Backups  []backupItem   `json:"backups"`
-	Alerts   []alertItem    `json:"alerts"`
-	Logs     []logItem      `json:"logs"`
-	Settings map[string]any `json:"settings"`
+	Backups   []backupItem      `json:"backups"`
+	Alerts    []alertItem       `json:"alerts"`
+	Logs      []logItem         `json:"logs"`
+	Settings  map[string]any    `json:"settings"`
+	Snapshots []settingSnapshot `json:"snapshots"`
+}
+
+// settingSnapshot 保存设置快照，供回滚与导入导出接口使用。
+type settingSnapshot struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Data        map[string]any `json:"data"`
+	CreatedAt   time.Time      `json:"createdAt"`
 }
 
 type domainStore struct {
@@ -154,7 +164,7 @@ func isBackupAlertLogSettingsRoute(pattern string) bool {
 	if len(parts) == 2 {
 		path = parts[1]
 	}
-	for _, prefix := range []string{"/api/v2/backups", "/api/v2/alert", "/api/v2/logs", "/api/v2/log/", "/api/v2/core/backups", "/api/v2/core/logs", "/api/v2/core/settings", "/api/v2/config/global"} {
+	for _, prefix := range []string{"/api/v2/backups", "/api/v2/alert", "/api/v2/logs", "/api/v2/log/", "/api/v2/core/backups", "/api/v2/core/logs", "/api/v2/core/settings", "/api/v2/settings", "/api/v2/config/global"} {
 		if path == prefix || strings.HasPrefix(path, prefix) {
 			return true
 		}
@@ -686,8 +696,21 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 		}
 		s.mu.RUnlock()
 		switch r.URL.Path {
-		case "/api/v2/core/settings/search/available":
+		case "/api/v2/core/settings/search/available", "/api/v2/settings/search/available":
 			success(w, map[string]any{"available": true})
+		case "/api/v2/settings/basedir":
+			dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
+			if dir == "" {
+				dir = ".workmesh-data"
+			}
+			success(w, map[string]any{"baseDir": dir, "path": dir})
+		case "/api/v2/settings/website/dir":
+			success(w, map[string]any{"path": "/var/www", "dir": "/var/www"})
+		case "/api/v2/settings/snapshot/load":
+			s.mu.RLock()
+			items := append([]settingSnapshot(nil), s.state.Snapshots...)
+			s.mu.RUnlock()
+			success(w, map[string]any{"items": items, "total": len(items)})
 		case "/api/v2/core/settings/interface":
 			success(w, []string{"127.0.0.1", "0.0.0.0"})
 		case "/api/v2/core/settings/apps/store/config":
@@ -704,7 +727,7 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 			success(w, copy)
 		}
 	}
-	for _, path := range []string{"/api/v2/config/global", "/api/v2/core/settings/interface", "/api/v2/core/settings/apps/store/config", "/api/v2/core/settings/search/available", "/api/v2/core/settings/ssl/info", "/api/v2/core/settings/upgrade", "/api/v2/core/settings/upgrade/releases", "/api/v2/core/settings/memo"} {
+	for _, path := range []string{"/api/v2/config/global", "/api/v2/core/settings/interface", "/api/v2/core/settings/apps/store/config", "/api/v2/core/settings/search/available", "/api/v2/core/settings/ssl/info", "/api/v2/core/settings/upgrade", "/api/v2/core/settings/upgrade/releases", "/api/v2/core/settings/memo", "/api/v2/settings/basedir", "/api/v2/settings/search/available", "/api/v2/settings/snapshot/load", "/api/v2/settings/website/dir"} {
 		mux.HandleFunc("GET "+path, get)
 	}
 	update := func(w http.ResponseWriter, r *http.Request) {
@@ -747,12 +770,123 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 		}
 		success(w, copy)
 	}
-	for _, path := range []string{"/api/v2/config/global", "/api/v2/core/settings/apps/store/update", "/api/v2/core/settings/bind/update", "/api/v2/core/settings/menu/update", "/api/v2/core/settings/port/update", "/api/v2/core/settings/proxy/update", "/api/v2/core/settings/search", "/api/v2/core/settings/search/base", "/api/v2/core/settings/terminal/update", "/api/v2/core/settings/ssl/update", "/api/v2/core/settings/upgrade", "/api/v2/core/settings/upgrade/notes", "/api/v2/core/settings/memo", "/api/v2/core/settings/update"} {
+	for _, path := range []string{"/api/v2/config/global", "/api/v2/core/settings/apps/store/update", "/api/v2/core/settings/bind/update", "/api/v2/core/settings/menu/update", "/api/v2/core/settings/port/update", "/api/v2/core/settings/proxy/update", "/api/v2/core/settings/search", "/api/v2/core/settings/search/base", "/api/v2/core/settings/terminal/update", "/api/v2/core/settings/ssl/update", "/api/v2/core/settings/upgrade", "/api/v2/core/settings/upgrade/notes", "/api/v2/core/settings/memo", "/api/v2/core/settings/update", "/api/v2/settings/description/save", "/api/v2/settings/file-history/search", "/api/v2/settings/file-history/update", "/api/v2/settings/files/ai/search", "/api/v2/settings/files/ai/update", "/api/v2/settings/search", "/api/v2/settings/update"} {
 		mux.HandleFunc("POST "+path, update)
 	}
 	for _, path := range []string{"/api/v2/core/settings/menu/default", "/api/v2/core/settings/terminal/search", "/api/v2/core/settings/ssl/download", "/api/v2/core/settings/ssl/reload"} {
 		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, _ *http.Request) { success(w, map[string]any{}) })
 	}
+	// Agent 侧设置快照使用同一份轻量状态文件，支持创建、查询、导入、恢复、回滚和删除。
+	createSnapshot := func(w http.ResponseWriter, r *http.Request) {
+		v, err := requestMap(r)
+		if err != nil {
+			domainError(w, 400, "INVALID_JSON", err.Error())
+			return
+		}
+		now := time.Now().UTC()
+		s.mu.Lock()
+		data := map[string]any{}
+		for k, value := range s.state.Settings {
+			data[k] = value
+		}
+		item := settingSnapshot{ID: idToken(), Name: valueString(v, "name", "snapshotName"), Description: valueString(v, "description"), Data: data, CreatedAt: now}
+		if item.Name == "" {
+			item.Name = "snapshot-" + now.Format("20060102-150405")
+		}
+		s.state.Snapshots = append(s.state.Snapshots, item)
+		err = s.saveLocked()
+		s.mu.Unlock()
+		if err != nil {
+			domainError(w, 500, "STATE_SAVE", err.Error())
+			return
+		}
+		success(w, item)
+	}
+	mux.HandleFunc("POST /api/v2/settings/snapshot", createSnapshot)
+	mux.HandleFunc("POST /api/v2/settings/snapshot/recreate", createSnapshot)
+	mux.HandleFunc("POST /api/v2/settings/snapshot/search", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.RLock()
+		items := append([]settingSnapshot(nil), s.state.Snapshots...)
+		s.mu.RUnlock()
+		success(w, map[string]any{"items": items, "total": len(items), "page": 1, "pageSize": 50})
+	})
+	mux.HandleFunc("POST /api/v2/settings/snapshot/import", func(w http.ResponseWriter, r *http.Request) {
+		v, err := requestMap(r)
+		if err != nil {
+			domainError(w, 400, "INVALID_JSON", err.Error())
+			return
+		}
+		data, _ := v["data"].(map[string]any)
+		if data == nil {
+			data = map[string]any{}
+		}
+		now := time.Now().UTC()
+		item := settingSnapshot{ID: idToken(), Name: valueString(v, "name"), Description: valueString(v, "description"), Data: data, CreatedAt: now}
+		if item.Name == "" {
+			item.Name = "imported-" + now.Format("20060102-150405")
+		}
+		s.mu.Lock()
+		s.state.Snapshots = append(s.state.Snapshots, item)
+		err = s.saveLocked()
+		s.mu.Unlock()
+		if err != nil {
+			domainError(w, 500, "STATE_SAVE", err.Error())
+			return
+		}
+		success(w, item)
+	})
+	mux.HandleFunc("POST /api/v2/settings/snapshot/del", func(w http.ResponseWriter, r *http.Request) {
+		v, _ := requestMap(r)
+		id := valueString(v, "id", "snapshotId")
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for i, item := range s.state.Snapshots {
+			if item.ID == id {
+				s.state.Snapshots = append(s.state.Snapshots[:i], s.state.Snapshots[i+1:]...)
+				_ = s.saveLocked()
+				success(w, nil)
+				return
+			}
+		}
+		domainError(w, 404, "NOT_FOUND", "设置快照不存在")
+	})
+	recoverSnapshot := func(w http.ResponseWriter, r *http.Request) {
+		v, _ := requestMap(r)
+		id := valueString(v, "id", "snapshotId")
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, item := range s.state.Snapshots {
+			if item.ID == id {
+				s.state.Settings = map[string]any{}
+				for k, value := range item.Data {
+					s.state.Settings[k] = value
+				}
+				_ = s.saveLocked()
+				success(w, item)
+				return
+			}
+		}
+		domainError(w, 404, "NOT_FOUND", "设置快照不存在")
+	}
+	for _, path := range []string{"/api/v2/settings/snapshot/recover", "/api/v2/settings/snapshot/rollback"} {
+		mux.HandleFunc("POST "+path, recoverSnapshot)
+	}
+	mux.HandleFunc("POST /api/v2/settings/snapshot/description/update", func(w http.ResponseWriter, r *http.Request) {
+		v, _ := requestMap(r)
+		id := valueString(v, "id", "snapshotId")
+		description := valueString(v, "description")
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for i := range s.state.Snapshots {
+			if s.state.Snapshots[i].ID == id {
+				s.state.Snapshots[i].Description = description
+				_ = s.saveLocked()
+				success(w, s.state.Snapshots[i])
+				return
+			}
+		}
+		domainError(w, 404, "NOT_FOUND", "设置快照不存在")
+	})
 }
 
 // settingJSONKey 将旧接口的 PascalCase 配置键转换为前端使用的 lowerCamelCase。

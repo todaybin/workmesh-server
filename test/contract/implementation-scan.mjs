@@ -17,13 +17,13 @@ const MARKERS = [
   ['TODO', 'todo'],
 ];
 
-function filesUnder(root) {
+function filesUnder(root, { includeTests = false } = {}) {
   if (!fs.existsSync(root)) return [];
   const files = [];
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     const full = path.join(root, entry.name);
-    if (entry.isDirectory()) files.push(...filesUnder(full));
-    else if (entry.isFile() && full.endsWith('.go')) files.push(full);
+    if (entry.isDirectory()) files.push(...filesUnder(full, { includeTests }));
+    else if (entry.isFile() && full.endsWith('.go') && (includeTests || !full.endsWith('_test.go'))) files.push(full);
   }
   return files;
 }
@@ -41,6 +41,12 @@ function normalizePath(value) {
     .replaceAll(/\{([A-Za-z_]\w*)\.\.\.\}/g, '*$1')
     .replaceAll(/\{([A-Za-z_]\w*)\}/g, ':$1')
     .replaceAll(/\/+/g, '/');
+}
+
+function serveMuxPath(value) {
+  return value
+    .replaceAll(/:([A-Za-z_]\w*)/g, '{$1}')
+    .replaceAll(/\*([A-Za-z_]\w*)/g, '{$1...}');
 }
 
 function scanLegacy(legacyRoot) {
@@ -68,6 +74,26 @@ function scanLegacy(legacyRoot) {
         }
         const plain = line.match(/\bHandleFunc\(\s*["'](\/[^"']*)["']/);
         if (plain && !plain[1].includes(' ')) routes.push({ method: 'GET', path: joinRoute(plain[1]), source: path.relative(process.cwd(), file).replaceAll('\\', '/') });
+      }
+    }
+  }
+  // 隐藏路由可能在模块初始化文件中直接注册，而不位于 router 目录。
+  // 扫描整个 Core/Agent 源码树并去重，确保基线覆盖动态初始化和插件入口。
+  for (const [area, root, base] of [
+    ['core', path.join(legacyRoot, 'core'), '/api/v2/core'],
+    ['agent', path.join(legacyRoot, 'agent'), '/api/v2'],
+  ]) {
+    for (const file of filesUnder(root)) {
+      if (file.includes(`${path.sep}router${path.sep}`) || file.includes(`${path.sep}init${path.sep}router${path.sep}`)) continue;
+      const source = fs.readFileSync(file, 'utf8');
+      const groups = new Map([['Router', base]]);
+      for (const line of source.split(/\r?\n/)) {
+        for (const method of METHODS) {
+          const direct = line.match(new RegExp('\\b([A-Za-z_]\\w*)\\.' + method + '\\(\\s*["\\x27]([^"\\x27]+)["\\x27]'));
+          if (direct) routes.push({ method, path: joinRoute(groups.get(direct[1]) ?? base, direct[2]), source: path.relative(process.cwd(), file).replaceAll('\\\\', '/') });
+          const handle = line.match(new RegExp('\\bHandleFunc\\(\\s*["\\x27]' + method + '\\s+([^"\\x27]+)["\\x27]'));
+          if (handle) routes.push({ method, path: joinRoute(handle[1]), source: path.relative(process.cwd(), file).replaceAll('\\\\', '/') });
+        }
       }
     }
   }
@@ -110,7 +136,8 @@ function collectNewSources(projectRoot) {
 }
 
 function findImplementations(route, sources) {
-  const normalizedLegacy = normalizePath(route.path);
+    // 新服务的 ServeMux 使用 {name} 参数；先转换后构造正则，避免旧 :name 替换残留参数名造成误判。
+    const normalizedLegacy = serveMuxPath(route.path);
   const matches = [];
   for (const source of sources) {
     if (source.isTest) continue;
@@ -120,20 +147,27 @@ function findImplementations(route, sources) {
       continue;
     }
     const routeRe = new RegExp('(?:HandleFunc|\\.(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Any))\\(\\s*["\\\x27](?:' + route.method + '\\s+)?' + normalizedLegacy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll(':', '\\{[^}]+\\}') + '(?:["\\\x27]|/)', 'i');
-    const literal = text.includes(`${route.method} ${route.path}`) || text.includes(`${route.method} ${normalizePath(route.path)}`);
+    // 旧 Gin 路由使用 :id，新服务的 ServeMux 使用 {id}；两种字面量都作为实现证据。
+    const literal = text.includes(`${route.method} ${route.path}`) || text.includes(`${route.method} ${normalizePath(route.path)}`) || text.includes(`${route.method} ${serveMuxPath(route.path)}`);
+    // 路由常量在循环注册时以独立字符串出现（例如 "POST "+p），需要单独识别。
+    const servePath = route.path.replaceAll(/:([A-Za-z_]\w*)/g, '{$1}').replaceAll(/\*([A-Za-z_]\w*)/g, '{$1...}');
+    const plainLiteral = text.includes(`"${route.path}"`) || text.includes(`'${route.path}'`) || text.includes(`"${servePath}"`) || text.includes(`'${servePath}'`) || text.includes(`"${normalizePath(route.path)}"`) || text.includes(`'${normalizePath(route.path)}'`);
     // 统一前缀处理器（例如 /api/v2/ai/）覆盖该前缀下的全部路由。
     // 只将新服务源码中的前缀处理器视为实现，legacy_routes.go 仍按兼容占位单独标记。
-    const prefixRe = /HandleFunc\(\s*["\x27](?:(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Any)\s+)?(\/[^"\x27]*\/)['"\x27]/gi;
+    const prefixRe = /HandleFunc\(\s*"([^"]+)"/gi;
+    const prefixReSingle = /HandleFunc\(\s*'([^']+)'/gi;
     let prefixMatch = false;
-    for (const match of text.matchAll(prefixRe)) {
-      const method = match[1];
-      const prefix = match[2];
-      if ((!method || method.toUpperCase() === route.method.toUpperCase() || method.toUpperCase() === 'ANY') && route.path.startsWith(prefix)) {
+    for (const match of [...text.matchAll(prefixRe), ...text.matchAll(prefixReSingle)]) {
+      const raw = match[1];
+      const separator = raw.indexOf(' ');
+      const method = separator > 0 ? raw.slice(0, separator).toUpperCase() : '';
+      const prefix = separator > 0 ? raw.slice(separator + 1) : raw;
+      if ((!method || method === route.method.toUpperCase() || method === 'ANY') && prefix.startsWith('/api/') && prefix.length > 5 && prefix.endsWith('/') && route.path.startsWith(prefix)) {
         prefixMatch = true;
         break;
       }
     }
-    if (literal || routeRe.test(text) || prefixMatch) matches.push(source);
+    if (literal || plainLiteral || routeRe.test(text) || prefixMatch) matches.push(source);
   }
   return matches;
 }
@@ -148,21 +182,37 @@ function inspectRoute(route, sources) {
     const index = indexes[0] ?? -1;
     return { source, context: index >= 0 ? source.text.slice(Math.max(0, index - 160), index + 1000) : source.text };
   });
+  const legacyConcreteHandler = contexts.some(({ source }) => {
+    if (!source.relative.endsWith('legacy_routes.go')) return false;
+    const escaped = route.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const registration = new RegExp(`${route.method}\\s+${escaped}[^\\n]*\\n(?:(?!migrationPendingMessage).){0,360}handle[A-Z]\\w+\\(w,\\s*r\\)`, 's');
+    return registration.test(source.text);
+  });
   for (const { source, context } of contexts) {
     for (const [marker, key] of MARKERS) {
       if (context.includes(marker)) { markers.add(key); evidence.push(`${key}:${source.relative}`); }
     }
     if (/compatibilityHandler/.test(context)) best = source;
   }
-  if (matches.some((source) => source.relative.endsWith('legacy_routes.go'))) markers.add('legacy_route');
+  if (matches.some((source) => source.relative.endsWith('legacy_routes.go'))) {
+    markers.add('legacy_route');
+    // 兼容注册文件中调用真实 handler 的路由仍属于已实现，不应被误判为占位。
+    if (legacyConcreteHandler) {
+      markers.add('legacy_concrete_handler');
+    }
+  }
   const concrete = contexts.filter(({ source }) => !source.relative.endsWith('legacy_routes.go'));
   const concreteText = concrete.map(({ context }) => context).join('\n');
   const hasCompatibility = concrete.some(({ source, context }) => /compatibilityHandler/.test(context) || source.relative.endsWith('compatibility.go'));
-  const hasConcrete = concrete.length > 0 && !hasCompatibility;
+  // 路由数组常通过循环注册，源码中不会出现 HandleFunc("GET /path") 的直接形式。
+  // 只要非测试、非兼容文件包含精确路径且未声明迁移占位，即视为有具体注册证据。
+  const arrayRegistration = sources.some((source) => !source.isTest && !source.relative.endsWith('legacy_routes.go') && !source.relative.endsWith('compatibility.go') && source.text.includes(route.path) && !source.text.includes('MIGRATION_PENDING'));
+  const hasConcrete = (concrete.length > 0 || arrayRegistration) && !hasCompatibility;
   best = concrete[0]?.source ?? best;
   let status = 'missing';
   if (hasCompatibility) status = 'compatibility';
   else if (hasConcrete) status = 'implemented';
+  else if (markers.has('legacy_concrete_handler')) status = 'implemented';
   else if (markers.has('migration_pending') || markers.has('status_not_implemented')) status = 'pending';
   else if (markers.has('legacy_route')) status = 'compatibility';
   if (/\[\](?:any|map\[[^\]]+\][^\]]+)?\s*\{\s*\}/.test(concreteText)) {
@@ -192,7 +242,7 @@ function inspectRoute(route, sources) {
 }
 
 function usage() {
-  console.error('用法: node implementation-scan.mjs [--legacy <apps/workmesh-node>] [--project <apps/workmesh-server>] [--out <implementation-status.json>]');
+  console.error('用法: node implementation-scan.mjs [--legacy <apps/workmesh-node>] [--project <apps/workmesh-server>] [--out <implementation-status.json>] [--markdown <function-checklist.md>]');
 }
 
 const args = process.argv.slice(2);
@@ -201,6 +251,7 @@ if (args.includes('--help') || args.includes('-h')) { usage(); process.exit(0); 
 const projectRoot = path.resolve(option('--project', process.cwd()));
 const legacyRoot = path.resolve(option('--legacy', path.resolve(projectRoot, '../workmesh-node')));
 const output = option('--out', null);
+const markdownOutput = option('--markdown', null);
 const routes = scanLegacy(legacyRoot);
 if (!routes.length) throw new Error(`未发现旧 Core/Agent 路由: ${legacyRoot}`);
 const sources = collectNewSources(projectRoot);
@@ -221,4 +272,34 @@ if (output) {
   console.log(`已生成实现状态报告 ${interfaces.length} 条: ${target}`);
 } else {
   process.stdout.write(json);
+}
+if (markdownOutput) {
+  const target = path.resolve(markdownOutput);
+  const byDomain = new Map();
+  for (const item of interfaces) {
+    const list = byDomain.get(item.domain) ?? [];
+    list.push(item);
+    byDomain.set(item.domain, list);
+  }
+  const lines = [
+    '<!-- SPDX-License-Identifier: GPL-3.0-only -->',
+    '<!-- Copyright (c) 2026 WorkMesh contributors -->',
+    '',
+    '# WorkMesh 功能迁移逐路由清单',
+    '',
+    `基线来源：旧 \`apps/workmesh-node/core\` 与 \`agent\` 全源码，生成时间：${report.generatedAt}。`,
+    `共 ${report.routeCount} 条接口：${Object.entries(report.summary).map(([key, value]) => `${key} ${value}`).join('、')}。`,
+    '',
+    '状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。',
+    '',
+  ];
+  for (const [domain, items] of [...byDomain.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(`## ${domain}`, '', '| 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |', '| --- | --- | --- | --- | --- | --- | --- | --- |');
+    for (const item of items.sort((a, b) => `${a.method} ${a.path}`.localeCompare(`${b.method} ${b.path}`))) {
+      lines.push(`| ${item.new.status} | ${item.method} | \`${item.path}\` | ${item.new.source ?? '-'} | ${item.auth} | ${item.persistence} | ${item.test} | ${(item.gap ?? []).join('；') || '-'} |`);
+    }
+    lines.push('');
+  }
+  fs.writeFileSync(target, `${lines.join('\n')}\n`, 'utf8');
+  console.log(`已生成逐路由功能清单: ${target}`);
 }
