@@ -6,6 +6,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -28,17 +29,33 @@ type appRecord struct {
 	UpdatedAt time.Time      `json:"updatedAt"`
 }
 
+// appCatalogDocument 描述本地应用目录文件，允许目录同时携带版本和同步元数据。
+type appCatalogDocument struct {
+	Apps         []appRecord `json:"apps"`
+	Catalog      []appRecord `json:"catalog"`
+	Version      string      `json:"version"`
+	LastModified int64       `json:"lastModified"`
+	IsSyncing    bool        `json:"isSyncing"`
+}
+
 type appStoreState struct {
-	Apps        []appRecord      `json:"apps"`
-	Catalog     []appRecord      `json:"catalog"`
-	Ignored     []map[string]any `json:"ignored"`
-	StoreConfig map[string]any   `json:"storeConfig"`
+	Apps                []appRecord      `json:"apps"`
+	Catalog             []appRecord      `json:"catalog"`
+	Ignored             []map[string]any `json:"ignored"`
+	StoreConfig         map[string]any   `json:"storeConfig"`
+	CatalogVersion      string           `json:"catalogVersion,omitempty"`
+	CatalogLastModified int64            `json:"catalogLastModified,omitempty"`
+	CatalogSyncing      bool             `json:"catalogSyncing,omitempty"`
+	CatalogSyncedAt     time.Time        `json:"catalogSyncedAt,omitempty"`
 }
 
 type appStore struct {
-	mu    sync.RWMutex
-	path  string
-	state appStoreState
+	mu             sync.RWMutex
+	path           string
+	state          appStoreState
+	catalogPath    string
+	catalogModTime time.Time
+	catalogSize    int64
 }
 
 var appStoreMu sync.Mutex
@@ -114,10 +131,20 @@ func appOK(w http.ResponseWriter, d any) { runtimeOK(w, d) }
 
 func appRecordData(a appRecord) map[string]any {
 	id := a.ID
-	item := map[string]any{"id": id, "key": a.Key, "name": a.Name, "version": a.Version, "status": a.Status, "appKey": a.Key, "appName": a.Name, "appStatus": a.Status, "ready": 1, "total": 1, "canUpdate": false, "favorite": false, "sortOrder": a.SortOrder, "updatedAt": a.UpdatedAt, "config": a.Config}
+	// 默认目录记录没有已安装版本上下文，调用方会在有目录时覆写该字段。
+	canUpdate := false
+	item := map[string]any{"id": id, "key": a.Key, "name": a.Name, "version": a.Version, "status": a.Status, "appKey": a.Key, "appName": a.Name, "appStatus": a.Status, "ready": 1, "total": 1, "canUpdate": canUpdate, "favorite": false, "sortOrder": a.SortOrder, "updatedAt": a.UpdatedAt, "config": a.Config}
 	if n, err := strconv.ParseInt(id, 10, 64); err == nil {
 		item["id"] = n
 	}
+	return item
+}
+
+// appRecordDataWithCatalog 在输出已安装应用时根据目录中的最高版本计算升级状态。
+func appRecordDataWithCatalog(a appRecord, catalog []appRecord) map[string]any {
+	item := appRecordData(a)
+	_, latest, ok := latestCatalogVersion(a, catalog)
+	item["canUpdate"] = ok && compareAppVersion(latest.Version, a.Version) > 0
 	return item
 }
 
@@ -131,48 +158,202 @@ func findApp(items []appRecord, id string) (int, appRecord) {
 }
 
 func appCatalogFromEnv() []appRecord {
-	var result []appRecord
 	if file := strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG")); file != "" {
-		if data, err := os.ReadFile(file); err == nil {
-			_ = json.Unmarshal(data, &result)
+		result, _, _, err := loadAppCatalogFile(file)
+		if err == nil {
+			return result
 		}
 	}
-	return result
+	return nil
 }
 
-// versionGreater 比较常见的点分数字版本，无法解析的版本按字典序比较。
-func versionGreater(latest, current string) bool {
-	parse := func(value string) []int {
-		parts := strings.Split(strings.TrimSpace(value), ".")
-		result := make([]int, len(parts))
-		for i, part := range parts {
-			part = strings.TrimLeft(part, "vV")
-			for j, r := range part {
-				if r < '0' || r > '9' {
-					part = part[:j]
-					break
+// compareAppVersion 比较常见的语义化版本，返回值大于零表示 a 更新。
+// 预发布版本低于同一主版本的正式版本；无法解析时使用不区分大小写的字典序。
+func compareAppVersion(a, b string) int {
+	parse := func(value string) (core []int, pre []string, valid bool) {
+		value = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(value, "v"), "V"))
+		if value == "" {
+			return nil, nil, false
+		}
+		value = strings.SplitN(value, "+", 2)[0]
+		parts := strings.SplitN(value, "-", 2)
+		for _, part := range strings.Split(parts[0], ".") {
+			if part == "" {
+				return nil, nil, false
+			}
+			n, err := strconv.Atoi(part)
+			if err != nil || n < 0 {
+				return nil, nil, false
+			}
+			core = append(core, n)
+		}
+		if len(parts) == 2 {
+			for _, id := range strings.Split(parts[1], ".") {
+				if id == "" {
+					return nil, nil, false
 				}
-			}
-			if n, err := strconv.Atoi(part); err == nil {
-				result[i] = n
+				pre = append(pre, id)
 			}
 		}
-		return result
+		return core, pre, true
 	}
-	a, b := parse(latest), parse(current)
-	for i := 0; i < len(a) || i < len(b); i++ {
-		av, bv := 0, 0
-		if i < len(a) {
-			av = a[i]
+	ac, ap, av := parse(a)
+	bc, bp, bv := parse(b)
+	if !av || !bv {
+		return strings.Compare(strings.ToLower(strings.TrimSpace(a)), strings.ToLower(strings.TrimSpace(b)))
+	}
+	for i := 0; i < len(ac) || i < len(bc); i++ {
+		an, bn := 0, 0
+		if i < len(ac) {
+			an = ac[i]
 		}
-		if i < len(b) {
-			bv = b[i]
+		if i < len(bc) {
+			bn = bc[i]
 		}
-		if av != bv {
-			return av > bv
+		if an != bn {
+			if an > bn {
+				return 1
+			}
+			return -1
 		}
 	}
-	return latest > current
+	if len(ap) == 0 && len(bp) == 0 {
+		return 0
+	}
+	if len(ap) == 0 {
+		return 1
+	}
+	if len(bp) == 0 {
+		return -1
+	}
+	for i := 0; i < len(ap) && i < len(bp); i++ {
+		ai, aerr := strconv.Atoi(ap[i])
+		bi, berr := strconv.Atoi(bp[i])
+		if aerr == nil && berr == nil && ai != bi {
+			if ai > bi {
+				return 1
+			}
+			return -1
+		}
+		if aerr == nil && berr != nil {
+			return -1
+		}
+		if aerr != nil && berr == nil {
+			return 1
+		}
+		if cmp := strings.Compare(ap[i], bp[i]); cmp != 0 {
+			return cmp
+		}
+	}
+	if len(ap) > len(bp) {
+		return 1
+	}
+	if len(ap) < len(bp) {
+		return -1
+	}
+	return 0
+}
+
+// versionGreater 保留内部调用兼容性，使用语义化版本比较结果。
+func versionGreater(latest, current string) bool { return compareAppVersion(latest, current) > 0 }
+
+func appIdentityEqual(a, b appRecord) bool {
+	for _, left := range []string{a.Key, a.ID, a.Name} {
+		if strings.TrimSpace(left) == "" {
+			continue
+		}
+		for _, right := range []string{b.Key, b.ID, b.Name} {
+			if strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func latestCatalogVersion(app appRecord, catalog []appRecord) (appRecord, appRecord, bool) {
+	var latest appRecord
+	found := false
+	for _, candidate := range catalog {
+		if !appIdentityEqual(app, candidate) || strings.TrimSpace(candidate.Version) == "" {
+			continue
+		}
+		if !found || compareAppVersion(candidate.Version, latest.Version) > 0 {
+			latest = candidate
+			found = true
+		}
+	}
+	return app, latest, found
+}
+
+const maxAppCatalogBytes = 8 << 20
+
+// loadAppCatalogFile 读取有界应用目录，避免配置文件异常增长导致内存占用失控。
+func loadAppCatalogFile(path string) ([]appRecord, appCatalogDocument, os.FileInfo, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, appCatalogDocument{}, nil, fmt.Errorf("打开应用目录 %q 失败: %w", path, err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, appCatalogDocument{}, nil, fmt.Errorf("读取应用目录 %q 属性失败: %w", path, err)
+	}
+	if info.Size() > maxAppCatalogBytes {
+		return nil, appCatalogDocument{}, nil, fmt.Errorf("应用目录 %q 超过 %d 字节限制", path, maxAppCatalogBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxAppCatalogBytes+1))
+	if err != nil {
+		return nil, appCatalogDocument{}, nil, fmt.Errorf("读取应用目录 %q 失败: %w", path, err)
+	}
+	var records []appRecord
+	if err := json.Unmarshal(data, &records); err == nil {
+		return records, appCatalogDocument{Apps: records}, info, nil
+	}
+	var doc appCatalogDocument
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, appCatalogDocument{}, nil, fmt.Errorf("解析应用目录 %q 失败: %w", path, err)
+	}
+	if len(doc.Catalog) > 0 {
+		records = doc.Catalog
+	} else {
+		records = doc.Apps
+	}
+	return records, doc, info, nil
+}
+
+// refreshCatalogLocked 在目录文件发生变化时刷新缓存，并记录同步元数据。
+// 调用方必须持有 s.mu 写锁；没有配置目录时保留已持久化的 catalog。
+func (s *appStore) refreshCatalogLocked() (bool, error) {
+	path := strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG"))
+	if path == "" {
+		if len(s.state.Catalog) == 0 && len(s.state.Apps) > 0 {
+			s.state.Catalog = append([]appRecord(nil), s.state.Apps...)
+			return true, nil
+		}
+		return false, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, fmt.Errorf("应用目录不可用 %q: %w", path, err)
+	}
+	if s.catalogPath == path && s.catalogSize == info.Size() && s.catalogModTime.Equal(info.ModTime()) {
+		return false, nil
+	}
+	records, doc, _, err := loadAppCatalogFile(path)
+	if err != nil {
+		return false, err
+	}
+	s.state.Catalog = records
+	s.state.CatalogVersion = strings.TrimSpace(doc.Version)
+	s.state.CatalogLastModified = doc.LastModified
+	if s.state.CatalogLastModified == 0 {
+		s.state.CatalogLastModified = info.ModTime().Unix()
+	}
+	s.state.CatalogSyncing = doc.IsSyncing
+	s.state.CatalogSyncedAt = time.Now().UTC()
+	s.catalogPath, s.catalogSize, s.catalogModTime = path, info.Size(), info.ModTime()
+	return true, nil
 }
 
 // RegisterAppRoutes 注册应用目录与已安装应用接口，所有写操作都会原子持久化到 apps.json。
@@ -180,9 +361,10 @@ func RegisterAppRoutes(mux *http.ServeMux) {
 	s := getAppStore()
 	listInstalled := func(w http.ResponseWriter, r *http.Request) {
 		s.mu.RLock()
+		catalog := append([]appRecord(nil), s.state.Catalog...)
 		items := make([]map[string]any, 0, len(s.state.Apps))
 		for _, app := range s.state.Apps {
-			items = append(items, appRecordData(app))
+			items = append(items, appRecordDataWithCatalog(app, catalog))
 		}
 		s.mu.RUnlock()
 		if r.Method == http.MethodGet {
@@ -220,22 +402,59 @@ func RegisterAppRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST "+path, searchCatalog)
 	}
 	mux.HandleFunc("GET /api/v2/apps/checkupdate", func(w http.ResponseWriter, _ *http.Request) {
-		s.mu.RLock()
+		s.mu.Lock()
+		changed, err := s.refreshCatalogLocked()
+		if err != nil {
+			s.mu.Unlock()
+			runtimeErr(w, http.StatusBadGateway, err.Error())
+			return
+		}
 		catalog := append([]appRecord(nil), s.state.Catalog...)
 		installed := append([]appRecord(nil), s.state.Apps...)
-		s.mu.RUnlock()
-		updates := make([]map[string]any, 0)
-		for _, current := range installed {
-			for _, candidate := range catalog {
-				if (candidate.Key != "" && candidate.Key == current.Key) || (candidate.Name != "" && candidate.Name == current.Name) {
-					if versionGreater(candidate.Version, current.Version) {
-						updates = append(updates, map[string]any{"key": current.Key, "currentVersion": current.Version, "latestVersion": candidate.Version})
-					}
-					break
-				}
+		meta := struct {
+			version      string
+			lastModified int64
+			syncing      bool
+			syncedAt     time.Time
+		}{s.state.CatalogVersion, s.state.CatalogLastModified, s.state.CatalogSyncing, s.state.CatalogSyncedAt}
+		if changed {
+			if err := s.saveLocked(); err != nil {
+				s.mu.Unlock()
+				runtimeErr(w, http.StatusInternalServerError, fmt.Sprintf("保存应用目录元数据失败: %v", err))
+				return
 			}
 		}
-		appOK(w, map[string]any{"canUpdate": len(updates) > 0, "updates": updates, "total": len(updates), "isSyncing": false, "lastSyncAt": time.Now().UTC()})
+		s.mu.Unlock()
+
+		updates := make([]map[string]any, 0)
+		for _, current := range installed {
+			_, latest, ok := latestCatalogVersion(current, catalog)
+			if !ok || compareAppVersion(latest.Version, current.Version) <= 0 {
+				continue
+			}
+			updates = append(updates, map[string]any{
+				"id":             current.ID,
+				"key":            current.Key,
+				"name":           current.Name,
+				"currentVersion": current.Version,
+				"latestVersion":  latest.Version,
+				"status":         current.Status,
+				"updatedAt":      latest.UpdatedAt,
+			})
+		}
+		lastSyncAt := any(nil)
+		if !meta.syncedAt.IsZero() {
+			lastSyncAt = meta.syncedAt
+		}
+		appOK(w, map[string]any{
+			"canUpdate":            len(updates) > 0,
+			"updates":              updates,
+			"total":                len(updates),
+			"isSyncing":            meta.syncing,
+			"appStoreVersion":      meta.version,
+			"appStoreLastModified": meta.lastModified,
+			"lastSyncAt":           lastSyncAt,
+		})
 	})
 	mux.HandleFunc("GET /api/v2/apps/tags", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.RLock()

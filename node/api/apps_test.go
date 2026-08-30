@@ -6,9 +6,17 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func resetAppStoreForTest() {
+	appStoreMu.Lock()
+	appStoreInstance = nil
+	appStoreMu.Unlock()
+}
 
 func TestAppInstallAndList(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
@@ -80,5 +88,104 @@ func TestAppDerivedDetailsAndDeleteCheck(t *testing.T) {
 	mux.ServeHTTP(services, httptest.NewRequest(http.MethodGet, "/api/v2/apps/services/demo", nil))
 	if services.Code != http.StatusOK || !strings.Contains(services.Body.String(), "running") {
 		t.Fatalf("services body=%s", services.Body.String())
+	}
+}
+
+func TestAppCheckUpdateUsesConfiguredCatalogAndPersistsMetadata(t *testing.T) {
+	dataDir := t.TempDir()
+	catalogPath := filepath.Join(dataDir, "catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(`{
+  "version": "2026.08",
+  "lastModified": 1700000000,
+  "apps": [
+    {"id":"demo-v1","key":"demo","name":"Demo","version":"1.3.0"},
+    {"id":"demo-v2","key":"demo","name":"Demo","version":"1.10.0"}
+  ]
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	t.Setenv("WORKMESH_APP_CATALOG", catalogPath)
+	resetAppStoreForTest()
+	defer resetAppStoreForTest()
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	install := httptest.NewRecorder()
+	mux.ServeHTTP(install, httptest.NewRequest(http.MethodPost, "/api/v2/apps/install", strings.NewReader(`{"id":"installed-demo","key":"demo","name":"Demo","version":"1.2.0"}`)))
+	if install.Code != http.StatusOK {
+		t.Fatalf("install status=%d body=%s", install.Code, install.Body.String())
+	}
+	check := httptest.NewRecorder()
+	mux.ServeHTTP(check, httptest.NewRequest(http.MethodGet, "/api/v2/apps/checkupdate", nil))
+	if check.Code != http.StatusOK {
+		t.Fatalf("check status=%d body=%s", check.Code, check.Body.String())
+	}
+	body := check.Body.String()
+	for _, want := range []string{`"canUpdate":true`, `"latestVersion":"1.10.0"`, `"appStoreLastModified":1700000000`, `"appStoreVersion":"2026.08"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("check body missing %s: %s", want, body)
+		}
+	}
+	// 重启后清除目录环境，仍应使用 apps.json 中持久化的目录快照。
+	t.Setenv("WORKMESH_APP_CATALOG", "")
+	resetAppStoreForTest()
+	mux = http.NewServeMux()
+	RegisterAppRoutes(mux)
+	check = httptest.NewRecorder()
+	mux.ServeHTTP(check, httptest.NewRequest(http.MethodGet, "/api/v2/apps/checkupdate", nil))
+	if check.Code != http.StatusOK || !strings.Contains(check.Body.String(), `"latestVersion":"1.10.0"`) {
+		t.Fatalf("persisted catalog check status=%d body=%s", check.Code, check.Body.String())
+	}
+}
+
+func TestAppCheckUpdateNoUpdateForEquivalentVersions(t *testing.T) {
+	dataDir := t.TempDir()
+	catalogPath := filepath.Join(dataDir, "catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(`[{"id":"demo","key":"demo","name":"Demo","version":"v1.10.0"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	t.Setenv("WORKMESH_APP_CATALOG", catalogPath)
+	resetAppStoreForTest()
+	defer resetAppStoreForTest()
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	mux.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v2/apps/install", strings.NewReader(`{"id":"demo","key":"demo","name":"Demo","version":"1.10"}`)))
+	check := httptest.NewRecorder()
+	mux.ServeHTTP(check, httptest.NewRequest(http.MethodGet, "/api/v2/apps/checkupdate", nil))
+	if check.Code != http.StatusOK || !strings.Contains(check.Body.String(), `"canUpdate":false`) || !strings.Contains(check.Body.String(), `"total":0`) {
+		t.Fatalf("equivalent version status=%d body=%s", check.Code, check.Body.String())
+	}
+}
+
+func TestAppCheckUpdateReportsCatalogError(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	t.Setenv("WORKMESH_APP_CATALOG", filepath.Join(t.TempDir(), "missing.json"))
+	resetAppStoreForTest()
+	defer resetAppStoreForTest()
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	check := httptest.NewRecorder()
+	mux.ServeHTTP(check, httptest.NewRequest(http.MethodGet, "/api/v2/apps/checkupdate", nil))
+	if check.Code != http.StatusBadGateway || !strings.Contains(check.Body.String(), "应用目录不可用") {
+		t.Fatalf("catalog error status=%d body=%s", check.Code, check.Body.String())
+	}
+}
+
+func TestCompareAppVersion(t *testing.T) {
+	tests := []struct {
+		latest, current string
+		greater         bool
+	}{
+		{"1.10.0", "1.2.0", true},
+		{"v1.10.0", "1.10", false},
+		{"1.2.0", "1.2.0-beta", true},
+		{"1.2.0-alpha.2", "1.2.0-alpha.10", false},
+		{"2026.08", "2026.7", true},
+	}
+	for _, tt := range tests {
+		if got := versionGreater(tt.latest, tt.current); got != tt.greater {
+			t.Errorf("versionGreater(%q,%q)=%v, want %v", tt.latest, tt.current, got, tt.greater)
+		}
 	}
 }

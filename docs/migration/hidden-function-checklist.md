@@ -182,7 +182,7 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 
 | 状态 | 路由 | 当前证据 | 剩余缺口 |
 | --- | --- | --- | --- |
-| partial | `GET /api/v2/apps/checkupdate` | `node/api/apps.go` 返回固定 `canUpdate=false` | 接入应用目录同步状态、版本比较和异步更新任务 |
+| implemented | `GET /api/v2/apps/checkupdate` | `node/api/apps.go:refreshCatalogLocked`、`latestCatalogVersion` | 从 `WORKMESH_APP_CATALOG` 有界读取应用元数据，按 key/id/name 取最高版本与已安装版本比较；目录版本、lastModified、同步时间原子持久化，配置错误返回明确 502 |
 | partial | `GET /api/v2/containers/search/log` | `node/api/containers.go` 已有入口；旧 SSE 语义需以 `Accept: text/event-stream` 持续输出 | 容器日志跟随、since/tail/timestamp、断开释放和背压测试 |
 
 ### 仍为 pending 的路由
