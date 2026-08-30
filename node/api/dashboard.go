@@ -184,7 +184,8 @@ func dashboardDisks() []map[string]any {
 			continue
 		}
 		seen[mount] = struct{}{}
-		disks = append(disks, map[string]any{"mount": mount, "device": fields[0], "filesystem": fields[2], "available": true})
+		// 前端契约使用 path/usedPercent；mount 作为兼容字段保留。无法跨平台读取磁盘用量时明确返回 0，避免 NaN/undefined 传播。
+		disks = append(disks, map[string]any{"path": mount, "mount": mount, "device": fields[0], "filesystem": fields[2], "available": true, "usedPercent": float64(0), "free": uint64(0), "total": uint64(0)})
 	}
 	return disks
 }

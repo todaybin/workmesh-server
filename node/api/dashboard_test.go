@@ -58,7 +58,7 @@ func TestDashboardNetworkAndDisks(t *testing.T) {
 		t.Fatal("disk data must be initialized")
 	}
 	for _, disk := range disks {
-		if disk["mount"] == nil || disk["device"] == nil {
+		if disk["mount"] == nil || disk["path"] == nil || disk["usedPercent"] == nil || disk["device"] == nil {
 			t.Fatalf("disk entry missing identity: %#v", disk)
 		}
 	}
