@@ -317,6 +317,85 @@ func TestAIAgentCollectionQueriesUsePersistedState(t *testing.T) {
 	}
 }
 
+func TestAgentResourceMutationsAndSessionLifecycle(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	create := httptest.NewRecorder()
+	mux.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents", strings.NewReader(`{"id":"agent-resource","name":"resource"}`)))
+	if create.Code != http.StatusOK {
+		t.Fatalf("create agent: %d %s", create.Code, create.Body.String())
+	}
+	remark := httptest.NewRecorder()
+	mux.ServeHTTP(remark, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/remark", strings.NewReader(`{"agentId":"agent-resource","remark":"updated"}`)))
+	if remark.Code != http.StatusOK || !strings.Contains(remark.Body.String(), "updated") {
+		t.Fatalf("remark: %d %s", remark.Code, remark.Body.String())
+	}
+	bind := httptest.NewRecorder()
+	mux.ServeHTTP(bind, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/website/bind", strings.NewReader(`{"agentId":"agent-resource","websiteId":"site-1"}`)))
+	if bind.Code != http.StatusOK || !strings.Contains(bind.Body.String(), "site-1") {
+		t.Fatalf("website bind: %d %s", bind.Code, bind.Body.String())
+	}
+	role := httptest.NewRecorder()
+	mux.ServeHTTP(role, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/agent/create", strings.NewReader(`{"agentId":"agent-resource","name":"primary","model":"m1"}`)))
+	if role.Code != http.StatusOK || !strings.Contains(role.Body.String(), "primary") {
+		t.Fatalf("role create: %d %s", role.Code, role.Body.String())
+	}
+	roles := httptest.NewRecorder()
+	mux.ServeHTTP(roles, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/agent/list", strings.NewReader(`{"agentId":"agent-resource"}`)))
+	if roles.Code != http.StatusOK || !strings.Contains(roles.Body.String(), "primary") {
+		t.Fatalf("role list: %d %s", roles.Code, roles.Body.String())
+	}
+	token := httptest.NewRecorder()
+	mux.ServeHTTP(token, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/token/reset", strings.NewReader(`{"id":"agent-resource"}`)))
+	if token.Code != http.StatusOK || strings.Contains(token.Body.String(), "wm_") {
+		t.Fatalf("token reset must not expose token: %d %s", token.Code, token.Body.String())
+	}
+	// 会话改动必须在通用 /delete 分支前处理，并拒绝不存在的会话。
+	s := getAIState()
+	s.mu.Lock()
+	s.data.Sessions["agent-resource"] = []map[string]any{{"id": "session-1", "title": "old"}}
+	if err := s.saveLocked(); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	rename := httptest.NewRecorder()
+	mux.ServeHTTP(rename, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/hermes/chat/sessions/rename", strings.NewReader(`{"agentId":"agent-resource","id":"session-1","title":"new"}`)))
+	if rename.Code != http.StatusOK {
+		t.Fatalf("session rename: %d %s", rename.Code, rename.Body.String())
+	}
+	remove := httptest.NewRecorder()
+	mux.ServeHTTP(remove, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/hermes/chat/sessions/delete", strings.NewReader(`{"agentId":"agent-resource","id":"session-1"}`)))
+	if remove.Code != http.StatusOK {
+		t.Fatalf("session delete: %d %s", remove.Code, remove.Body.String())
+	}
+	missing := httptest.NewRecorder()
+	mux.ServeHTTP(missing, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/hermes/chat/sessions/delete", strings.NewReader(`{"agentId":"agent-resource","id":"missing"}`)))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing session status = %d", missing.Code)
+	}
+}
+
+func TestAIResourceOperationsRequireExistingResource(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	for _, tc := range []struct {
+		path string
+		body string
+	}{
+		{"/api/v2/ai/ollama/close", `{"name":"missing"}`},
+		{"/api/v2/ai/ollama/model/load", `{"name":"missing"}`},
+		{"/api/v2/ai/mcp/server/op", `{"id":"missing","operate":"start"}`},
+	} {
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body)))
+		if res.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, body=%s", tc.path, res.Code, res.Body.String())
+		}
+	}
+}
+
 func TestWorkMeshTaskRoutesUseIsolatedProvider(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	t.Setenv("WORKMESH_TASK_TOKEN", "task-token")

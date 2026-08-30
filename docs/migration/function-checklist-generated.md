@@ -1124,3 +1124,12 @@
 | 功能 | 来源 | 新实现 | 覆盖 | 状态 |
 | --- | --- | --- | --- | --- |
 | Core/Agent 后端语言包与前端语言入口 | `apps/workmesh-node/core/i18n`、`apps/workmesh-node/agent/i18n`、旧 frontend | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 12 种语言；后端每种 1037 键；前端键结构和菜单入口通过 `i18n-scan.mjs` | implemented |
+
+## Agent 资源语义补充（2026-08-31）
+
+| 状态 | 方法 | 路径 | 新实现 | 数据来源 | 持久化 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- |
+| implemented | POST | `/api/v2/ai/agents/remark`、`/token/reset`、`/website/bind`、`/website/unbind` | `node/api/ai_execution.go:handleAgentRoute` | Agent 记录 | `ai.json` 原子写入 | 资源不存在返回 404；令牌仅脱敏返回 |
+| implemented | POST | `/api/v2/ai/agents/agent/create`、`/bind`、`/unbind`、`/delete`、`/list`、`/channels` | `node/api/ai_execution.go:handleAgentRoute` | Agent.roles | `ai.json` 原子写入 | 父 Agent 归属校验与重复角色冲突 |
+| implemented | POST | `/api/v2/ai/agents/hermes/chat/sessions/rename`、`/delete` | `node/api/ai_execution.go:handleSessionMutation` | Agent 会话 | `ai.json` 原子写入 | 会话不存在返回 404 |
+| implemented | POST | `/api/v2/ai/ollama/close`、`/ollama/model/load`、`/ollama/model/recreate`、`/mcp/server/op` | `node/api/ai_execution.go:handleAIResourceOperation` | Ollama/MCP/TensorRT 记录 | `ai.json` 原子写入 | 只更新已有资源状态，不生成伪记录 |

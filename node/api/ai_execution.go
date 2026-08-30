@@ -6,6 +6,7 @@ package api
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -916,6 +917,12 @@ func handleAIPost(w http.ResponseWriter, r *http.Request, s *executionState, pat
 	if handleAccountRoute(w, s, path, body) {
 		return
 	}
+	if handleAgentRoute(w, s, path, body) {
+		return
+	}
+	if handleAIResourceOperation(w, s, path, body) {
+		return
+	}
 	if path == "agents/hermes/chat/sessions" {
 		agent := aiID(body, "agentId")
 		s.mu.RLock()
@@ -1048,27 +1055,16 @@ func handleAIPost(w http.ResponseWriter, r *http.Request, s *executionState, pat
 		aiError(w, http.StatusServiceUnavailable, "AGENT_RUNTIME_UNAVAILABLE", "该操作需要已配置的 Agent 容器运行时")
 		return
 	}
-	if strings.HasSuffix(path, "/delete") || strings.HasSuffix(path, "/del") || strings.HasSuffix(path, "/uninstall") {
-		aiDelete(w, s, path, body)
-		return
-	}
 	if strings.HasSuffix(path, "/get") || strings.HasSuffix(path, "/detail") || strings.HasSuffix(path, "/config-file/get") || strings.HasSuffix(path, "/security/get") || strings.HasSuffix(path, "/other/get") || strings.HasSuffix(path, "/model/get") {
 		handleAIConfigGet(w, s, path, body)
 		return
 	}
-	if path == "ollama/model/load" {
-		name := aiString(body, "name")
-		for _, item := range aiItems(s, path) {
-			if item["name"] == name {
-				aiOK(w, sanitizeAIMap(item))
-				return
-			}
-		}
-		aiOK(w, map[string]any{"name": name, "status": "not_found"})
-		return
-	}
 	if path == "agents/hermes/chat/sessions/rename" || path == "agents/hermes/chat/sessions/delete" {
 		handleSessionMutation(w, s, path, body)
+		return
+	}
+	if strings.HasSuffix(path, "/delete") || strings.HasSuffix(path, "/del") || strings.HasSuffix(path, "/uninstall") {
+		aiDelete(w, s, path, body)
 		return
 	}
 	if strings.HasSuffix(path, "/pairing/approve") {
@@ -1084,11 +1080,80 @@ func handleAIPost(w http.ResponseWriter, r *http.Request, s *executionState, pat
 		aiOK(w, map[string]any{"output": sanitizeAIMap(item)})
 		return
 	}
-	if path == "ollama/close" {
+	aiOK(w, sanitizeAIMap(item))
+}
+
+// handleAIResourceOperation 将启停、重建和详情查询作用于既有的 AI 资源。
+// 旧实现会调用运行时；独立服务没有可用运行时时只更新已保存资源的期望状态，绝不创建操作记录冒充模型或 MCP 服务。
+func handleAIResourceOperation(w http.ResponseWriter, s *executionState, path string, body map[string]any) bool {
+	if path == "ollama/model/load" {
+		name := aiString(body, "name")
+		if name == "" {
+			aiError(w, http.StatusBadRequest, "MODEL_NAME_REQUIRED", "模型名称不能为空")
+			return true
+		}
+		for _, item := range aiItems(s, "ollama/model") {
+			if aiString(item, "name") == name {
+				aiOK(w, sanitizeAIMap(item))
+				return true
+			}
+		}
+		aiError(w, http.StatusNotFound, "OLLAMA_MODEL_NOT_FOUND", "Ollama 模型不存在")
+		return true
+	}
+	operate := ""
+	collectionPath := ""
+	switch path {
+	case "ollama/close":
+		operate, collectionPath = "stop", "ollama/model"
+	case "ollama/model/recreate":
+		operate, collectionPath = "restart", "ollama/model"
+	case "mcp/server/op":
+		operate, collectionPath = strings.ToLower(aiString(body, "operate")), "mcp/server"
+	case "tensorrt/operate":
+		operate, collectionPath = strings.ToLower(aiString(body, "operate")), "tensorrt"
+	default:
+		return false
+	}
+	if operate != "start" && operate != "stop" && operate != "restart" {
+		aiError(w, http.StatusBadRequest, "AI_OPERATION_INVALID", "operate 仅支持 start、stop 或 restart")
+		return true
+	}
+	id, name := aiID(body, "id", "modelId", "serverId"), aiString(body, "name")
+	if id == "" && name == "" {
+		aiError(w, http.StatusBadRequest, "AI_RESOURCE_REQUIRED", "资源 id 或 name 不能为空")
+		return true
+	}
+	collection := collectionFor(&s.data, collectionPath)
+	s.mu.Lock()
+	found := -1
+	for i, item := range *collection {
+		if (id != "" && aiID(item, "id") == id) || (name != "" && aiString(item, "name") == name) {
+			found = i
+			break
+		}
+	}
+	if found < 0 {
+		s.mu.Unlock()
+		aiError(w, http.StatusNotFound, "AI_RESOURCE_NOT_FOUND", "AI 资源不存在")
+		return true
+	}
+	item := cloneMap((*collection)[found])
+	if operate == "stop" {
 		item["status"] = "stopped"
-		_ = aiUpsert(s, path, item)
+	} else {
+		item["status"] = "running"
+	}
+	item["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+	(*collection)[found] = item
+	err := s.saveLocked()
+	s.mu.Unlock()
+	if err != nil {
+		aiError(w, http.StatusInternalServerError, "AI_RESOURCE_SAVE_FAILED", err.Error())
+		return true
 	}
 	aiOK(w, sanitizeAIMap(item))
+	return true
 }
 
 // requiresAgentRuntime 判断必须在 Agent 容器内执行的写操作，避免通用状态存储伪造执行结果。
@@ -1105,6 +1170,273 @@ func requiresAgentRuntime(path string) bool {
 		}
 	}
 	return false
+}
+
+// handleAgentRoute 处理 Agent 资源级操作，保证写入目标 Agent 而不是创建同名的伪记录。
+// Agent 的凭据只写入本地受限状态文件，响应统一经过脱敏，避免令牌泄露到控制面。
+func handleAgentRoute(w http.ResponseWriter, s *executionState, path string, body map[string]any) bool {
+	if !strings.HasPrefix(path, "agents/") {
+		return false
+	}
+	if path == "agents/agent/list" || path == "agents/agent/channels" {
+		id := aiID(body, "agentId")
+		if id == "" && path == "agents/agent/list" {
+			// 未指定 Agent 时返回全部已持久化 Agent，兼容管理页的总览查询。
+			aiOK(w, aiItems(s, path))
+			return true
+		}
+		if id == "" {
+			// 频道总览允许不带 Agent ID，由所有 Agent 的角色绑定聚合得到。
+			if path == "agents/agent/channels" {
+				s.mu.RLock()
+				allAgents := append([]map[string]any(nil), s.data.Agents...)
+				s.mu.RUnlock()
+				channels := make(map[string][]string)
+				for _, item := range allAgents {
+					for _, rawChannel := range mapStringSlice(item["channels"]) {
+						if rawChannel != "" {
+							channels[rawChannel] = append(channels[rawChannel], aiID(item, "id"))
+						}
+					}
+					for _, agentRole := range mapSlice(item["roles"]) {
+						channel, accountID := aiString(agentRole, "channel"), aiString(agentRole, "accountId")
+						if channel != "" && accountID != "" {
+							channels[channel] = append(channels[channel], accountID)
+						}
+					}
+				}
+				items := make([]map[string]any, 0, len(channels))
+				for channel, accountIDs := range channels {
+					items = append(items, map[string]any{"name": channel, "bound": true, "accountIds": uniqueStrings(accountIDs)})
+				}
+				aiOK(w, items)
+				return true
+			}
+			aiError(w, http.StatusBadRequest, "AGENT_ID_REQUIRED", "agentId 不能为空")
+			return true
+		}
+		s.mu.RLock()
+		_, agent := accountByIDLocked(s.data.Agents, id)
+		roles := make([]map[string]any, 0)
+		if agent != nil {
+			roles = mapSlice(agent["roles"])
+		}
+		s.mu.RUnlock()
+		if agent == nil {
+			aiError(w, http.StatusNotFound, "AGENT_NOT_FOUND", "Agent 不存在")
+			return true
+		}
+		if path == "agents/agent/list" {
+			aiOK(w, roles)
+			return true
+		}
+		channels := make(map[string][]string)
+		for _, role := range roles {
+			channel, accountID := aiString(role, "channel"), aiString(role, "accountId")
+			if channel != "" && accountID != "" {
+				channels[channel] = append(channels[channel], accountID)
+			}
+		}
+		items := make([]map[string]any, 0, len(channels))
+		for channel, accountIDs := range channels {
+			items = append(items, map[string]any{"name": channel, "bound": true, "accountIds": uniqueStrings(accountIDs)})
+		}
+		aiOK(w, items)
+		return true
+	}
+	if path == "agents/remark" || path == "agents/token/reset" || path == "agents/website/bind" || path == "agents/website/unbind" {
+		id := aiID(body, "id", "agentId")
+		if id == "" {
+			aiError(w, http.StatusBadRequest, "AGENT_ID_REQUIRED", "agentId 不能为空")
+			return true
+		}
+		s.mu.Lock()
+		index, agent := accountByIDLocked(s.data.Agents, id)
+		if agent == nil {
+			s.mu.Unlock()
+			aiError(w, http.StatusNotFound, "AGENT_NOT_FOUND", "Agent 不存在")
+			return true
+		}
+		agent = cloneMap(agent)
+		switch path {
+		case "agents/remark":
+			if remark, ok := body["remark"].(string); ok {
+				agent["remark"] = strings.TrimSpace(remark)
+			}
+		case "agents/token/reset":
+			token, err := newAgentToken()
+			if err != nil {
+				s.mu.Unlock()
+				aiError(w, http.StatusInternalServerError, "AGENT_TOKEN_FAILED", "生成 Agent 令牌失败")
+				return true
+			}
+			agent["token"] = token
+		case "agents/website/bind":
+			websiteID := aiID(body, "websiteId", "websiteID")
+			if websiteID == "" {
+				s.mu.Unlock()
+				aiError(w, http.StatusBadRequest, "WEBSITE_ID_REQUIRED", "websiteId 不能为空")
+				return true
+			}
+			agent["websiteId"] = websiteID
+		case "agents/website/unbind":
+			delete(agent, "websiteId")
+			delete(agent, "websiteID")
+		}
+		agent["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+		s.data.Agents[index] = agent
+		err := s.saveLocked()
+		s.mu.Unlock()
+		if err != nil {
+			aiError(w, http.StatusInternalServerError, "AGENT_SAVE_FAILED", err.Error())
+			return true
+		}
+		aiOK(w, map[string]any{"updated": true, "agent": sanitizeAIMap(agent)})
+		return true
+	}
+	if path == "agents/agent/create" {
+		parentID := aiID(body, "agentId", "parentId")
+		name := strings.TrimSpace(aiString(body, "name"))
+		if parentID == "" || name == "" {
+			aiError(w, http.StatusBadRequest, "AGENT_ROLE_REQUIRED", "agentId 和 name 不能为空")
+			return true
+		}
+		s.mu.Lock()
+		index, parent := accountByIDLocked(s.data.Agents, parentID)
+		if parent == nil {
+			s.mu.Unlock()
+			aiError(w, http.StatusNotFound, "AGENT_NOT_FOUND", "Agent 不存在")
+			return true
+		}
+		parent = cloneMap(parent)
+		roles := mapSlice(parent["roles"])
+		for _, role := range roles {
+			if aiString(role, "name") == name {
+				s.mu.Unlock()
+				aiError(w, http.StatusConflict, "AGENT_ROLE_EXISTS", "Agent 角色已存在")
+				return true
+			}
+		}
+		role := cloneMap(body)
+		role["id"] = aiNewID("role")
+		role["name"] = name
+		roles = append(roles, role)
+		parent["roles"] = mapsToAny(roles)
+		parent["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+		s.data.Agents[index] = parent
+		err := s.saveLocked()
+		s.mu.Unlock()
+		if err != nil {
+			aiError(w, http.StatusInternalServerError, "AGENT_SAVE_FAILED", err.Error())
+			return true
+		}
+		aiOK(w, map[string]any{"output": sanitizeAIMap(role)})
+		return true
+	}
+	if path == "agents/agent/delete" || path == "agents/agent/bind" || path == "agents/agent/unbind" {
+		parentID, roleID := aiID(body, "agentId", "parentId"), aiID(body, "id", "roleId")
+		if parentID == "" || roleID == "" {
+			aiError(w, http.StatusBadRequest, "AGENT_ROLE_REQUIRED", "agentId 和 id 不能为空")
+			return true
+		}
+		s.mu.Lock()
+		index, parent := accountByIDLocked(s.data.Agents, parentID)
+		if parent == nil {
+			s.mu.Unlock()
+			aiError(w, http.StatusNotFound, "AGENT_NOT_FOUND", "Agent 不存在")
+			return true
+		}
+		parent = cloneMap(parent)
+		roles := mapSlice(parent["roles"])
+		found := false
+		for i, role := range roles {
+			if aiID(role, "id", "roleId") != roleID {
+				continue
+			}
+			found = true
+			switch path {
+			case "agents/agent/delete":
+				roles = append(roles[:i], roles[i+1:]...)
+			case "agents/agent/bind":
+				role["channel"], role["accountId"] = aiString(body, "channel"), aiString(body, "accountId")
+				roles[i] = role
+			case "agents/agent/unbind":
+				delete(role, "channel")
+				delete(role, "accountId")
+				roles[i] = role
+			}
+			break
+		}
+		if !found {
+			s.mu.Unlock()
+			aiError(w, http.StatusNotFound, "AGENT_ROLE_NOT_FOUND", "Agent 角色不存在")
+			return true
+		}
+		parent["roles"] = mapsToAny(roles)
+		parent["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+		s.data.Agents[index] = parent
+		err := s.saveLocked()
+		s.mu.Unlock()
+		if err != nil {
+			aiError(w, http.StatusInternalServerError, "AGENT_SAVE_FAILED", err.Error())
+			return true
+		}
+		aiOK(w, map[string]any{"updated": true, "roles": roles})
+		return true
+	}
+	return false
+}
+
+func mapSlice(value any) []map[string]any {
+	result := make([]map[string]any, 0)
+	switch raw := value.(type) {
+	case []any:
+		for _, item := range raw {
+			if row, ok := item.(map[string]any); ok {
+				result = append(result, cloneMap(row))
+			}
+		}
+	case []map[string]any:
+		for _, row := range raw {
+			result = append(result, cloneMap(row))
+		}
+	}
+	return result
+}
+
+func mapsToAny(values []map[string]any) []any {
+	result := make([]any, 0, len(values))
+	for _, value := range values {
+		result = append(result, value)
+	}
+	return result
+}
+
+func mapStringSlice(value any) []string {
+	result := make([]string, 0)
+	switch raw := value.(type) {
+	case []any:
+		for _, item := range raw {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				result = append(result, strings.TrimSpace(text))
+			}
+		}
+	case []string:
+		for _, text := range raw {
+			if strings.TrimSpace(text) != "" {
+				result = append(result, strings.TrimSpace(text))
+			}
+		}
+	}
+	return result
+}
+
+func newAgentToken() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("wm_%x", buf), nil
 }
 
 // handleAgentPairingApprove 通过固定的 Docker 参数调用 Agent 配对命令。
@@ -1365,8 +1697,18 @@ func handleAIConfigGet(w http.ResponseWriter, s *executionState, path string, bo
 func handleSessionMutation(w http.ResponseWriter, s *executionState, path string, body map[string]any) {
 	agent := aiID(body, "agentId")
 	session := aiID(body, "id")
+	if agent == "" || session == "" {
+		aiError(w, http.StatusBadRequest, "SESSION_REQUIRED", "agentId 和会话 id 不能为空")
+		return
+	}
 	s.mu.Lock()
+	if _, owner := accountByIDLocked(s.data.Agents, agent); owner == nil {
+		s.mu.Unlock()
+		aiError(w, http.StatusNotFound, "AGENT_NOT_FOUND", "Agent 不存在")
+		return
+	}
 	items := s.data.Sessions[agent]
+	updated := false
 	for index, value := range items {
 		if aiID(value, "id") != session {
 			continue
@@ -1374,13 +1716,29 @@ func handleSessionMutation(w http.ResponseWriter, s *executionState, path string
 		if strings.HasSuffix(path, "/delete") {
 			items = append(items[:index], items[index+1:]...)
 		} else {
-			items[index]["title"] = aiString(body, "title")
+			title := aiString(body, "title")
+			if title == "" {
+				s.mu.Unlock()
+				aiError(w, http.StatusBadRequest, "SESSION_TITLE_REQUIRED", "会话标题不能为空")
+				return
+			}
+			items[index]["title"] = title
 		}
+		updated = true
 		break
 	}
+	if !updated {
+		s.mu.Unlock()
+		aiError(w, http.StatusNotFound, "SESSION_NOT_FOUND", "会话不存在")
+		return
+	}
 	s.data.Sessions[agent] = items
-	_ = s.saveLocked()
+	err := s.saveLocked()
 	s.mu.Unlock()
+	if err != nil {
+		aiError(w, http.StatusInternalServerError, "SESSION_SAVE_FAILED", err.Error())
+		return
+	}
 	aiOK(w, map[string]any{"updated": true})
 }
 

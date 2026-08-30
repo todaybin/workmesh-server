@@ -277,3 +277,12 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | [x] | Compose 文件创建、更新、置顶及 `.env` 读取 | `apps/workmesh-node/agent/app/api/v2/container.go` | `node/api/containers.go:handleComposeCreate/Update/Pin/Env`；临时文件原子 rename | 路径穿越拒绝、文件内容和环境变量测试通过 |
 | [x] | 容器用户及尺寸查询 | `apps/workmesh-node/agent/app/api/v2/container.go` | `node/api/containers.go:handleContainerPost`；固定 Docker argv 调用 `exec /etc/passwd`、`inspect --size` | 参数校验和 Docker 不可用错误可观测 |
 | [x] | 镜像归档导入导出路径安全 | `apps/workmesh-node/agent/app/api/v2/container.go` | `node/api/containers.go:handleImageOperation`；`docker load -i`、`save -o`，拒绝 `..` | 无路径/穿越参数测试通过 |
+
+## 2026-08-31 Agent 资源语义核对
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新项目证据 | 完成条件 |
+|---|---|---|---|---|
+| [x] | Agent 资源级备注、令牌重置和网站绑定 | `apps/workmesh-node/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleAgentRoute`；随机令牌、目标资源归属校验、原子保存和脱敏 | `node/api/ai_execution_test.go:TestAgentResourceMutationsAndSessionLifecycle` |
+| [x] | Agent 角色嵌套 CRUD 与频道聚合 | `apps/workmesh-node/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleAgentRoute`；roles 持久化、重复冲突、父 Agent 校验 | 同上 |
+| [x] | Hermes 会话生命周期 | `apps/workmesh-node/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleSessionMutation`；重命名/删除位于通用删除分支之前，不存在返回 404 | 同上 |
+| [x] | Ollama/MCP 资源状态操作不伪造记录 | `apps/workmesh-node/agent/app/api/v2/ai.go`、`mcp_server.go` | `node/api/ai_execution.go:handleAIResourceOperation`；资源 ID/名称必填，不存在返回 404，状态原子写入 | `node/api/ai_execution_test.go:TestAIResourceOperationsRequireExistingResource` |
