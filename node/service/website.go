@@ -4,11 +4,13 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -20,6 +22,18 @@ import (
 )
 
 var domainPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$`)
+
+// OpenRestyStatus 描述节点上 OpenResty 的真实探测结果。
+type OpenRestyStatus struct {
+	Available    bool                    `json:"available"`
+	Binary       string                  `json:"binary,omitempty"`
+	Version      string                  `json:"version,omitempty"`
+	ConfigValid  bool                    `json:"configValid"`
+	Enabled      bool                    `json:"enabled"`
+	DefaultHTTPS bool                    `json:"defaultHttps"`
+	Modules      []model.OpenRestyModule `json:"modules"`
+	Error        string                  `json:"error,omitempty"`
+}
 
 // WebsiteService 提供网站、WAF 和 OpenResty 的轻量本地控制面。
 // 文件采用原子替换保存，节点未配置数据库时重启仍能保留配置。
@@ -609,4 +623,59 @@ func (s *WebsiteService) UpdateOpenResty(cfg model.OpenRestyConfig) (model.OpenR
 	cfg.UpdatedAt = time.Now().UTC()
 	s.openresty = cfg
 	return cfg, s.persist("openresty.json", cfg)
+}
+
+// ProbeOpenResty 使用受限外部命令探测 OpenResty 安装及配置状态；命令均设置超时且不接受用户参数。
+func (s *WebsiteService) ProbeOpenResty(ctx context.Context) OpenRestyStatus {
+	cfg := s.GetOpenResty()
+	status := OpenRestyStatus{Enabled: cfg.Enabled, DefaultHTTPS: cfg.DefaultHTTPS, Modules: append([]model.OpenRestyModule(nil), cfg.Modules...)}
+	bin := strings.TrimSpace(os.Getenv("WORKMESH_OPENRESTY_BIN"))
+	if bin == "" {
+		for _, candidate := range []string{"openresty", "nginx"} {
+			if found, err := exec.LookPath(candidate); err == nil {
+				bin = found
+				break
+			}
+		}
+	}
+	if bin == "" {
+		status.Error = "OpenResty binary not found"
+		return status
+	}
+	status.Binary = bin
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	versionOut, err := exec.CommandContext(probeCtx, bin, "-v").CombinedOutput()
+	if err != nil {
+		status.Error = strings.TrimSpace(string(versionOut))
+		if status.Error == "" {
+			status.Error = err.Error()
+		}
+		return status
+	}
+	status.Available = true
+	status.Version = parseOpenRestyVersion(string(versionOut))
+	if status.Version == "" {
+		status.Version = cfg.Version
+	}
+	configCtx, cancelConfig := context.WithTimeout(ctx, 2*time.Second)
+	defer cancelConfig()
+	configOut, configErr := exec.CommandContext(configCtx, bin, "-t").CombinedOutput()
+	status.ConfigValid = configErr == nil
+	if configErr != nil && status.Error == "" {
+		status.Error = strings.TrimSpace(string(configOut))
+	}
+	return status
+}
+
+func parseOpenRestyVersion(output string) string {
+	for _, token := range strings.Fields(output) {
+		if strings.HasPrefix(token, "openresty/") {
+			return strings.TrimPrefix(token, "openresty/")
+		}
+		if strings.HasPrefix(token, "nginx/") {
+			return strings.TrimPrefix(token, "nginx/")
+		}
+	}
+	return ""
 }

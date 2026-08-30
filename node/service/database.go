@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -164,6 +166,16 @@ func (s *DatabaseService) Update(ctx context.Context, item Database) (Database, 
 	}
 	return s.repo.Update(ctx, item)
 }
-func (s *DatabaseService) Check(_ context.Context, item Database) bool {
-	return strings.TrimSpace(item.Host) != "" && item.Port > 0 && item.Port <= 65535
+func (s *DatabaseService) Check(ctx context.Context, item Database) bool {
+	if strings.TrimSpace(item.Host) == "" || item.Port <= 0 || item.Port > 65535 {
+		return false
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(checkCtx, "tcp", net.JoinHostPort(item.Host, strconv.Itoa(item.Port)))
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }

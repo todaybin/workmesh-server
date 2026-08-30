@@ -1,5 +1,13 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
+## 2026-08-30 数据服务与 OpenResty 真实运行时补齐
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| MySQL/PostgreSQL/Redis/Mongo 数据库端点检查 | `apps/workmesh-node/agent/router/ro_database.go`、`agent/app/service/database*.go` | `/databases/db/check`、`/databases/redis/check`、`/databases/status` | `node/api/database_routes.go`、`node/service/database.go` | `POST /api/v2/databases/db/check`、`POST /api/v2/databases/redis/check`、`POST /api/v2/databases/status` | 节点会话鉴权 | 目标主机 TCP 连接，按类型默认端口 3306/5432/6379/27017 | 无状态探测；操作审计 `database-operations.json` | `node/api/database_test.go` | `go test ./node/api -run Database` | 待主次节点人力联调 | implemented | 未提供账号时仅验证网络可达性，不执行 SQL 登录 |
+| 数据库元数据新增、查询、分页、删除 | `apps/workmesh-node/agent/router/ro_database.go` | `/databases/db`、`/databases/db/search`、`/databases/db/:name`、`/databases/db/del` | `node/api/database.go`、`node/api/database_routes.go`、`node/service/database.go` | `POST/GET /api/v2/databases/db*` | 节点会话鉴权；密码字段不落库 | 本地数据库登记信息 | `WORKMESH_DATA_DIR/databases.json` 原子替换 | `node/api/database_test.go`, `node/service/database_test.go` | `go test ./node/api ./node/service -run Database` | 待主次节点重启恢复验证 | implemented | 用户/授权/变量等 DB 专属 SQL 管理仍需按凭据启用 |
+| OpenResty 版本与配置语法探测 | `apps/workmesh-node/agent/app/api/v2/nginx.go`、`agent/app/service/nginx.go` | `GET /openresty/status`、`GET /openresty/https` | `node/service/website.go:ProbeOpenResty`、`node/api/website.go:registerOpenRestyRoutes` | `GET /api/v2/openresty/status`、`GET /api/v2/openresty/https` | 节点会话鉴权 | 受限 `openresty -v/-t` 或 `nginx -v/-t`，命令超时 2 秒 | `openresty.json` 保存控制面配置 | `node/service/website_test.go`, `node/api/website_test.go` | `go test ./node/service ./node/api -run OpenResty` | 待主节点安装 OpenResty 后实测 | implemented | 未安装二进制时明确返回 `available=false`，不伪造运行状态 |
+
 ## 2026-08-30 核心认证、脚本与进程批次
 
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
@@ -73,7 +81,7 @@
 | 备份/告警/日志 | `/api/v2/backups/*`、`alert/*`、`logs/*` | 轻量持久化、查询、更新和日志读取 | 功能域测试 |
 | 容器与 Compose | `/api/v2/containers/*` | Docker argv 操作、镜像、网络、卷、Compose、统计和 inspect | `go test ./node/api` |
 | 快捷命令 | `/api/v2/core/commands/*` | 命令模板增删改查、分页、树、CSV 上传、JSON 导入导出 | `go test ./node/api -run CoreCommands` |
-| 计划任务 | `/api/v2/cronjobs/*` | 任务持久化、启停、单次执行、执行记录、清理、导入导出 | `go test ./node/service ./node/api` |
+| 计划任务 | `/api/v2/cronjobs/*` | 任务持久化、启停、单次执行、按五字段 Spec 每分钟调度、执行记录、清理、导入导出和下一次执行计算 | `go test ./node/service ./node/api` |
 | Gateway 客户端 | `/api/v2/workmesh/gateway/*` | 登录、注册、心跳、解绑、授权刷新、Ed25519 签名 | Gateway 契约测试 |
 | 节点链路 | handshake/heartbeat/sync/fencing | HMAC、时间戳、nonce、防重放和角色 fencing | `go test ./runtime/link ./control/api` |
 | 文件/数据库首批扩展 | `/api/v2/files/share/*`、`/api/v2/databases/db/update` | 分享 token 与数据库登记持久化、输入校验、分页和更新 | `go test ./node/api ./node/service` |

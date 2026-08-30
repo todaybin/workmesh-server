@@ -843,15 +843,16 @@ func registerWAFRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 
 func registerOpenRestyRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 	mux.HandleFunc("GET /api/v2/openresty/status", func(w http.ResponseWriter, r *http.Request) {
-		cfg := svc.GetOpenResty()
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"version": cfg.Version, "enabled": cfg.Enabled, "defaultHttps": cfg.DefaultHTTPS, "modules": cfg.Modules}})
+		status := svc.ProbeOpenResty(r.Context())
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": status})
 	})
 	mux.HandleFunc("GET /api/v2/openresty/modules", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": svc.GetOpenResty().Modules})
 	})
 	mux.HandleFunc("GET /api/v2/openresty/https", func(w http.ResponseWriter, r *http.Request) {
 		cfg := svc.GetOpenResty()
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"open": cfg.DefaultHTTPS, "enabled": cfg.DefaultHTTPS}})
+		status := svc.ProbeOpenResty(r.Context())
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"open": cfg.DefaultHTTPS, "enabled": cfg.DefaultHTTPS, "available": status.Available, "configValid": status.ConfigValid}})
 	})
 	mux.HandleFunc("POST /api/v2/openresty/update", openRestyUpdate(svc))
 	mux.HandleFunc("POST /api/v2/openresty/file", openRestyUpdate(svc))

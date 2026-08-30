@@ -4,12 +4,28 @@
 package service
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/todaybin/workmesh-server/node/model"
 )
+
+func TestProbeOpenRestyMissingBinary(t *testing.T) {
+	t.Setenv("WORKMESH_OPENRESTY_BIN", filepath.Join(t.TempDir(), "missing-openresty"))
+	svc := NewWebsiteService(t.TempDir())
+	status := svc.ProbeOpenResty(context.Background())
+	if status.Available {
+		t.Fatalf("missing binary should not be available: %#v", status)
+	}
+}
+
+func TestParseOpenRestyVersion(t *testing.T) {
+	if got := parseOpenRestyVersion("nginx version: openresty/1.25.3.1"); got != "1.25.3.1" {
+		t.Fatalf("unexpected version %q", got)
+	}
+}
 
 func TestWebsiteServicePersistsWebsiteAndWAF(t *testing.T) {
 	root := t.TempDir()
