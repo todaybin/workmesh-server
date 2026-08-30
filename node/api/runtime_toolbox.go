@@ -313,8 +313,9 @@ func registerSSHRoutes(mux *http.ServeMux, s *runtimeStore) {
 func registerToolboxRoutes(mux *http.ServeMux, s *runtimeStore) {
 	paths := []string{"/api/v2/toolbox/device/users", "/api/v2/toolbox/device/zone/options", "/api/v2/toolbox/fail2ban/base", "/api/v2/toolbox/fail2ban/load/conf", "/api/v2/toolbox/ftp/base"}
 	for _, p := range paths {
-		mux.HandleFunc("GET "+p, func(w http.ResponseWriter, _ *http.Request) {
-			runtimeOK(w, map[string]any{"items": []any{}, "status": "ready"})
+		path := p
+		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, _ *http.Request) {
+			runtimeOK(w, toolboxGetData(s, path))
 		})
 	}
 	for _, p := range []string{"/api/v2/toolbox/device/base", "/api/v2/toolbox/device/check/dns", "/api/v2/toolbox/device/conf", "/api/v2/toolbox/device/update/byconf", "/api/v2/toolbox/device/update/conf", "/api/v2/toolbox/device/update/host", "/api/v2/toolbox/device/update/passwd", "/api/v2/toolbox/device/update/swap", "/api/v2/toolbox/fail2ban/operate", "/api/v2/toolbox/fail2ban/operate/sshd", "/api/v2/toolbox/fail2ban/search", "/api/v2/toolbox/fail2ban/update", "/api/v2/toolbox/fail2ban/update/byconf", "/api/v2/toolbox/ftp", "/api/v2/toolbox/ftp/del", "/api/v2/toolbox/ftp/log/search", "/api/v2/toolbox/ftp/operate", "/api/v2/toolbox/ftp/search", "/api/v2/toolbox/ftp/sync", "/api/v2/toolbox/ftp/update", "/api/v2/toolbox/clam", "/api/v2/toolbox/clam/base", "/api/v2/toolbox/clam/del", "/api/v2/toolbox/clam/file/search", "/api/v2/toolbox/clam/file/update", "/api/v2/toolbox/clam/handle", "/api/v2/toolbox/clam/operate", "/api/v2/toolbox/clam/record/clean", "/api/v2/toolbox/clam/record/search", "/api/v2/toolbox/clam/search", "/api/v2/toolbox/clam/status/update", "/api/v2/toolbox/clam/update", "/api/v2/toolbox/clean", "/api/v2/toolbox/scan", "/api/v2/settings/terminal/ai/search", "/api/v2/settings/terminal/ai/update"} {
@@ -324,4 +325,54 @@ func registerToolboxRoutes(mux *http.ServeMux, s *runtimeStore) {
 		})
 	}
 	_ = s
+}
+
+// toolboxGetData 从受限系统文件和本地状态读取工具箱信息，不执行用户输入命令。
+func toolboxGetData(s *runtimeStore, path string) map[string]any {
+	switch path {
+	case "/api/v2/toolbox/device/users":
+		items := make([]map[string]any, 0)
+		if raw, err := os.ReadFile("/etc/passwd"); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				fields := strings.SplitN(line, ":", 7)
+				if len(fields) < 7 || fields[0] == "" {
+					continue
+				}
+				items = append(items, map[string]any{"name": fields[0], "uid": fields[2], "gid": fields[3], "home": fields[5], "shell": fields[6]})
+				if len(items) >= 200 {
+					break
+				}
+			}
+		}
+		return map[string]any{"items": items, "total": len(items), "status": "ready", "supported": len(items) > 0}
+	case "/api/v2/toolbox/device/zone/options":
+		zone := time.Local.String()
+		if zone == "" {
+			zone = "Local"
+		}
+		return map[string]any{"items": []map[string]any{{"name": zone, "value": zone}}, "current": zone, "status": "ready"}
+	case "/api/v2/toolbox/fail2ban/base", "/api/v2/toolbox/fail2ban/load/conf":
+		configPath := "/etc/fail2ban/jail.local"
+		content := ""
+		if raw, err := os.ReadFile(configPath); err == nil {
+			content = string(raw)
+			if len(content) > 1<<20 {
+				content = content[:1<<20]
+			}
+		}
+		return map[string]any{"path": configPath, "content": content, "installed": content != "", "enabled": content != "", "status": "ready"}
+	case "/api/v2/toolbox/ftp/base":
+		s.mu.RLock()
+		value := s.state.Settings["ftp"]
+		s.mu.RUnlock()
+		if value == nil {
+			value = map[string]any{"enabled": false, "port": 21, "status": "not_configured"}
+		}
+		if config, ok := value.(map[string]any); ok {
+			return config
+		}
+		return map[string]any{"config": value, "status": "ready"}
+	default:
+		return map[string]any{"status": "unsupported", "path": path}
+	}
 }

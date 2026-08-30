@@ -30,3 +30,20 @@ func TestRuntimeAndSSHRoutes(t *testing.T) {
 		t.Fatalf("ssh response leaked or failed: %s", ssh.Body.String())
 	}
 }
+
+func TestToolboxGetDataUsesHostState(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	s := getRuntimeStore()
+	users := toolboxGetData(s, "/api/v2/toolbox/device/users")
+	if users["items"] == nil || users["total"] == nil {
+		t.Fatalf("users response missing fields: %#v", users)
+	}
+	zones := toolboxGetData(s, "/api/v2/toolbox/device/zone/options")
+	if zones["current"] == "" {
+		t.Fatalf("timezone response missing current zone: %#v", zones)
+	}
+	ftp := toolboxGetData(s, "/api/v2/toolbox/ftp/base")
+	if ftp["status"] == nil && ftp["enabled"] == nil {
+		t.Fatalf("ftp response missing state: %#v", ftp)
+	}
+}
