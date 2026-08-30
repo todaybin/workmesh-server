@@ -1124,3 +1124,10 @@
 | 功能 | 来源 | 新实现 | 覆盖 | 状态 |
 | --- | --- | --- | --- | --- |
 | Core/Agent 后端语言包与前端语言入口 | `apps/workmesh-node/core/i18n`、`apps/workmesh-node/agent/i18n`、旧 frontend | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 12 种语言；后端每种 1037 键；前端键结构和菜单入口通过 `i18n-scan.mjs` | implemented |
+
+## 启动初始化与 CLI 制品安全
+
+| 状态 | 方法/入口 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
+|---|---|---|---|---|---|---|
+| implemented | 进程启动 | `apps/workmesh-server/cmd/workmesh-server/main.go:initializeDataDir` | 本地进程权限 | `WORKMESH_DATA_DIR` 下运行子目录 | `cmd/workmesh-server/cli_test.go:TestInitializeDataDirCreatesRuntimeLayout` | 生产挂载点和配额待部署验收 |
+| implemented | `restore <artifact>`、`update <artifact>` | `apps/workmesh-server/cmd/workmesh-server/cli.go:installSignedArtifact` | Ed25519 公钥与签名必填 | `deployment-artifact.json` 原子写入，目标制品保留 previous 备份 | `TestCLIUpdateVerifiesSignatureAndAtomicallyInstalls`、`TestCLIRestoreRejectsTamperedArtifactAndUnsafeTarget` | 云端发布服务和跨节点同步需真实网关凭据 |

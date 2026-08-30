@@ -1,5 +1,10 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
+## 2026-08-31 全局安全中间件
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 全局 Session、CSRF、域名绑定与密码过期策略 | `apps/workmesh-node/core/middleware/session.go`、`csrf_protect.go`、`bind_domain.go`、`password_expired.go` | 所有 `/api/v2/*` 请求及前端安全入口 | `control/api/security_middleware.go:NewSecurityMiddleware` | API 全路径；前端 `/{securityEntrance}` | 本地 Session/Bearer/API Key/节点令牌；Cookie 写请求要求 `pcsrftoken` 与 `X-CSRF-Token` | `WORKMESH_DATA_DIR/domains.json.settings`（`bindDomain`、`securityEntrance`、`expirationDays`、`expirationTime`）及环境变量覆盖 | 读取设置采用 mtime/大小缓存；会话和令牌由 CoreService 管理 | `control/api/security_middleware_test.go` | `go test -count=1 ./control/api -run SecurityMiddleware` | 待主 Agent 在 `main` HTTP 生命周期挂载并进行 HTTPS/反向代理验收 | implemented | 主进程需调用 `NewSecurityMiddleware` 包装根 mux；生产 `Secure` Cookie 和真实域名需部署配置 |
+
 ## 2026-08-31 容器日志与下载进度闭环
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -297,3 +302,10 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 | Docker 容器生命周期 | containers | `node/api/containers.go`、`node/service/docker.go` | POST `/api/v2/containers`、`/operate`、`/update`、`/rename`、`/commit`、`/prune` | 节点会话/HMAC | Docker CLI | Docker daemon | `node/api/hosts_containers_test.go` | implemented | 资源配额字段需按平台扩展 |
 | Docker 容器文件 | containers | `node/api/containers.go` | POST `/api/v2/containers/files/{search,content,size,del,upload,download}` | 节点会话/HMAC | Docker exec/cp | 容器文件系统 | `node/api/hosts_containers_test.go` | implemented | 大文件下载需流式响应 |
 | Docker 镜像、网络、卷 | containers | `node/api/containers.go` | GET/POST `/api/v2/containers/image*`、`network*`、`volume*` | 节点会话/HMAC | Docker CLI | Docker daemon | `node/api/hosts_containers_test.go` | implemented | 仓库与模板管理待接入持久化 |
+
+## 2026-08-31 启动初始化与 CLI 制品安全
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 服务启动数据目录初始化 | `apps/workmesh-node/core/init`、`agent/init` | 进程启动入口 | `cmd/workmesh-server/main.go`、`cmd/workmesh-server/cli.go:initializeDataDir` | 无 HTTP；启动前初始化 `apps/backups/logs/releases/runtime/uploads` | 本地进程权限 | `WORKMESH_DATA_DIR` | 目录 0750，状态文件由各域原子写入 | `cmd/workmesh-server/cli_test.go:TestInitializeDataDirCreatesRuntimeLayout` | `go test ./cmd/workmesh-server -run InitializeDataDir` | 待 Linux 权限验收 | implemented | 生产挂载点和磁盘配额需部署确认 |
+| 签名制品更新与恢复 | `apps/workmesh-node/core/cmd/server/cmd/restore.go`、`update.go` | `restore`、`update` CLI | `cmd/workmesh-server/cli.go:installSignedArtifact` | CLI：`restore|update <artifact> [--signature] [--public-key] [--target] [--sha256] [--version]` | 本地管理员调用；Ed25519 签名必须有效 | 制品文件、SHA-256、签名与公钥 | `deployment-artifact.json` 原子写入；目标保留 previous 备份 | `cmd/workmesh-server/cli_test.go:TestCLIUpdateVerifiesSignatureAndAtomicallyInstalls` | `go test ./cmd/workmesh-server -run 'CLI(Update|Restore)'` | 云端发布凭据待配置 | implemented | 真实发布服务和跨节点同步需网关凭据 |

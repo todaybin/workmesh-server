@@ -28,6 +28,10 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := initializeDataDir(cfg.DataDir); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "初始化数据目录失败:", err)
+		os.Exit(1)
+	}
 	if handled, err := runCLI(os.Args[1:], cfg.DataDir); handled {
 		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
@@ -60,7 +64,11 @@ func main() {
 
 	mux, gatewayStore := httpMux(cfg)
 	gatewayStore.Start(ctx, []string{"system", "containers", "files", "databases", "websites", "tasks"})
-	server := wmhttp.New(cfg.ListenAddr, mux, cfg.RequestTimeout)
+	// 统一安全包装器位于所有控制面和节点路由外层，避免新增路由遗漏 Session/CSRF、域名绑定和密码过期校验。
+	securedMux := controlapi.NewSecurityMiddleware(mux, controlapi.SecurityMiddlewareOptions{
+		DataDir: cfg.DataDir, Authorize: nodeapi.AuthorizeControlRequest,
+	})
+	server := wmhttp.New(cfg.ListenAddr, securedMux, cfg.RequestTimeout)
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, context.Canceled) {
 			logger.Error("HTTP 服务退出", "error", err)

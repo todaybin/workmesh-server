@@ -67,7 +67,7 @@
 | [x] | 单进程 HTTP 服务、静态资源和优雅停机 | `core/init`、`agent/init` | `cmd/workmesh-server/main.go`、`runtime/http/server.go`；`go test ./...` | SIGTERM 在超时内停止监听并刷新状态 |
 | [x] | 健康与就绪探针 | `core/init/router` | `/health` 不访问依赖，`/ready` 可检查依赖；双节点 HTTP 200 | 探针响应保持 200/ERR envelope 契约 |
 | [x] | 节点角色与 epoch/fencing | `core/utils/xpack/providers/multi_node.go`、`agent/utils/xpack/providers/multi_node.go` | `runtime/role`、`runtime/link`、`control/api/role.go`；链路和重启恢复测试 | 旧 epoch 请求返回 409，角色状态通过 `role-state.json` 原子保存并在重启后恢复，禁止双主写入 |
-| [~] | 启动配置、数据目录和资源限制 | `core/global/config.go`、`agent/global/config.go` | `config/config.go`、`WORKMESH_*` 环境变量 | 补充生产配置校验和资源上限 E2E |
+| [x] | 启动配置、数据目录和资源限制 | `core/global/config.go`、`agent/global/config.go` | `config/config.go`、`cmd/workmesh-server/cli.go:initializeDataDir`；数据目录和 releases/apps/backups/logs/runtime/uploads 子目录启动时创建，制品读取上限 512 MiB | 本地初始化、文件类型和上限测试通过；生产硬件资源 E2E 仍需部署验证 |
 
 ## 安全中间件与授权
 
@@ -228,6 +228,14 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 - [x] 服务端 12 个语言包已从旧 Agent 全量迁移至 `apps/workmesh-server/i18n/lang/*.yaml`，并替换原品牌标识。
 - [x] `apps/workmesh-server/i18n/i18n.go` 提供嵌入式资源加载、未知语言回退中文和标量消息查询；`go test ./i18n` 已通过。
 - [x] 前端 `web/src/lang/modules/*.ts` 保留 12 个语言模块；`npm.cmd run type-check` 与 `npm.cmd run build:pro` 已通过。
+
+## 2026-08-31 启动初始化与 CLI 制品安全
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 测试与剩余缺口 |
+|---|---|---|---|---|
+| [x] | 单进程启动时初始化数据目录与运行子目录 | `apps/workmesh-node/core/init`、`agent/init` | `cmd/workmesh-server/main.go` 调用 `initializeDataDir`；`apps/backups/logs/releases/runtime/uploads` 目录使用 0750 创建 | `cmd/workmesh-server/cli_test.go:TestInitializeDataDirCreatesRuntimeLayout`；生产目录权限需部署验收 |
+| [x] | CLI restore/update 签名制品校验 | `apps/workmesh-node/core/cmd/server/cmd/restore.go`、`update.go` | `cmd/workmesh-server/cli.go:installSignedArtifact`；Ed25519 公钥、SHA-256 摘要、签名文件和大小上限校验，无签名材料明确报错 | `TestCLIUpdateVerifiesSignatureAndAtomicallyInstalls`、`TestCLIRestoreRejectsTamperedArtifactAndUnsafeTarget`；云端发布服务仍需真实凭据 |
+| [x] | CLI 制品原子替换与回滚备份 | `apps/workmesh-node/core/cmd/server/cmd/restore.go` | `cmd/workmesh-server/cli.go:atomicInstall/saveArtifactResult`；同目录临时文件、Sync、rename，旧版本保存为 `.previous.<timestamp>` | 同上；跨文件系统目标被拒绝并返回上下文错误 |
 ## 数据库后台能力（2026-08-31）
 
 | 能力 | 入口 | 新实现 | 状态 | 说明 |
