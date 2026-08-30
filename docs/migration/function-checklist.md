@@ -7,7 +7,7 @@
 | xpack 监控/WAF 别名 | `apps/workmesh-node/agent/router/ro_website.go` | `node/api/website.go` | GET/POST `/api/v2/xpack/monitor/*`、`/api/v2/xpack/waf/*` | 节点会话 | analytics、网站 WAF 服务 | 网站配置文件 | `node/api/website_test.go` | implemented | 外部 OpenResty 可用性依赖部署环境 |
 | 网站负载均衡与资源查询 | `apps/workmesh-node/agent/app/api/v2/website.go` | `node/api/website.go`、`node/api/website_extensions.go` | GET `/api/v2/websites/:id/lbs`、`/api/v2/websites/resource/:id` | 节点会话 | 网站配置与域名记录 | 网站状态文件 | `node/api/website_test.go` | implemented | 数据库资源关联需凭据后接入 |
 | 文件分片、历史与高级操作 | `apps/workmesh-node/agent/app/api/v2/file.go` | `node/api/files_routes.go` | POST `/api/v2/files/chunkupload`、`history/*`、`depth/size`、`mode`、`read/:type`、`share/detail`、`mount`、`user/group` | 节点会话 | 本地文件系统 | 原子文件与 file-aux 状态 | `node/api/files_routes_test.go` | implemented | Windows owner 修改明确不支持 |
-| 媒体文件转换 | `apps/workmesh-node/agent/app/api/v2/file.go:ConvertFile` | `node/api/files_routes.go` | POST `/api/v2/files/convert`、`/convert/log` | 节点会话 | 配置的媒体转换器与本地文件 | 输出由转换器写入 | `node/api/files_routes_test.go` | partial | `convert/log` 尚未持久化转换日志；未配置转换器时返回 503 |
+| 媒体文件转换 | `apps/workmesh-node/agent/app/api/v2/file.go:ConvertFile` | `node/api/files_routes.go` | POST `/api/v2/files/convert`、`/convert/log` | 节点会话 | 配置的媒体转换器与本地文件 | 输出原子替换，转换日志写入 `files.json` | `node/api/files_routes_test.go` | implemented | 转换器需通过 `WORKMESH_MEDIA_CONVERTER` 配置；未配置时返回 503 |
 
 ## 2026-08-30 数据服务与 OpenResty 真实运行时补齐
 
@@ -224,6 +224,9 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 | 应用详情与运行服务 | `apps/workmesh-node/agent/app/api/v2/app.go:GetApp*` | `GET /api/v2/apps/:key`、`GET /api/v2/apps/detail/*`、`GET /api/v2/apps/services/:key` | `node/api/apps.go:appCatalogGet` | 同左 | 节点会话鉴权（上层中间件） | `apps.json` catalog/apps 记录及配置中的 services/params | `WORKMESH_DATA_DIR/apps.json` 原子写入 | `node/api/apps_test.go:TestAppDerivedDetailsAndDeleteCheck` | `go test ./node/api -run App` | 本地 HTTP 已验证 | implemented | 未接入远程应用商店 SDK |
 | 已安装应用信息与删除检查 | `apps/workmesh-node/agent/app/api/v2/app.go` | `GET /api/v2/apps/installed/info/:appInstallId`、`GET /api/v2/apps/installed/params/:appInstallId`、`GET /api/v2/apps/installed/delete/check/:appInstallId` | `node/api/apps.go:appInstalledGet` | 同左 | 节点会话鉴权（上层中间件） | 安装记录、容器名称和参数 | `apps.json` 原子写入 | `node/api/apps_test.go:TestAppDerivedDetailsAndDeleteCheck` | `go test ./node/api -run AppDerived` | 本地 HTTP 已验证 | implemented | 容器资源删除仍需容器域执行 |
 | 应用版本更新查询 | `apps/workmesh-node/agent/app/api/v2/app.go` | `POST /api/v2/apps/installed/update/versions` | `node/api/apps.go:handleAppPost` | `POST /api/v2/apps/installed/update/versions` | 节点会话鉴权（上层中间件） | catalog 中匹配应用的版本记录 | 无额外写入 | `node/api/apps_test.go` | `go test ./node/api -run App` | 本地 HTTP 已验证 | implemented | 远程版本同步依赖 Gateway 配置 |
+
+| 媒体文件异步转换 | `apps/workmesh-node/agent/app/service/file.go:Convert`、`utils/convert/convert.go` | `POST /api/v2/files/convert` | `node/api/files_routes.go:runMediaConversion` | 支持 files 批量、任务 ID、转换器超时、输出原子提交、删除源文件选项 | 节点会话/HMAC（上层中间件） | 本地输入文件与 `WORKMESH_MEDIA_CONVERTER` | `WORKMESH_DATA_DIR/files.json` 的 ConvertLogs，最多 2000 条 | `node/api/files_routes_test.go:TestConvertAndConvertLogPersistence` | `go test ./node/api -run TestConvertAndConvertLogPersistence` | 本地 HTTP 已验证 | implemented | 转换器需由部署配置提供 |
+| 媒体转换日志分页 | `apps/workmesh-node/agent/app/service/file.go:ConvertLog` | `POST /api/v2/files/convert/log` | `node/api/files_routes.go:fileAdvancedHandler` | 按 taskID、status、type 过滤并分页返回真实成功/失败记录 | 节点会话/HMAC（上层中间件） | ConvertLogs 持久化记录 | 同 files.json 原子写入 | `node/api/files_routes_test.go:TestConvertAndConvertLogPersistence` | `go test ./node/api -run TestConvertAndConvertLogPersistence` | 本地 HTTP 已验证 | implemented | 大规模日志归档策略待补充 |
 
 ## 文件、备份与日志增强批次（2026-08-31）
 

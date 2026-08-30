@@ -7,7 +7,7 @@
 | xpack 监控/WAF 别名方法路由 | `apps/workmesh-node/agent/router/ro_website.go` | `node/api/website.go` | implemented | 修复 ServeMux 方法模式拼接，别名进入真实 analytics/WAF 处理器 |
 | 网站资源与负载均衡查询 | `apps/workmesh-node/agent/app/service/website.go` | `node/api/website.go`、`website_extensions.go` | implemented | 读取网站配置、域名并返回资源列表 |
 | 文件 owner、挂载点、用户组查询 | `apps/workmesh-node/agent/app/api/v2/file.go` | `node/api/files_routes.go` | implemented | Linux 使用 os/user 与 Chown，Windows 返回明确不支持 |
-| 媒体文件转换任务 | `apps/workmesh-node/agent/app/service/file.go:Convert` | `node/api/files_routes.go` | partial | 通过受控 `WORKMESH_MEDIA_CONVERTER` 执行并设置超时，转换日志查询仍待持久化 |
+| 媒体文件转换任务 | `apps/workmesh-node/agent/app/service/file.go:Convert` | `node/api/files_routes.go` | implemented | 通过受控 `WORKMESH_MEDIA_CONVERTER` 执行并设置 5 分钟超时；输出原子替换，日志持久化并支持分页筛选 |
 <!-- Copyright (c) 2026 WorkMesh contributors -->
 
 ## 2026-08-30 核心认证与执行入口
@@ -258,6 +258,8 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | 文件历史版本快照 | `apps/workmesh-node/agent/app/service/file_history.go` | `node/api/files.go:handleFilesSave`、`files_routes.go:history/*` | implemented | 保存前记录最多 200 条快照，支持恢复和删除 |
 | 日志分页与类型清理 | `apps/workmesh-node/agent/app/api/v2/task.go`、`core/app/api/v2/logs.go` | `node/api/functional_domains.go:registerLogRoutes` | implemented | 日志检索支持关键字/类型/级别和分页，清理按类型过滤 |
 | 压缩包安全解压 | `apps/workmesh-node/agent/app/service/file.go` | `node/api/files_routes.go:unzipPath` | implemented | 拒绝路径穿越与符号链接，条目临时文件原子替换 |
+| 媒体转换后台任务 | `apps/workmesh-node/agent/app/service/file.go:Convert` | `node/api/files_routes.go:runMediaConversion` | implemented | 每个输入文件独立执行、5 分钟超时、输出文件校验并写入持久化日志 |
+| 媒体转换 JSON 日志 | `apps/workmesh-node/agent/utils/convert/convert.go:appendJSONLog` | `node/api/files_routes.go:appendConvertLog`、`convert/log` | implemented | ConvertLogs 上限 2000，支持 taskID/status/type 过滤和分页 |
 
 ## 2026-08-31 AI 流式与 MCP 隐藏能力
 
