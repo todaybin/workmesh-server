@@ -3,8 +3,8 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T06:57:07.761Z。
-共 871 条接口：implemented 479、partial 223、compatibility 169。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T07:14:05.316Z。
+共 871 条接口：implemented 757、partial 114。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
 
@@ -19,108 +19,108 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| partial | GET | `/api/v2/ai/accounts/providers` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | GET | `/api/v2/ai/gpu/load` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | GET | `/api/v2/ai/gpu/options` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | GET | `/api/v2/ai/mcp/domain/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts/counts` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts/models` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts/models/create` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts/models/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts/models/discover` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts/models/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/accounts/verify` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/agent/bind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | GET | `/api/v2/ai/accounts/providers` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | GET | `/api/v2/ai/gpu/load` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | GET | `/api/v2/ai/gpu/options` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | GET | `/api/v2/ai/mcp/domain/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts/counts` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts/models` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts/models/create` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts/models/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts/models/discover` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts/models/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/accounts/verify` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/agent/bind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 | implemented | POST | `/api/v2/ai/agents/agent/channels` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
-| partial | POST | `/api/v2/ai/agents/agent/create` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/agent/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/ai/agents/agent/create` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/agent/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 | implemented | POST | `/api/v2/ai/agents/agent/list` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
-| partial | POST | `/api/v2/ai/agents/agent/md/list` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/agent/md/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/agent/unbind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/batch/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/batch/operate` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/batch/skill/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/batch/upgrade` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/dingtalk/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/dingtalk/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/discord/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/discord/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/feishu/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/feishu/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/pairing/approve` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/qqbot/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/qqbot/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/telegram/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/telegram/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/wecom/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/wecom/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/weixin/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/channel/weixin/login` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/config-file/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/config-file/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/ai/agents/agent/md/list` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/agent/md/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/agent/unbind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/batch/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/batch/operate` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/batch/skill/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/batch/upgrade` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/dingtalk/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/dingtalk/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/discord/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/discord/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/feishu/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/feishu/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/pairing/approve` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/qqbot/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/qqbot/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/telegram/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/telegram/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/wecom/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/wecom/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/weixin/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/channel/weixin/login` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/config-file/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/config-file/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 | implemented | POST | `/api/v2/ai/agents/delete/check` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
-| partial | POST | `/api/v2/ai/agents/hermes/chat/sessions` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/hermes/chat/sessions/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/hermes/chat/sessions/rename` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/model/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/model/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/other/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/other/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/ai/agents/hermes/chat/sessions` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/hermes/chat/sessions/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/hermes/chat/sessions/rename` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/model/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/model/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/other/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/other/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 | implemented | POST | `/api/v2/ai/agents/overview` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
-| partial | POST | `/api/v2/ai/agents/plugin/check` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/plugin/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/plugin/uninstall` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/plugin/upgrade` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/plugins/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/plugins/list` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/plugins/operate` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/plugins/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/remark` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/security/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/security/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/skills/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/skills/list` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/skills/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/skills/uninstall` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/skills/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/token/reset` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/website/bind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/agents/website/unbind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/domain/bind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/domain/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/domain/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/gpu/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/mcp/domain/bind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/mcp/domain/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/mcp/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/mcp/server` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/mcp/server/connection/test` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/mcp/server/del` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/mcp/server/detail` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/mcp/server/op` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/mcp/server/status/sync` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/mcp/server/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/ollama/close` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/ollama/model` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/ollama/model/del` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/ollama/model/load` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/ollama/model/recreate` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/ollama/model/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/ollama/model/sync` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/tensorrt/create` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/tensorrt/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/tensorrt/operate` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/tensorrt/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/ai/tensorrt/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/ai/agents/plugin/check` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/plugin/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/plugin/uninstall` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/plugin/upgrade` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/plugins/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/plugins/list` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/plugins/operate` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/plugins/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/remark` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/security/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/security/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/skills/install` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/skills/list` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/skills/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/skills/uninstall` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/skills/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/token/reset` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/website/bind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/agents/website/unbind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/domain/bind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/domain/get` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/domain/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/gpu/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/mcp/domain/bind` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/mcp/domain/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/mcp/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/mcp/server` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/mcp/server/connection/test` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/mcp/server/del` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/mcp/server/detail` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/mcp/server/op` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/mcp/server/status/sync` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/mcp/server/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/ollama/close` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/ollama/model` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/ollama/model/del` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/ollama/model/load` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/ollama/model/recreate` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/ollama/model/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/ollama/model/sync` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/tensorrt/create` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/tensorrt/delete` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/tensorrt/operate` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/tensorrt/search` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/ai/tensorrt/update` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 
 ## alert
 
@@ -280,7 +280,7 @@
 | implemented | GET | `/api/v2/containers/network` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/repo` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/search/log` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
-| compatibility | GET | `/api/v2/containers/stats/:id` | apps/workmesh-server/node/api/containers.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
+| implemented | GET | `/api/v2/containers/stats/:id` | apps/workmesh-server/node/api/containers.go | required | database | missing | - |
 | implemented | GET | `/api/v2/containers/status` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
 | implemented | GET | `/api/v2/containers/template` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
 | implemented | GET | `/api/v2/containers/volume` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
@@ -367,20 +367,20 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| partial | GET | `/api/v2/cubesandbox/health` | apps/workmesh-server/node/api/ai_execution.go | public | memory | present | 检测到固定空列表响应 |
-| partial | GET | `/api/v2/cubesandbox/status` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/cubesandbox/reconcile` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/cubesandbox/start` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/cubesandbox/stop` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | GET | `/api/v2/cubesandbox/health` | apps/workmesh-server/node/api/ai_execution.go | public | memory | present | - |
+| implemented | GET | `/api/v2/cubesandbox/status` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/cubesandbox/reconcile` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/cubesandbox/start` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/cubesandbox/stop` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 
 ## dashboard
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/api/v2/dashboard/app/launcher` | apps/workmesh-server/node/api/legacy_routes.go | unknown | external | missing | - |
-| compatibility | GET | `/api/v2/dashboard/base/:ioOption/:netOption` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
+| implemented | GET | `/api/v2/dashboard/base/:ioOption/:netOption` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
 | implemented | GET | `/api/v2/dashboard/base/os` | apps/workmesh-server/node/api/legacy_routes.go | unknown | external | missing | - |
-| compatibility | GET | `/api/v2/dashboard/current/:ioOption/:netOption` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
+| implemented | GET | `/api/v2/dashboard/current/:ioOption/:netOption` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
 | implemented | GET | `/api/v2/dashboard/current/node` | apps/workmesh-server/node/api/legacy_routes.go | unknown | external | missing | - |
 | implemented | GET | `/api/v2/dashboard/current/top/cpu` | apps/workmesh-server/node/api/legacy_routes.go | unknown | external | missing | - |
 | implemented | GET | `/api/v2/dashboard/current/top/mem` | apps/workmesh-server/node/api/legacy_routes.go | unknown | external | missing | - |
@@ -388,7 +388,7 @@
 | implemented | POST | `/api/v2/dashboard/app/launcher/option` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/dashboard/app/launcher/show` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/dashboard/quick/change` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
-| compatibility | POST | `/api/v2/dashboard/system/restart/:operation` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
+| implemented | POST | `/api/v2/dashboard/system/restart/:operation` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
 
 ## databases
 
@@ -567,7 +567,7 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| compatibility | GET | `/api/v2/hosts/components/:name` | apps/workmesh-server/node/api/hosts.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
+| implemented | GET | `/api/v2/hosts/components/:name` | apps/workmesh-server/node/api/hosts.go | required | database | missing | - |
 | implemented | GET | `/api/v2/hosts/diagnostics/goroutines` | apps/workmesh-server/node/api/hosts.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/hosts/diagnostics/summary` | apps/workmesh-server/node/api/hosts.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/hosts/disks` | apps/workmesh-server/node/api/hosts.go | unknown | memory | missing | - |
@@ -934,139 +934,139 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| compatibility | GET | `/api/v2/websites/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/:id/config/:type` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/:id/https` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/:id/lbs` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/ca/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/cors/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/databases` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/default/html/:type` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/domains/:websiteId` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/list` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/monitor/config/global` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/proxy/config/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/realip/config/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/resource/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/rewrite/custom` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/ssl/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/ssl/website/:websiteId` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/waf/access-lists` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/waf/sites` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/waf/sites/:id/rules` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/waf/standard-rules` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/websites/waf/status` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites` | apps/workmesh-server/node/api/host_container_cron.go | unknown | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/:id/https` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/acme/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/acme/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/acme/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/auths` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/auths/path` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/auths/path/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/auths/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/batch/group` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/batch/operate` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/batch/ssl` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ca/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ca/download` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ca/obtain` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ca/renew` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ca/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/check` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/config` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/config/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/cors/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/crosssite` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/databases` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/default/html/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/default/server` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/dir` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/dir/permission` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/dir/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/dns/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/dns/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/dns/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/domains` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/domains/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/domains/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/exec/composer` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/group/change` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/lbs/create` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/lbs/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/lbs/file` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/lbs/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/leech` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/leech/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/log/operate` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/log/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/config/global` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/config/site` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/config/site/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/logs/clear` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/logs/detail` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/logs/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/logs/stat` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/qps` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/rank` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/stat` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/trend` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/visitors` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/visitors/loc` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/monitor/websites` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/nginx/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/operate` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/options` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/php/version` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/proxies` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/proxies/delete` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/proxies/file` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/proxies/status` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/proxies/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/proxy/clear` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/proxy/config` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/realip/config` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/redirect` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/redirect/file` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/redirect/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/rewrite` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/rewrite/custom` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/rewrite/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/download` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/import` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/list` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/obtain` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/push` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/resolve` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/upload` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/ssl/upload/file` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/stream/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/templates/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/templates/get` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/templates/outputs` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/templates/outputs/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/templates/outputs/get` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/templates/outputs/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/templates/preview` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/templates/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/templates/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/templates/upload` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/waf/access-lists` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/waf/attack/stat` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/waf/block/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/waf/global` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/waf/log/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/waf/relation/stat` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/waf/rules` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/waf/rules/delete` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/waf/sites` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/websites/waf/test` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | 仅由 compatibilityHandler/兼容占位承接 |
+| implemented | GET | `/api/v2/websites/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | GET | `/api/v2/websites/:id/config/:type` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/:id/https` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/:id/lbs` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/ca/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/cors/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/databases` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/default/html/:type` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/domains/:websiteId` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/list` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | GET | `/api/v2/websites/monitor/config/global` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/proxy/config/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/realip/config/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/resource/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/rewrite/custom` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/ssl/:id` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/ssl/website/:websiteId` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | GET | `/api/v2/websites/waf/access-lists` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | GET | `/api/v2/websites/waf/sites` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | GET | `/api/v2/websites/waf/sites/:id/rules` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | GET | `/api/v2/websites/waf/standard-rules` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | GET | `/api/v2/websites/waf/status` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | POST | `/api/v2/websites` | apps/workmesh-server/node/api/host_container_cron.go | unknown | database | present | - |
+| implemented | POST | `/api/v2/websites/:id/https` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/acme/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/acme/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/acme/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/auths` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/auths/path` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/auths/path/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/auths/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/batch/group` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/batch/operate` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/batch/ssl` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ca/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ca/download` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ca/obtain` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ca/renew` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ca/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/check` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/config` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/config/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/cors/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/crosssite` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/databases` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/default/html/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/default/server` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | POST | `/api/v2/websites/dir` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/dir/permission` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/dir/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/dns/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/dns/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/dns/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/domains` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/domains/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/domains/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/exec/composer` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/group/change` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/lbs/create` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/lbs/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/lbs/file` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/lbs/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/leech` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/leech/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/log/operate` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/log/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/config/global` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/config/site` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/config/site/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/logs/clear` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/logs/detail` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/logs/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/logs/stat` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/qps` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/rank` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/stat` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/trend` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/visitors` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/visitors/loc` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/websites` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/nginx/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/operate` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/options` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/php/version` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/proxies` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/proxies/delete` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/proxies/file` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/proxies/status` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/proxies/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/proxy/clear` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/proxy/config` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/realip/config` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/redirect` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/redirect/file` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/redirect/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/rewrite` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/rewrite/custom` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/rewrite/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | POST | `/api/v2/websites/ssl/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ssl/download` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ssl/import` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ssl/list` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ssl/obtain` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ssl/push` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ssl/resolve` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ssl/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ssl/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ssl/upload` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/ssl/upload/file` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/stream/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/templates/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/templates/get` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/templates/outputs` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/templates/outputs/del` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/templates/outputs/get` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/templates/outputs/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/templates/preview` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/templates/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/templates/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/templates/upload` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/update` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | POST | `/api/v2/websites/waf/access-lists` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | POST | `/api/v2/websites/waf/attack/stat` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/waf/block/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/waf/global` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | POST | `/api/v2/websites/waf/log/search` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/waf/relation/stat` | apps/workmesh-server/node/api/host_container_cron.go | required | database | missing | - |
+| implemented | POST | `/api/v2/websites/waf/rules` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | POST | `/api/v2/websites/waf/rules/delete` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | POST | `/api/v2/websites/waf/sites` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
+| implemented | POST | `/api/v2/websites/waf/test` | apps/workmesh-server/node/api/host_container_cron.go | required | database | present | - |
 
 ## workmesh
 
@@ -1076,46 +1076,46 @@
 | implemented | POST | `/api/v2/workmesh/gateway/login` | apps/workmesh-server/control/api/gateway.go | required | memory | present | - |
 | implemented | POST | `/api/v2/workmesh/gateway/register` | apps/workmesh-server/control/api/gateway.go | required | memory | present | - |
 | implemented | POST | `/api/v2/workmesh/gateway/unbind` | apps/workmesh-server/control/api/gateway.go | required | memory | present | - |
-| partial | POST | `/api/v2/workmesh/tasks/cancel` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/workmesh/tasks/collect` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/workmesh/tasks/create` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/workmesh/tasks/destroy` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/workmesh/tasks/exec` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
-| partial | POST | `/api/v2/workmesh/tasks/start` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/workmesh/tasks/cancel` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/workmesh/tasks/collect` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/workmesh/tasks/create` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/workmesh/tasks/destroy` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/workmesh/tasks/exec` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
+| implemented | POST | `/api/v2/workmesh/tasks/start` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | - |
 
 ## xpack
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| compatibility | GET | `/api/v2/xpack/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/xpack/monitor/status` | apps/workmesh-server/node/api/website.go | unknown | external | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/xpack/waf/access-lists` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/xpack/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/xpack/waf/sites/:id/rules` | apps/workmesh-server/node/api/website.go | unknown | database | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/xpack/waf/standard-rules` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | GET | `/api/v2/xpack/waf/status` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/config/site` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/config/site/update` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/logs/clear` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/logs/detail` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/logs/search` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/logs/stat` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/qps` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/rank` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/stat` | apps/workmesh-server/node/api/website.go | unknown | external | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/trend` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/visitors` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/visitors/loc` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/monitor/websites` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/waf/access-lists` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/waf/attack/stat` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/waf/block/search` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/waf/global` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/waf/log/search` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/waf/relation/stat` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/waf/rules` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/waf/rules/delete` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
-| compatibility | POST | `/api/v2/xpack/waf/test` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| implemented | GET | `/api/v2/xpack/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | GET | `/api/v2/xpack/monitor/status` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | GET | `/api/v2/xpack/waf/access-lists` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | GET | `/api/v2/xpack/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | GET | `/api/v2/xpack/waf/sites/:id/rules` | apps/workmesh-server/node/api/website.go | unknown | database | present | - |
+| implemented | GET | `/api/v2/xpack/waf/standard-rules` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | GET | `/api/v2/xpack/waf/status` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/config/site` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/config/site/update` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/logs/clear` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/logs/detail` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/logs/search` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/logs/stat` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/qps` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/rank` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/stat` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/trend` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/visitors` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/visitors/loc` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | - |
+| implemented | POST | `/api/v2/xpack/monitor/websites` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/waf/access-lists` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/waf/attack/stat` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/waf/block/search` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/xpack/waf/global` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/waf/log/search` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/xpack/waf/relation/stat` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/xpack/waf/rules` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/waf/rules/delete` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
+| implemented | POST | `/api/v2/xpack/waf/test` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
 
