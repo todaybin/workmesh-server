@@ -5,7 +5,7 @@
 
 日期：2026-08-30  
 制品：`workmesh-server` Linux amd64  
-制品 SHA256：`00e07f7dbb4ed995446cee19d5d97ad6deeec268852cdfcaf10dad575367fc65`
+制品 SHA256：`918c32fb34a702330946937a7590b23b15aba55d225a7ad19869e0ccf42204b5`
 
 ## 本批变更
 
@@ -23,7 +23,7 @@
 | route-scan | 870/870，通过；扩展路由 62 条允许兼容 |
 | hidden-function-scan | 95 个源码文件，init/middleware/i18n/log/cron 五类清单存在 |
 | implementation-scan | implemented 476，partial 225，compatibility 169，pending 0，missing 0 |
-| 双节点制品校验 | 主、次节点 SHA256 一致 |
+| 双节点制品校验 | 主、次节点 SHA256 一致（`918c32fb34a702330946937a7590b23b15aba55d225a7ad19869e0ccf42204b5`） |
 | 双节点健康检查 | `/health`、`/ready` 均 HTTP 200 |
 | 前端 MIME | 首页 `text/html`，入口 JS `text/javascript` |
 | 节点管理 | 登录、添加、列表、删除通过，测试节点已清理 |
@@ -33,4 +33,3 @@
 ## 未完成项声明
 
 `partial` 和 `compatibility` 不等同于完整复刻。真实访问日志采集、云备份 token 刷新、完整双向终端/SSE、CSRF/域名绑定/密码过期中间件、PHP/Node 运行时详情、文件回收站高级行为等仍需按逐路由清单逐项验收后才能发布为“完整功能”。
-

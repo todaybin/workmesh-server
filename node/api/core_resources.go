@@ -92,6 +92,8 @@ func handleScriptRun(w http.ResponseWriter, r *http.Request) {
 	status := http.StatusOK
 	if err != nil {
 		status = http.StatusUnprocessableEntity
+		wmhttp.JSON(w, status, map[string]any{"code": "ERR", "details": map[string]any{"errCode": "SCRIPT_FAILED", "exitCode": data["exitCode"], "timedOut": data["timedOut"]}, "data": data})
+		return
 	}
 	wmhttp.JSON(w, status, map[string]any{"code": 200, "data": data})
 }
