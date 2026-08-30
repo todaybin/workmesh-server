@@ -41,6 +41,11 @@ func cleanFilePath(path string) (string, error) {
 	if path == "" {
 		return "", errors.New("文件路径不能为空")
 	}
+	for _, segment := range strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if segment == ".." {
+			return "", errors.New("path traversal is not allowed")
+		}
+	}
 	clean := filepath.Clean(path)
 	if clean == "." || strings.ContainsRune(clean, 0) {
 		return "", errors.New("文件路径无效")

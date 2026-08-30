@@ -77,3 +77,11 @@ func TestFilesSaveReplacesAtomically(t *testing.T) {
 		t.Fatalf("temporary save file should not remain: %v", leftovers)
 	}
 }
+
+func TestCleanFilePathRejectsTraversal(t *testing.T) {
+	for _, input := range []string{"../outside", "a/../../outside", `..\\outside`} {
+		if _, err := cleanFilePath(input); err == nil {
+			t.Fatalf("expected traversal rejection for %q", input)
+		}
+	}
+}
