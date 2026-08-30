@@ -838,6 +838,12 @@ func testMCPConnection(s *executionState, body map[string]any) (map[string]any, 
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
 		return nil, errors.New("MCP 服务地址必须是无凭据的 HTTP(S) 地址")
 	}
+	for key := range parsed.Query() {
+		name := strings.ToLower(key)
+		if strings.Contains(name, "token") || strings.Contains(name, "secret") || strings.Contains(name, "password") || strings.Contains(name, "apikey") || strings.Contains(name, "api_key") {
+			return nil, errors.New("MCP 服务地址不得在查询参数中携带凭据")
+		}
+	}
 	transport := strings.ToLower(aiString(server, "outputTransport", "transport"))
 	if transport == "" {
 		transport = "streamablehttp"
