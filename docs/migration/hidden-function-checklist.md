@@ -242,3 +242,12 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | 任务失败重试 | agent service/cronjob_helper.go | node/service/cronjob.go | implemented | RetryTimes 与 Timeout 生效 |
 | 脚本库持久化 | core script library | node/api/core_resources.go | implemented | scripts.json 原子写入，审核后执行 |
 | 任务记录上限 | agent cronjobRepo | node/service/cronjob.go | implemented | 每任务最多保留 1000 条 |
+| MCP 连接协议探测 | `apps/workmesh-node/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 实际执行 Streamable HTTP initialize 或 SSE Content-Type 校验，失败不返回成功 |
+| Agent 渠道配对命令 | `apps/workmesh-node/agent/app/service/agents_channels.go:ApproveChannelPairing` | `node/api/ai_execution.go:handleAgentPairingApprove` | implemented | 仅对已登记容器执行固定 Docker 参数，容器缺失返回不可用 |
+
+## 2026-08-31 AI 流式与 MCP 隐藏能力
+
+| 隐藏能力 | 发现位置 | 实现位置 | 状态 | 说明 |
+|---|---|---|---|---|
+| MCP Streamable HTTP initialize 探测 | `apps/workmesh-node/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 发送 JSON-RPC initialize，10 秒超时，网络失败返回明确错误 |
+| MCP SSE 响应类型校验 | `apps/workmesh-node/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 要求 `text/event-stream`，拒绝伪造成功 |

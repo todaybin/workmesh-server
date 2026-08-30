@@ -180,6 +180,99 @@ func TestAIMcpAndDomainOperations(t *testing.T) {
 	}
 }
 
+func TestMCPConnectionTestPerformsNetworkProbe(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/mcp" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18"}}`))
+	}))
+	defer server.Close()
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	create := httptest.NewRecorder()
+	mux.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v2/ai/mcp/server", strings.NewReader(fmt.Sprintf(`{"id":"mcp-1","baseUrl":"%s/mcp","outputTransport":"streamableHttp"}`, server.URL))))
+	if create.Code != http.StatusOK {
+		t.Fatalf("mcp create: %d %s", create.Code, create.Body.String())
+	}
+	probe := httptest.NewRecorder()
+	mux.ServeHTTP(probe, httptest.NewRequest(http.MethodPost, "/api/v2/ai/mcp/server/connection/test", strings.NewReader(`{"id":"mcp-1"}`)))
+	if probe.Code != http.StatusOK || !strings.Contains(probe.Body.String(), `"success":true`) {
+		t.Fatalf("mcp probe: %d %s", probe.Code, probe.Body.String())
+	}
+	failed := httptest.NewRecorder()
+	mux.ServeHTTP(failed, httptest.NewRequest(http.MethodPost, "/api/v2/ai/mcp/server/connection/test", strings.NewReader(`{"baseUrl":"http://127.0.0.1:1/mcp","outputTransport":"streamableHttp"}`)))
+	if failed.Code != http.StatusBadGateway || strings.Contains(failed.Body.String(), `"success":true`) {
+		t.Fatalf("failed probe must be explicit: %d %s", failed.Code, failed.Body.String())
+	}
+}
+
+func TestMCPSSEConnectionRequiresEventStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: ready\\ndata: {}\\n\\n"))
+	}))
+	defer server.Close()
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	probe := httptest.NewRecorder()
+	requestBody := fmt.Sprintf(`{"baseUrl":"%s","outputTransport":"sse"}`, server.URL)
+	mux.ServeHTTP(probe, httptest.NewRequest(http.MethodPost, "/api/v2/ai/mcp/server/connection/test", strings.NewReader(requestBody)))
+	if probe.Code != http.StatusOK || !strings.Contains(probe.Body.String(), `"success":true`) {
+		t.Fatalf("sse probe: %d %s", probe.Code, probe.Body.String())
+	}
+}
+
+func TestMCPSyncStatusPersistsProbeResult(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	defer server.Close()
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	create := httptest.NewRecorder()
+	mux.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v2/ai/mcp/server", strings.NewReader(fmt.Sprintf(`{"id":"mcp-sync","baseUrl":"%s","outputTransport":"streamableHttp"}`, server.URL))))
+	if create.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", create.Code, create.Body.String())
+	}
+	syncResult := httptest.NewRecorder()
+	mux.ServeHTTP(syncResult, httptest.NewRequest(http.MethodPost, "/api/v2/ai/mcp/server/status/sync", strings.NewReader(`{"ids":["mcp-sync"]}`)))
+	if syncResult.Code != http.StatusOK || !strings.Contains(syncResult.Body.String(), `"status":"running"`) {
+		t.Fatalf("sync: %d %s", syncResult.Code, syncResult.Body.String())
+	}
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodPost, "/api/v2/ai/mcp/search", strings.NewReader(`{}`)))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"status":"running"`) {
+		t.Fatalf("persisted status: %d %s", list.Code, list.Body.String())
+	}
+}
+
+func TestAgentPairingRequiresRegisteredRuntime(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	create := httptest.NewRecorder()
+	mux.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents", strings.NewReader(`{"id":"agent-pair","name":"pair-test","agentType":"openclaw"}`)))
+	if create.Code != http.StatusOK {
+		t.Fatalf("create agent: %d %s", create.Code, create.Body.String())
+	}
+	invalid := httptest.NewRecorder()
+	mux.ServeHTTP(invalid, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/channel/pairing/approve", strings.NewReader(`{"agentId":"agent-pair","type":"unknown","pairingCode":"x"}`)))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid pairing status = %d", invalid.Code)
+	}
+	missingRuntime := httptest.NewRecorder()
+	mux.ServeHTTP(missingRuntime, httptest.NewRequest(http.MethodPost, "/api/v2/ai/agents/channel/pairing/approve", strings.NewReader(`{"agentId":"agent-pair","type":"telegram","pairingCode":"AB-12"}`)))
+	if missingRuntime.Code != http.StatusServiceUnavailable || strings.Contains(missingRuntime.Body.String(), `"accepted":true`) {
+		t.Fatalf("missing runtime must be explicit: %d %s", missingRuntime.Code, missingRuntime.Body.String())
+	}
+}
+
 func TestAIAgentCollectionQueriesUsePersistedState(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()

@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/node/model"
+	"github.com/todaybin/workmesh-server/node/service"
 	"github.com/todaybin/workmesh-server/node/service/taskruntime"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
@@ -246,7 +248,7 @@ func aiHandler(w http.ResponseWriter, r *http.Request) {
 		aiError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
 		return
 	}
-	handleAIPost(w, s, path, body)
+	handleAIPost(w, r, s, path, body)
 }
 
 func handleAIGet(w http.ResponseWriter, s *executionState, path string) {
@@ -807,7 +809,98 @@ func discoverAIModels(body map[string]any) ([]map[string]any, error) {
 	return result, nil
 }
 
-func handleAIPost(w http.ResponseWriter, s *executionState, path string, body map[string]any) {
+// testMCPConnection 按 MCP 传输协议探测服务，不以参数校验代替真实网络检查。
+// SSE 传输必须返回 text/event-stream；Streamable HTTP 传输发送 initialize JSON-RPC 请求。
+func testMCPConnection(s *executionState, body map[string]any) (map[string]any, error) {
+	id := aiID(body, "id", "serverId")
+	var server map[string]any
+	if id != "" {
+		s.mu.RLock()
+		for _, item := range s.data.MCP {
+			if aiID(item, "id", "serverId") == id {
+				server = cloneMap(item)
+				break
+			}
+		}
+		s.mu.RUnlock()
+		if server == nil {
+			return nil, errors.New("MCP 服务不存在")
+		}
+	}
+	if server == nil {
+		server = body
+	}
+	base := strings.TrimRight(aiString(server, "baseUrl", "baseURL", "url"), "/")
+	if base == "" {
+		return nil, errors.New("MCP 服务地址不能为空")
+	}
+	parsed, err := url.Parse(base)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+		return nil, errors.New("MCP 服务地址必须是无凭据的 HTTP(S) 地址")
+	}
+	transport := strings.ToLower(aiString(server, "outputTransport", "transport"))
+	if transport == "" {
+		transport = "streamablehttp"
+	}
+	endpoint := base
+	if transport == "sse" {
+		if suffix := strings.TrimSpace(aiString(server, "ssePath")); suffix != "" {
+			endpoint = strings.TrimRight(base, "/") + "/" + strings.TrimLeft(suffix, "/")
+		}
+	} else if suffix := strings.TrimSpace(aiString(server, "streamableHttpPath", "streamableHTTPPath")); suffix != "" {
+		endpoint = strings.TrimRight(base, "/") + "/" + strings.TrimLeft(suffix, "/")
+	}
+	parsed, err = url.Parse(endpoint)
+	if err != nil || parsed.Host == "" {
+		return nil, errors.New("MCP 服务端点地址无效")
+	}
+	protocol := aiString(server, "protocolVersion")
+	if protocol == "" {
+		protocol = "2025-06-18"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client := &http.Client{Timeout: 10 * time.Second}
+	var req *http.Request
+	if transport == "sse" {
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err == nil {
+			req.Header.Set("Accept", "text/event-stream")
+		}
+	} else {
+		payload := map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": protocol, "capabilities": map[string]any{}, "clientInfo": map[string]string{"name": "workmesh-server", "version": "1.0.0"}}}
+		var raw []byte
+		raw, err = json.Marshal(payload)
+		if err == nil {
+			req, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(raw)))
+		}
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", "application/json, text/event-stream")
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("连接 MCP 服务失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		if strings.TrimSpace(string(message)) == "" {
+			return nil, fmt.Errorf("MCP 服务返回 HTTP %d", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("MCP 服务返回 HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
+	}
+	if transport == "sse" && !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		return nil, fmt.Errorf("MCP SSE 响应类型无效: %s", resp.Header.Get("Content-Type"))
+	}
+	return map[string]any{"success": true, "endpoint": endpoint, "outputTransport": transport, "protocolVersion": protocol, "message": "连接成功"}, nil
+}
+
+func handleAIPost(w http.ResponseWriter, r *http.Request, s *executionState, path string, body map[string]any) {
 	if handleAccountRoute(w, s, path, body) {
 		return
 	}
@@ -830,7 +923,11 @@ func handleAIPost(w http.ResponseWriter, s *executionState, path string, body ma
 				return
 			}
 		}
-		aiOK(w, map[string]any{"id": id, "status": "not_found"})
+		aiError(w, http.StatusNotFound, "MCP_SERVER_NOT_FOUND", "MCP 服务不存在")
+		return
+	}
+	if path == "mcp/server/status/sync" {
+		aiOK(w, syncMCPStatuses(s, body))
 		return
 	}
 	if path == "agents/model/get" {
@@ -893,8 +990,17 @@ func handleAIPost(w http.ResponseWriter, s *executionState, path string, body ma
 		aiOK(w, sanitizeAIMap(current))
 		return
 	}
+	if path == "mcp/server/connection/test" {
+		result, err := testMCPConnection(s, body)
+		if err != nil {
+			aiError(w, http.StatusBadGateway, "MCP_CONNECTION_FAILED", err.Error())
+			return
+		}
+		aiOK(w, result)
+		return
+	}
 	if strings.HasSuffix(path, "/connection/test") {
-		aiOK(w, map[string]any{"success": true, "endpoint": aiString(body, "baseUrl", "url"), "outputTransport": aiString(body, "outputTransport"), "protocolVersion": "2025-03-26", "message": "连接参数已通过本地校验"})
+		aiError(w, http.StatusNotImplemented, "CONNECTION_TEST_UNSUPPORTED", "当前功能域未提供连接测试实现")
 		return
 	}
 	if strings.HasSuffix(path, "/config/update") || strings.HasSuffix(path, "/security/update") || strings.HasSuffix(path, "/other/update") || strings.HasSuffix(path, "/model/update") || strings.HasSuffix(path, "/md/update") || strings.HasSuffix(path, "/channel/feishu/update") || strings.HasSuffix(path, "/channel/telegram/update") || strings.HasSuffix(path, "/channel/discord/update") || strings.HasSuffix(path, "/channel/wecom/update") || strings.HasSuffix(path, "/channel/dingtalk/update") || strings.HasSuffix(path, "/channel/qqbot/update") {
@@ -941,8 +1047,12 @@ func handleAIPost(w http.ResponseWriter, s *executionState, path string, body ma
 		handleSessionMutation(w, s, path, body)
 		return
 	}
-	if path == "agents/channel/weixin/login" || strings.HasSuffix(path, "/pairing/approve") {
-		aiOK(w, map[string]any{"accepted": true, "status": "pending", "message": "请求已记录，等待渠道确认"})
+	if strings.HasSuffix(path, "/pairing/approve") {
+		handleAgentPairingApprove(w, r, s, body)
+		return
+	}
+	if path == "agents/channel/weixin/login" {
+		aiError(w, http.StatusServiceUnavailable, "AGENT_RUNTIME_UNAVAILABLE", "微信登录需要已配置的 Agent 运行时")
 		return
 	}
 	item := aiUpsert(s, path, body)
@@ -955,6 +1065,126 @@ func handleAIPost(w http.ResponseWriter, s *executionState, path string, body ma
 		_ = aiUpsert(s, path, item)
 	}
 	aiOK(w, sanitizeAIMap(item))
+}
+
+// handleAgentPairingApprove 通过固定的 Docker 参数调用 Agent 配对命令。
+// 未发现已登记容器时返回明确的不可用状态，避免伪造“已接受”结果。
+func handleAgentPairingApprove(w http.ResponseWriter, r *http.Request, s *executionState, body map[string]any) {
+	agentID := aiID(body, "agentId")
+	pairingType := strings.ToLower(aiString(body, "type"))
+	code := strings.TrimSpace(aiString(body, "pairingCode"))
+	if agentID == "" || code == "" || !validAgentChannel(pairingType) || !validPairingCode(code) {
+		aiError(w, http.StatusBadRequest, "PAIRING_PARAMETERS_INVALID", "agentId、type 或 pairingCode 参数无效")
+		return
+	}
+	s.mu.RLock()
+	var agent map[string]any
+	for _, item := range s.data.Agents {
+		if aiID(item, "id") == agentID {
+			agent = cloneMap(item)
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if agent == nil {
+		aiError(w, http.StatusNotFound, "AGENT_NOT_FOUND", "Agent 不存在")
+		return
+	}
+	container := strings.TrimSpace(aiString(agent, "containerName", "container"))
+	if !validDockerIdentifier(container) {
+		aiError(w, http.StatusServiceUnavailable, "AGENT_RUNTIME_UNAVAILABLE", "Agent 尚未绑定可用容器")
+		return
+	}
+	program := "openclaw"
+	if strings.EqualFold(aiString(agent, "agentType"), "hermes-agent") || strings.EqualFold(aiString(agent, "type"), "hermes") {
+		program = "hermes"
+	}
+	args := []string{"exec", container, program, "pairing", "approve", pairingType, code}
+	if accountID := strings.TrimSpace(aiString(body, "accountId")); accountID != "" {
+		if !validDockerIdentifier(accountID) {
+			aiError(w, http.StatusBadRequest, "PAIRING_ACCOUNT_INVALID", "accountId 参数无效")
+			return
+		}
+		args = append(args, "--account", accountID)
+	}
+	result, err := (service.CommandService{}).Execute(r.Context(), model.CommandRequest{Program: "docker", Args: args, Timeout: 20 * time.Second})
+	if err != nil {
+		message := strings.TrimSpace(result.Stderr)
+		if message == "" {
+			message = err.Error()
+		}
+		aiError(w, http.StatusBadGateway, "AGENT_PAIRING_FAILED", message)
+		return
+	}
+	aiOK(w, map[string]any{"accepted": true, "status": "approved", "agentId": agentID, "type": pairingType, "output": result.Stdout})
+}
+
+func validAgentChannel(value string) bool {
+	switch value {
+	case "feishu", "telegram", "discord", "wecom", "qqbot", "dingtalk":
+		return true
+	default:
+		return false
+	}
+}
+
+func validPairingCode(value string) bool {
+	if len(value) < 2 || len(value) > 128 {
+		return false
+	}
+	for _, ch := range value {
+		if !(ch == '-' || ch == '_' || ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z') {
+			return false
+		}
+	}
+	return true
+}
+
+// syncMCPStatuses 对指定 MCP 服务执行一次受限探测，并把最近状态写回 ai.json。
+func syncMCPStatuses(s *executionState, body map[string]any) []map[string]any {
+	requested := map[string]bool{}
+	if raw, ok := body["ids"].([]any); ok {
+		for _, value := range raw {
+			if id := aiID(map[string]any{"id": value}, "id"); id != "" {
+				requested[id] = true
+			}
+		}
+	}
+	s.mu.RLock()
+	servers := make([]map[string]any, 0, len(s.data.MCP))
+	for _, item := range s.data.MCP {
+		id := aiID(item, "id")
+		if len(requested) == 0 || requested[id] {
+			servers = append(servers, cloneMap(item))
+		}
+	}
+	s.mu.RUnlock()
+	result := make([]map[string]any, 0, len(servers))
+	for _, server := range servers {
+		id := aiID(server, "id")
+		probe, err := testMCPConnection(s, map[string]any{"id": id})
+		status, message := "running", "连接成功"
+		if err != nil {
+			status, message = "error", err.Error()
+		}
+		s.mu.Lock()
+		for i, item := range s.data.MCP {
+			if aiID(item, "id") == id {
+				item["status"], item["message"] = status, message
+				item["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+				s.data.MCP[i] = item
+				break
+			}
+		}
+		_ = s.saveLocked()
+		s.mu.Unlock()
+		entry := map[string]any{"id": id, "status": status, "message": message}
+		if probe != nil {
+			entry["endpoint"] = probe["endpoint"]
+		}
+		result = append(result, entry)
+	}
+	return result
 }
 
 func handleAICollectionQuery(w http.ResponseWriter, s *executionState, path string, body map[string]any) {
