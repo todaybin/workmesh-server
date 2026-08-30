@@ -65,7 +65,7 @@
 | --- | --- | --- | --- |
 | [~] | `xpack/monitor` 监控别名 15 条：`GET /api/v2/xpack/monitor/status`、`POST /api/v2/xpack/monitor/{stat,visitors,visitors/loc,qps,rank,trend,logs/search,logs/stat,logs/detail,logs/clear,websites,config/global,config/site,config/site/update}` | `apps/workmesh-node/agent/router/ro_website.go:130-154`；新 `node/api/website.go` 已显式注册 | 当前由兼容处理器防止 404；应与 `/api/v2/websites/monitor/*` 使用同一真实监控服务并增加 E2E。 |
 | [~] | `xpack/waf` WAF 别名 15 条：`GET /api/v2/xpack/waf/{status,standard-rules,sites,sites/:id/rules,access-lists}`、`POST /api/v2/xpack/waf/{test,global,sites,rules,rules/delete,attack/stat,log/search,block/search,relation/stat,access-lists}` | `apps/workmesh-node/agent/router/ro_website.go:131,157-172`；新 `node/api/website.go` 已显式注册 | 当前由兼容处理器防止 404；应绑定 `WebsiteService` 的 WAF 存储并覆盖读写测试。 |
-| [ ] | Swagger 文档 `GET /1panel/swagger/*any` | `apps/workmesh-node/core/init/router/router.go:77-79` | 新服务没有同等文档入口；需提供去品牌化路径（如 `/swagger/*any`）或明确兼容重定向，并验证鉴权。 |
+| [~] | Swagger 文档 `GET /1panel/swagger/*any` | `apps/workmesh-node/core/init/router/router.go:77-79`；新服务 `/swagger/{any...}` | 已提供去品牌化 `/swagger/*any` JSON 入口；尚未接入文档文件和 SessionAuth，生产发布前必须补齐鉴权。 |
 | [~] | 静态文件 `GET/HEAD /public/*filepath`、`GET/HEAD /favicon.ico/*filepath`、`GET/HEAD /assets/*filepath` | `apps/workmesh-node/core/init/router/router.go:25-39` | 新服务仅显式托管 `/assets/{filepath...}`、`/api/v2/images/*`、`/api/v2/static/*`；需验证 favicon/public 和 HEAD 响应的 MIME、缓存及路径穿越策略。 |
 | [~] | 动态安全入口 `GET /{securityEntrance}` 与根页面安全检查 | `apps/workmesh-node/core/init/router/router.go:43-63` | 新服务根 Handler 对任意路径直接提供 SPA，未复刻 security entrance、Cookie 设置和安全检查；需在认证 E2E 中验证未授权访问行为。 |
 
