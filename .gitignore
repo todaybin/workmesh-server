@@ -2,6 +2,7 @@
 .cache/
 .tmp/
 data/
+.workmesh-data/
 *.exe
 *.test
 web/node_modules/
