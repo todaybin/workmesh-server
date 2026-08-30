@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -28,6 +29,22 @@ func coreToken() string {
 // registerCoreAuthExtras 注册 MFA、Passkey 和 API 密钥的兼容接口。
 // 当前默认关闭外部认证因子，但接口保持幂等并返回稳定 envelope，便于后续接入硬件/云端提供商。
 func registerCoreAuthExtras(mux *http.ServeMux) {
+	// 可选外部身份源默认关闭，但仍返回契约化状态，前端可据此隐藏入口而非触发 404。
+	mux.HandleFunc("GET /api/v2/core/auth/ldap/status", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, map[string]any{"enabled": false}) })
+	mux.HandleFunc("GET /api/v2/core/auth/oidc/status", func(w http.ResponseWriter, _ *http.Request) {
+		coreJSON(w, map[string]any{"enabled": false, "displayName": "", "authorizationCode": false})
+	})
+	mux.HandleFunc("POST /api/v2/core/auth/oidc/begin", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, map[string]any{"authorizationURL": ""}) })
+	mux.HandleFunc("POST /api/v2/core/auth/oidc/finish", func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusNotImplemented, errors.New("OIDC 未启用"))
+	})
+	mux.HandleFunc("GET /api/v2/core/auth/saml2/status", func(w http.ResponseWriter, _ *http.Request) {
+		coreJSON(w, map[string]any{"enabled": false, "displayName": "", "syncLogout": false})
+	})
+	mux.HandleFunc("POST /api/v2/core/auth/saml2/begin", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, map[string]any{"navigation": nil}) })
+	mux.HandleFunc("POST /api/v2/core/auth/saml2/finish", func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusNotImplemented, errors.New("SAML2 未启用"))
+	})
 	mux.HandleFunc("GET /api/v2/core/auth/passkey/list", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, []any{}) })
 	mux.HandleFunc("POST /api/v2/core/auth/api/generate", handleCoreAPIGenerate)
 	mux.HandleFunc("POST /api/v2/core/auth/api/update", handleCoreAPIUpdate)
