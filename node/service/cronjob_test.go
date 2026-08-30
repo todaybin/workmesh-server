@@ -35,3 +35,25 @@ func TestNextRunCronExpression(t *testing.T) {
 		t.Fatal("invalid expression should fail")
 	}
 }
+
+func TestNextRunsSupportsEveryAndMacros(t *testing.T) {
+	from := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
+	runs, err := NextRuns("@every 2m", from, 3)
+	if err != nil || len(runs) != 3 || !runs[0].Equal(from.Add(2*time.Minute)) {
+		t.Fatalf("@every 解析异常: %v %+v", err, runs)
+	}
+	if _, err := NextRuns("@every invalid", from, 1); err == nil {
+		t.Fatal("无效 @every 应返回错误")
+	}
+}
+
+func TestCronjobRejectsUnsafeCommand(t *testing.T) {
+	s := NewCronjobService()
+	job, err := s.Create(context.Background(), model.Cronjob{Name: "unsafe", Type: "shell", Command: "echo ok; rm -rf /"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.HandleOnce(context.Background(), job.ID); err == nil {
+		t.Fatal("包含 shell 控制字符的命令必须拒绝")
+	}
+}

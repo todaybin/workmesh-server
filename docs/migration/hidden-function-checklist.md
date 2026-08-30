@@ -224,3 +224,17 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 - [x] 服务端 12 个语言包已从旧 Agent 全量迁移至 `apps/workmesh-server/i18n/lang/*.yaml`，并替换原品牌标识。
 - [x] `apps/workmesh-server/i18n/i18n.go` 提供嵌入式资源加载、未知语言回退中文和标量消息查询；`go test ./i18n` 已通过。
 - [x] 前端 `web/src/lang/modules/*.ts` 保留 12 个语言模块；`npm.cmd run type-check` 与 `npm.cmd run build:pro` 已通过。
+## 数据库后台能力（2026-08-31）
+
+| 能力 | 入口 | 新实现 | 状态 | 说明 |
+| --- | --- | --- | --- | --- |
+| 数据库用户和授权元数据 | 数据库管理接口 | `node/service/database_admin.go` | implemented | 使用原子 JSON 持久化，密码不回显 |
+| 数据库变量和配置文件 | 数据库管理接口 | `node/api/database_admin_routes.go` | implemented | 限制配置大小，支持重启恢复 |
+# 计划任务隐藏能力核对
+
+| 隐藏能力 | 发现位置 | 实现位置 | 状态 | 说明 |
+|---|---|---|---|---|
+| cron 后台轮询 | agent service/entry.go | node/service/cronjob.go | implemented | 单实例分钟调度，避免重复执行 |
+| 任务失败重试 | agent service/cronjob_helper.go | node/service/cronjob.go | implemented | RetryTimes 与 Timeout 生效 |
+| 脚本库持久化 | core script library | node/api/core_resources.go | implemented | scripts.json 原子写入，审核后执行 |
+| 任务记录上限 | agent cronjobRepo | node/service/cronjob.go | implemented | 每任务最多保留 1000 条 |

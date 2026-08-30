@@ -2,6 +2,14 @@
 
 ## 2026-08-30 数据服务与 OpenResty 真实运行时补齐
 
+## 2026-08-31 数据库管理控制面
+
+| 功能名称 | 来源模块 | 来源入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 数据库用户生命周期 | 数据库服务 | `/databases/users*` | `node/service/database_admin.go`, `node/api/database_admin_routes.go` | POST `/api/v2/databases/users`, `/users/search`, `/users/update`, `/users/del`, `/users/password`, `/users/password/save` | 节点会话鉴权 | 本地数据库管理元数据，密码仅保存状态 | `WORKMESH_DATA_DIR/database-admin.json` 原子替换 | `node/api/database_admin_routes_test.go` | `go test ./node/api -run DatabaseAdmin` | 待节点联调 | implemented | 尚未连接远程数据库 SQL 执行器 |
+| 数据库授权管理 | 数据库服务 | `/databases/grants*` | `node/service/database_admin.go`, `node/api/database_admin_routes.go` | POST `/api/v2/databases/grants`, `/grants/search`, `/grants/summary`, `/grants/del` | 节点会话鉴权 | 授权主体、数据库和权限集合 | `database-admin.json` 原子替换 | `node/api/database_admin_routes_test.go` | 同上 | 待节点联调 | implemented | 远程授权执行器待按凭据启用 |
+| 数据库变量、配置和状态 | 数据库服务 | `/databases/variables*`, `/databases/common/*`, `/databases/status` | `node/service/database_admin.go`, `node/api/database_admin_routes.go` | POST `/api/v2/databases/variables`, `/variables/update`, `/common/info`, `/common/load/file`, `/common/update/conf`, `/format/options`, `/status`, `/remote`; `/description/update` | 节点会话鉴权 | 变量、配置文本及 TCP 状态探测 | `database-admin.json` 与数据库登记仓库原子替换 | `node/api/database_admin_routes_test.go`, `node/api/database_test.go` | `go test ./node/api -run Database` | 待节点联调 | implemented | 远程实例 SQL/配置文件写入需凭据和驱动后启用 |
+
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | MySQL/PostgreSQL/Redis/Mongo 数据库端点检查 | `apps/workmesh-node/agent/router/ro_database.go`、`agent/app/service/database*.go` | `/databases/db/check`、`/databases/redis/check`、`/databases/status` | `node/api/database_routes.go`、`node/service/database.go` | `POST /api/v2/databases/db/check`、`POST /api/v2/databases/redis/check`、`POST /api/v2/databases/status` | 节点会话鉴权 | 目标主机 TCP 连接，按类型默认端口 3306/5432/6379/27017 | 无状态探测；操作审计 `database-operations.json` | `node/api/database_test.go` | `go test ./node/api -run Database` | 待主次节点人力联调 | implemented | 未提供账号时仅验证网络可达性，不执行 SQL 登录 |
@@ -205,3 +213,13 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 | 应用详情与运行服务 | `apps/workmesh-node/agent/app/api/v2/app.go:GetApp*` | `GET /api/v2/apps/:key`、`GET /api/v2/apps/detail/*`、`GET /api/v2/apps/services/:key` | `node/api/apps.go:appCatalogGet` | 同左 | 节点会话鉴权（上层中间件） | `apps.json` catalog/apps 记录及配置中的 services/params | `WORKMESH_DATA_DIR/apps.json` 原子写入 | `node/api/apps_test.go:TestAppDerivedDetailsAndDeleteCheck` | `go test ./node/api -run App` | 本地 HTTP 已验证 | implemented | 未接入远程应用商店 SDK |
 | 已安装应用信息与删除检查 | `apps/workmesh-node/agent/app/api/v2/app.go` | `GET /api/v2/apps/installed/info/:appInstallId`、`GET /api/v2/apps/installed/params/:appInstallId`、`GET /api/v2/apps/installed/delete/check/:appInstallId` | `node/api/apps.go:appInstalledGet` | 同左 | 节点会话鉴权（上层中间件） | 安装记录、容器名称和参数 | `apps.json` 原子写入 | `node/api/apps_test.go:TestAppDerivedDetailsAndDeleteCheck` | `go test ./node/api -run AppDerived` | 本地 HTTP 已验证 | implemented | 容器资源删除仍需容器域执行 |
 | 应用版本更新查询 | `apps/workmesh-node/agent/app/api/v2/app.go` | `POST /api/v2/apps/installed/update/versions` | `node/api/apps.go:handleAppPost` | `POST /api/v2/apps/installed/update/versions` | 节点会话鉴权（上层中间件） | catalog 中匹配应用的版本记录 | 无额外写入 | `node/api/apps_test.go` | `go test ./node/api -run App` | 本地 HTTP 已验证 | implemented | 远程版本同步依赖 Gateway 配置 |
+# 计划任务与命令脚本补齐记录（2026-08-31）
+
+| 功能名称 | 来源模块 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|
+| 计划任务模型与类型 | agent cronjob | node/model/command.go、node/service/cronjob.go | POST /api/v2/cronjobs | 节点会话/HMAC | 请求参数与本地资源 | WORKMESH_DATA_DIR/cronjobs.json | node/service/cronjob_test.go | implemented | 网站/数据库/应用备份适配器待接入 |
+| 计划任务调度 | agent cronjob_helper | node/service/cronjob.go | POST /api/v2/cronjobs/next | 节点会话 | cron 表达式 | 任务定义 | node/service/cronjob_test.go | implemented | 时区配置待补充 |
+| 任务重试超时 | agent task runtime | node/service/cronjob.go | POST /api/v2/cronjobs/handle | 节点会话/HMAC | RetryTimes/Timeout | 执行记录 | node/service/cronjob_test.go | implemented | 分布式 fencing 待接入 |
+| 记录分页清理 | agent cronjobRepo | node/service/cronjob.go、node/api/host_container_cron.go | POST /api/v2/cronjobs/search/records | 节点会话 | 本地执行记录 | cronjobs.json（最多 1000 条/任务） | node/service/cronjob_test.go | implemented | 记录文件日志关联待补充 |
+| 脚本库持久化与审核执行 | core script library | node/api/core_resources.go | POST /api/v2/core/script、GET /api/v2/core/script/run | Session + X-WorkMesh-Token | scripts.json | 原子 JSON 文件 | node/api/core_resources_test.go | implemented | 远程签名同步待接入 |
+| 命令执行白名单 | core command | node/service/cronjob.go、node/service/command.go | POST /api/v2/system/command | X-WorkMesh-Token | 白名单程序与参数 | 审计日志 | node/service/command_test.go | implemented | 完整审计查询待补充 |

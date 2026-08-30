@@ -101,8 +101,19 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": cronjobs.List(r.Context())})
 	})
 	mux.HandleFunc("POST /api/v2/cronjobs/search", func(w http.ResponseWriter, r *http.Request) {
-		items := cronjobs.List(r.Context())
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items), "page": 1, "pageSize": len(items)}})
+		var in struct {
+			Page     int `json:"page"`
+			PageSize int `json:"pageSize"`
+		}
+		_ = decodeJSON(r, &in)
+		total, items := cronjobs.ListPage(r.Context(), in.Page, in.PageSize)
+		if in.Page < 1 {
+			in.Page = 1
+		}
+		if in.PageSize < 1 || in.PageSize > 200 {
+			in.PageSize = 20
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": total, "page": in.Page, "pageSize": in.PageSize}})
 	})
 	mux.HandleFunc("POST /api/v2/cronjobs/update", func(w http.ResponseWriter, r *http.Request) {
 		var job model.Cronjob
@@ -160,14 +171,22 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 		var in struct {
 			ID        string `json:"id"`
 			CronjobID string `json:"cronjobID"`
+			Page      int    `json:"page"`
+			PageSize  int    `json:"pageSize"`
 		}
 		_ = decodeJSON(r, &in)
 		id := in.ID
 		if id == "" {
 			id = in.CronjobID
 		}
-		records := cronjobs.Records(r.Context(), id)
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": records, "total": len(records), "page": 1, "pageSize": len(records)}})
+		total, records := cronjobs.RecordsPage(r.Context(), id, in.Page, in.PageSize)
+		if in.Page < 1 {
+			in.Page = 1
+		}
+		if in.PageSize < 1 || in.PageSize > 200 {
+			in.PageSize = 20
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": records, "total": total, "page": in.Page, "pageSize": in.PageSize}})
 	})
 	mux.HandleFunc("POST /api/v2/cronjobs/records/log", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -227,12 +246,16 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "spec is required"})
 			return
 		}
-		next, ok := service.NextRun(in.Spec, time.Now().UTC())
-		if !ok {
+		next, err := service.NextRuns(in.Spec, time.Now().UTC(), 5)
+		if err != nil {
 			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "无效的 cron 表达式"})
 			return
 		}
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": []string{next.Format(time.RFC3339)}})
+		formatted := make([]string, len(next))
+		for i, t := range next {
+			formatted[i] = t.Format(time.RFC3339)
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": formatted})
 	})
 	mux.HandleFunc("POST /api/v2/cronjobs/stop", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -313,6 +336,7 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	registerCoreResourceRoutes(mux)
 	registerCoreCommandRoutes(mux)
 	registerFileRoutes(mux)
+	RegisterDatabaseAdminRoutes(mux)
 	registerDatabaseRoutes(mux)
 	registerDeploymentAndProcessRoutes(mux)
 

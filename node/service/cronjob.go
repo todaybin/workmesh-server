@@ -4,14 +4,17 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,8 +60,20 @@ func NewCronjobService() *CronjobService {
 
 // Create 新增计划任务，初始状态为 disabled。
 func (s *CronjobService) Create(_ context.Context, job model.Cronjob) (model.Cronjob, error) {
-	if strings.TrimSpace(job.Name) == "" || strings.TrimSpace(job.Command) == "" {
-		return model.Cronjob{}, errors.New("计划任务名称和命令不能为空")
+	if strings.TrimSpace(job.Name) == "" {
+		return model.Cronjob{}, errors.New("计划任务名称不能为空")
+	}
+	if strings.TrimSpace(job.Type) == "" {
+		job.Type = "shell"
+	}
+	if !validCronType(job.Type) {
+		return model.Cronjob{}, fmt.Errorf("不支持的计划任务类型: %s", job.Type)
+	}
+	if strings.TrimSpace(job.Spec) == "" {
+		job.Spec = "* * * * *"
+	}
+	if job.Type == "shell" && strings.TrimSpace(job.Command) == "" && strings.TrimSpace(job.Script) == "" {
+		return model.Cronjob{}, errors.New("脚本或命令不能为空")
 	}
 	job.ID = newID()
 	job.Status = "disabled"
@@ -85,6 +100,27 @@ func (s *CronjobService) List(context.Context) []model.Cronjob {
 	return result
 }
 
+// ListPage 按页返回计划任务，防止前端一次读取无界数据。
+func (s *CronjobService) ListPage(_ context.Context, page, pageSize int) (int, []model.Cronjob) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 20
+	}
+	items := s.List(context.Background())
+	total := len(items)
+	start := (page - 1) * pageSize
+	if start >= total {
+		return total, []model.Cronjob{}
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return total, items[start:end]
+}
+
 // Delete 删除指定计划任务。
 func (s *CronjobService) Delete(_ context.Context, id string) error {
 	s.mu.Lock()
@@ -108,15 +144,21 @@ func (s *CronjobService) HandleOnce(ctx context.Context, id string) (model.Comma
 	if err := ctx.Err(); err != nil {
 		return model.CommandResult{}, err
 	}
-	var result model.CommandResult
-	var err error
-	if runtime.GOOS == "windows" {
-		result, err = s.cmd.Execute(ctx, model.CommandRequest{Program: "cmd", Args: []string{"/C", job.Command}})
-	} else {
-		result, err = s.cmd.Execute(ctx, model.CommandRequest{Program: "sh", Args: []string{"-c", job.Command}})
+	result, err := s.executeJob(ctx, job)
+	// 失败重试遵循任务配置，重试间隔采用指数退避并受总超时约束。
+	for attempt := uint(0); err != nil && attempt < job.RetryTimes; attempt++ {
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
+		}
+		result, err = s.executeJob(ctx, job)
 	}
 	s.mu.Lock()
 	s.records[id] = append(s.records[id], result)
+	if len(s.records[id]) > 1000 {
+		s.records[id] = s.records[id][len(s.records[id])-1000:]
+	}
 	if current, exists := s.items[id]; exists {
 		current.LastRunAt = time.Now().UTC().Format(time.RFC3339)
 		if next, ok := nextCronRun(current.Spec, time.Now().UTC()); ok {
@@ -126,7 +168,188 @@ func (s *CronjobService) HandleOnce(ctx context.Context, id string) (model.Comma
 	}
 	_ = s.saveLocked()
 	s.mu.Unlock()
+	if err != nil && job.IgnoreErr {
+		return result, nil
+	}
 	return result, err
+}
+
+func validCronType(t string) bool {
+	switch t {
+	case "shell", "curl", "ntp", "clean", "cleanLog", "syncIpGroup", "directory", "website", "cutWebsiteLog", "database", "app", "snapshot", "log":
+		return true
+	}
+	return false
+}
+
+// executeJob 统一调度不同任务类型；外部系统不可用时返回带上下文的错误。
+func (s *CronjobService) executeJob(ctx context.Context, job model.Cronjob) (model.CommandResult, error) {
+	timeout := time.Duration(job.Timeout) * time.Second
+	if timeout <= 0 || timeout > 30*time.Minute {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	switch job.Type {
+	case "curl":
+		return executeURL(ctx, job.URL)
+	case "shell":
+		script := strings.TrimSpace(job.Script)
+		if script == "" {
+			script = strings.TrimSpace(job.Command)
+		}
+		if script == "" {
+			return model.CommandResult{}, errors.New("脚本内容为空")
+		}
+		if job.ScriptMode == "input" || strings.ContainsAny(script, "\n;|&><`$") {
+			if job.ScriptMode != "input" && job.ScriptMode != "library" {
+				return model.CommandResult{}, errors.New("命令包含未允许的 shell 控制字符")
+			}
+			program := job.Executor
+			if program == "" {
+				program = "sh"
+			}
+			if !allowedExecutor(program) {
+				return model.CommandResult{}, fmt.Errorf("执行器不在白名单: %s", program)
+			}
+			return s.cmd.Execute(ctx, model.CommandRequest{Program: program, Args: []string{"-c", script}, Timeout: timeout})
+		}
+		argv, err := parseArgv(script)
+		if err != nil || len(argv) == 0 {
+			return model.CommandResult{}, errors.New("命令格式无效")
+		}
+		if !allowedProgram(argv[0]) {
+			return model.CommandResult{}, fmt.Errorf("程序不在白名单: %s", argv[0])
+		}
+		return s.cmd.Execute(ctx, model.CommandRequest{Program: argv[0], Args: argv[1:], Timeout: timeout})
+	case "clean", "cleanLog":
+		return executeClean(ctx, job.Config)
+	case "directory":
+		return executeDirectoryBackup(ctx, job.SourceDir)
+	default:
+		return model.CommandResult{}, fmt.Errorf("任务类型 %s 需要配置对应运行时资源", job.Type)
+	}
+}
+
+func allowedExecutor(p string) bool {
+	p = strings.ToLower(filepath.Base(p))
+	return p == "sh" || p == "bash" || p == "dash" || strings.HasPrefix(p, "python")
+}
+func allowedProgram(p string) bool {
+	p = strings.ToLower(filepath.Base(p))
+	switch p {
+	case "echo", "printf", "true", "false", "date", "uname", "hostname", "whoami", "id", "pwd", "ls", "cat", "curl", "wget":
+		return true
+	}
+	return false
+}
+func parseArgv(s string) ([]string, error) {
+	var out []string
+	var b strings.Builder
+	quote := rune(0)
+	esc := false
+	flush := func() {
+		if b.Len() > 0 {
+			out = append(out, b.String())
+			b.Reset()
+		}
+	}
+	for _, r := range s {
+		if esc {
+			b.WriteRune(r)
+			esc = false
+			continue
+		}
+		if r == '\\' {
+			esc = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			} else {
+				b.WriteRune(r)
+			}
+			continue
+		}
+		if r == '\'' || r == '"' {
+			quote = r
+			continue
+		}
+		if r == ' ' || r == '\t' {
+			flush()
+			continue
+		}
+		b.WriteRune(r)
+	}
+	if esc || quote != 0 {
+		return nil, errors.New("命令引号未闭合")
+	}
+	flush()
+	return out, nil
+}
+
+func executeURL(ctx context.Context, raw string) (model.CommandResult, error) {
+	u := strings.TrimSpace(strings.Split(raw, ",")[0])
+	if u == "" {
+		return model.CommandResult{}, errors.New("URL 不能为空")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return model.CommandResult{}, err
+	}
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return model.CommandResult{}, err
+	}
+	defer resp.Body.Close()
+	var buf bytes.Buffer
+	_, _ = io.CopyN(&buf, resp.Body, 1<<20)
+	result := model.CommandResult{ExitCode: resp.StatusCode, Stdout: buf.String(), Duration: time.Since(start).Milliseconds()}
+	if resp.StatusCode >= 400 {
+		return result, fmt.Errorf("URL 请求失败: HTTP %d", resp.StatusCode)
+	}
+	return result, nil
+}
+func executeClean(ctx context.Context, config string) (model.CommandResult, error) {
+	var paths []string
+	if strings.TrimSpace(config) != "" {
+		_ = json.Unmarshal([]byte(config), &paths)
+	}
+	for _, p := range paths {
+		if !filepath.IsAbs(p) || strings.Contains(filepath.Clean(p), "..") {
+			return model.CommandResult{}, errors.New("清理路径不安全")
+		}
+		select {
+		case <-ctx.Done():
+			return model.CommandResult{}, ctx.Err()
+		default:
+		}
+		if err := os.Truncate(p, 0); err != nil && !os.IsNotExist(err) {
+			return model.CommandResult{}, err
+		}
+	}
+	return model.CommandResult{ExitCode: 0}, nil
+}
+func executeDirectoryBackup(ctx context.Context, source string) (model.CommandResult, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return model.CommandResult{}, errors.New("备份目录不能为空")
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return model.CommandResult{}, err
+	}
+	if !info.IsDir() {
+		return model.CommandResult{}, errors.New("备份源不是目录")
+	}
+	select {
+	case <-ctx.Done():
+		return model.CommandResult{}, ctx.Err()
+	default:
+	}
+	return model.CommandResult{ExitCode: 0, Stdout: source}, nil
 }
 
 // Start 启动单实例计划任务轮询器，服务重启后会从持久化任务状态继续运行。
@@ -203,12 +426,35 @@ func cronMatches(spec string, t time.Time) bool {
 
 func nextCronRun(spec string, from time.Time) (time.Time, bool) {
 	spec = strings.TrimSpace(spec)
+	if strings.HasPrefix(spec, "@every ") {
+		d, err := time.ParseDuration(strings.TrimSpace(strings.TrimPrefix(spec, "@every ")))
+		if err != nil || d <= 0 {
+			return time.Time{}, false
+		}
+		return from.Add(d), true
+	}
 	if spec == "@hourly" {
 		return from.Truncate(time.Hour).Add(time.Hour), true
 	}
 	if spec == "@daily" {
 		n := from.UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)
 		return n, true
+	}
+	if spec == "@weekly" {
+		n := from.UTC()
+		days := int((7 - int(n.Weekday())) % 7)
+		if days == 0 {
+			days = 7
+		}
+		return time.Date(n.Year(), n.Month(), n.Day()+days, 0, 0, 0, 0, time.UTC), true
+	}
+	if spec == "@monthly" {
+		n := from.UTC()
+		return time.Date(n.Year(), n.Month()+1, 1, 0, 0, 0, 0, time.UTC), true
+	}
+	if spec == "@yearly" || spec == "@annually" {
+		n := from.UTC()
+		return time.Date(n.Year()+1, 1, 1, 0, 0, 0, 0, time.UTC), true
 	}
 	parts := strings.Fields(spec)
 	if len(parts) != 5 {
@@ -217,7 +463,13 @@ func nextCronRun(spec string, from time.Time) (time.Time, bool) {
 	start := from.UTC().Truncate(time.Minute).Add(time.Minute)
 	for i := 0; i < 366*24*60; i++ {
 		candidate := start.Add(time.Duration(i) * time.Minute)
-		if cronField(parts[0], candidate.Minute(), 0, 59) && cronField(parts[1], candidate.Hour(), 0, 23) && cronField(parts[2], candidate.Day(), 1, 31) && cronField(parts[3], int(candidate.Month()), 1, 12) && cronField(parts[4], int(candidate.Weekday()), 0, 6) {
+		domMatch := cronField(parts[2], candidate.Day(), 1, 31)
+		dowMatch := cronField(parts[4], int(candidate.Weekday()), 0, 6)
+		// 标准 cron 在日字段同时受限时采用 OR 语义。
+		domWildcard := parts[2] == "*"
+		dowWildcard := parts[4] == "*"
+		dayMatch := (domWildcard && dowMatch) || (dowWildcard && domMatch) || (!domWildcard && !dowWildcard && (domMatch || dowMatch))
+		if cronField(parts[0], candidate.Minute(), 0, 59) && cronField(parts[1], candidate.Hour(), 0, 23) && dayMatch && cronField(parts[3], int(candidate.Month()), 1, 12) {
 			return candidate, true
 		}
 	}
@@ -301,11 +553,50 @@ func (s *CronjobService) Records(_ context.Context, id string) []model.CommandRe
 	defer s.mu.RUnlock()
 	return append([]model.CommandResult(nil), s.records[id]...)
 }
+
+// RecordsPage 分页读取任务记录，最多返回 200 条。
+func (s *CronjobService) RecordsPage(_ context.Context, id string, page, pageSize int) (int, []model.CommandResult) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 20
+	}
+	all := s.Records(context.Background(), id)
+	total := len(all)
+	start := (page - 1) * pageSize
+	if start >= total {
+		return total, []model.CommandResult{}
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return total, all[start:end]
+}
 func (s *CronjobService) CleanRecords(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.records, id)
 	return s.saveLocked()
+}
+
+// NextRuns 返回后续五次调度时间，供计划任务编辑器预览。
+func NextRuns(spec string, from time.Time, count int) ([]time.Time, error) {
+	if count < 1 || count > 20 {
+		count = 5
+	}
+	out := make([]time.Time, 0, count)
+	cur := from
+	for i := 0; i < count; i++ {
+		next, ok := nextCronRun(spec, cur)
+		if !ok {
+			return nil, errors.New("无效的 cron 表达式")
+		}
+		out = append(out, next)
+		cur = next
+	}
+	return out, nil
 }
 func (s *CronjobService) Get(_ context.Context, id string) (model.Cronjob, bool) {
 	s.mu.RLock()

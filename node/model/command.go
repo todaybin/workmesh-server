@@ -42,4 +42,42 @@ type Cronjob struct {
 	UpdatedAt string `json:"updatedAt,omitempty"`
 	LastRunAt string `json:"lastRunAt,omitempty"`
 	NextRunAt string `json:"nextRunAt,omitempty"`
+	// 以下字段覆盖文件、网站、数据库、应用和快照任务所需配置。
+	SpecCustom        bool   `json:"specCustom,omitempty"`
+	Executor          string `json:"executor,omitempty"`
+	ScriptMode        string `json:"scriptMode,omitempty"`
+	Script            string `json:"script,omitempty"`
+	ContainerName     string `json:"containerName,omitempty"`
+	User              string `json:"user,omitempty"`
+	ScriptID          string `json:"scriptID,omitempty"`
+	Website           string `json:"website,omitempty"`
+	AppID             string `json:"appID,omitempty"`
+	DBType            string `json:"dbType,omitempty"`
+	DBName            string `json:"dbName,omitempty"`
+	URL               string `json:"url,omitempty"`
+	IsDir             bool   `json:"isDir,omitempty"`
+	SourceDir         string `json:"sourceDir,omitempty"`
+	SnapshotRule      string `json:"snapshotRule,omitempty"`
+	ExclusionRules    string `json:"exclusionRules,omitempty"`
+	SourceAccountIDs  string `json:"sourceAccountIDs,omitempty"`
+	DownloadAccountID string `json:"downloadAccountID,omitempty"`
+	RetryTimes        uint   `json:"retryTimes,omitempty"`
+	Timeout           uint   `json:"timeout,omitempty"`
+	IgnoreErr         bool   `json:"ignoreErr,omitempty"`
+	RetainCopies      uint64 `json:"retainCopies,omitempty"`
+	Args              string `json:"args,omitempty"`
+	Secret            string `json:"secret,omitempty"`
+	Config            string `json:"config,omitempty"`
+}
+
+// ScriptLibrary 描述可审核执行的脚本库条目。
+type ScriptLibrary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Script      string `json:"script"`
+	Description string `json:"description,omitempty"`
+	Version     string `json:"version,omitempty"`
+	Approved    bool   `json:"approved"`
+	CreatedAt   string `json:"createdAt,omitempty"`
+	UpdatedAt   string `json:"updatedAt,omitempty"`
 }

@@ -3,33 +3,47 @@
 
 # WorkMesh Server
 
-WorkMesh Server 是独立的单进程节点服务，Git 权威仓库为
-`https://github.com/todaybin/workmesh-server.git`，Go 模块为
-`github.com/todaybin/workmesh-server`。
-
-当前目录提供统一 HTTP、状态存储、缓存、日志、调度、节点角色和 Gateway 对接边界。Core 与 Agent 的完整业务功能按迁移清单逐域迁移，原 `apps/workmesh-node` 项目保持不变且不作为运行时依赖。
+WorkMesh Server 是面向单机和多节点环境的自主运行服务，提供主机、容器、网站、数据库、文件、备份、计划任务、终端、日志、SSL、运行时和 AI 工作流管理能力。
 
 ## 运行
+
+在本目录执行：
 
 ```powershell
 go run ./cmd/workmesh-server
 ```
 
-默认监听 `:9999`。可通过 `WORKMESH_SERVER_ADDR`、`WORKMESH_DATA_DIR`、`WORKMESH_NODE_ID`、`WORKMESH_NODE_ROLE`、`WORKMESH_GATEWAY_URL`、`WORKMESH_GATEWAY_ID`、`WORKMESH_GATEWAY_SECRET`、`WORKMESH_GATEWAY_USERNAME` 和 `WORKMESH_GATEWAY_PASSWORD` 配置。Gateway 用户名和密码仅用于启动时换取短期 JWT，不写入日志或响应。首次运行会在数据目录写入节点状态文件，敏感凭据不得写入日志或普通配置。
+默认监听地址由环境变量 `WORKMESH_LISTEN_ADDR` 控制，默认端口为 `9999`。健康检查为 `/health`，依赖就绪检查为 `/ready`。
 
-任务隔离执行需要额外配置已签名的运行时 CLI：`WORKMESH_TASK_CLI`（绝对路径）、`WORKMESH_TASK_CLI_SHA256`（CLI 文件的 64 位小写 SHA256 摘要）和可选的 `WORKMESH_TASK_TOKEN`（节点写操作令牌）。服务启动后按摘要缓存 Provider，HTTP 请求只能提交固定的 `task` 操作和 `argv` 参数，不经过 Shell；缺少 CLI 或摘要、摘要校验失败时，`/api/v2/workmesh/tasks/*` 返回 `503 TASK_PROVIDER_UNAVAILABLE`，不会伪造任务成功，也不会回退到宿主命令执行。任务工作区还必须位于 `WORKMESH_AGENT_WORKSPACE_ROOT`（如配置）范围内，且镜像必须使用固定 `sha256:` 摘要。
+## 运行数据
+
+节点数据目录由 `WORKMESH_DATA_DIR` 指定。服务使用嵌入式 SQLite WAL 保存任务、脚本、命令、站点、证书、备份、数据库实例、审计日志和登录会话，不要求额外启动数据库进程。
+
+敏感配置只从环境变量或部署系统注入，不写入源码、示例配置或 Git。所有长任务都支持状态查询、超时、取消和重启恢复。
+
+## API 与前端
+
+HTTP API 统一使用 `/api/v2`，成功响应使用数字 `code: 200`，错误响应使用 `code: "ERR"` 和结构化错误详情。Web 前端位于 `web`，构建产物由同一进程提供静态资源和 history 路由。
+
+所有接口都经过参数校验、资源归属校验和权限校验。文件操作使用路径穿越防护、上传上限和原子写入；命令执行使用白名单、超时和审计记录。
+
+## 节点角色与网关
+
+节点角色通过 `WORKMESH_ROLE` 配置为 `primary` 或 `secondary`。网关地址、节点标识和授权信息由部署配置提供，服务不会内置或生成任何凭据。普通站点与网关控制面使用独立域名、配置和数据库。
+
+## 开发规范
+
+- 新增 Go 导出符号必须包含中文注释。
+- 新增代码文件使用 GPL-3.0 SPDX 头部。
+- 列表接口必须分页或设置明确上限。
+- 外部命令和网络请求必须设置超时。
+- 修改公开接口时同步更新 API 文档、测试和功能清单。
 
 ## 验证
 
 ```powershell
-go test ./...
-go build ./cmd/workmesh-server
+node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='off'; Set-Location apps/workmesh-server; go test ./..."
+node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='off'; Set-Location apps/workmesh-server; go vet ./..."
 ```
 
-`/health` 不依赖数据库或 Gateway；`/ready` 用于后续依赖就绪检查。
-
-## 迁移规则
-
-- 新服务与 `apps/workmesh-node` 完全解耦，不复制旧项目的 Git 元数据和构建产物。
-- 所有旧 API、WebSocket、SSE、文件传输、系统命令、容器、计划任务等必须逐项登记并通过契约测试后才能标记完成。
-- 新增和修改的代码注释使用中文；许可证和第三方 NOTICE 按 `docs/legal` 记录。
+完整接口、隐藏功能和部署验收记录位于 `docs/migration` 与 `docs/operations`。
