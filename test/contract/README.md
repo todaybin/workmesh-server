@@ -31,3 +31,14 @@ node test/contract/implementation-scan.mjs `
 ```
 
 状态值：`implemented`（发现业务实现）、`partial`（实现但含固定空列表）、`compatibility`（兼容占位）、`pending`（迁移待完成）和 `missing`（未发现新路由）。脚本只读源码，不启动服务；报告中的启发式字段需结合对应 `evidence` 和源码复核。
+
+## 隐藏能力扫描
+
+`hidden-function-scan.mjs` 盘点旧 Core/Agent 的 `init`、`middleware`、`i18n`、`log` 和 `cron` 目录，检查隐藏能力清单章节是否仍存在，并可输出 JSON 报告：
+
+```powershell
+node test/contract/hidden-function-scan.mjs `
+  --legacy ../workmesh-node `
+  --project . `
+  --out .tmp/hidden-function-status.json
+```

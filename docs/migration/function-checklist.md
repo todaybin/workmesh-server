@@ -5,6 +5,8 @@
 
 本清单以旧 `apps/workmesh-node/core` 与 `agent` 的 831 条路由为基线。状态必须以真实副作用或端到端响应确认，不能仅以路由注册作为完成依据。
 
+非路由的初始化、后台作业、中间件、国际化、日志、任务和协议升级能力见 [`hidden-function-checklist.md`](./hidden-function-checklist.md)，两份清单必须同步维护。
+
 ## 已完成
 
 | 功能域 | 接口范围 | 真实行为 | 验证 |
@@ -53,4 +55,5 @@
 
 ```powershell
 node scripts/with-dev-env.mjs -- node test/contract/implementation-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --out .tmp/implementation-status.json
+node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --out .tmp/hidden-function-status.json
 ```
