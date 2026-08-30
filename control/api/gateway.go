@@ -184,16 +184,8 @@ func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Reque
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": auth})
 		return
 	}
-	s.mu.Lock()
-	s.status.Registration = gateway.RegistrationRegistered
-	s.status.NodeID = request.NodeID
-	s.status.Role = request.Role
-	s.status.Connected = true
-	s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
-	s.status.Reason = ""
-	s.auth = gateway.Authorization{BindingID: request.NodeID, Refreshable: true}
-	s.mu.Unlock()
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": s.auth})
+	// 未配置真实 Gateway 客户端时禁止伪造注册成功，避免节点绕过云端授权。
+	writeError(w, http.StatusServiceUnavailable, errors.New("Gateway 未配置有效凭据，无法完成节点注册"))
 }
 
 func (s *GatewayStateStore) heartbeatHandler(w http.ResponseWriter, r *http.Request) {

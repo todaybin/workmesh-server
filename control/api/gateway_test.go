@@ -64,3 +64,25 @@ func TestGatewayRoutesUseExternalProtocolClient(t *testing.T) {
 		}
 	}
 }
+
+func TestGatewayRegisterRejectsMissingClient(t *testing.T) {
+	t.Setenv("WORKMESH_GATEWAY_URL", "")
+	t.Setenv("WORKMESH_GATEWAY_ID", "")
+	t.Setenv("WORKMESH_GATEWAY_SECRET", "")
+	mux := http.NewServeMux()
+	RegisterGatewayRoutes(mux, "node-local", "secondary")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v2/gateway/register", strings.NewReader(`{"nodeId":"node-local","role":"secondary"}`)))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("register status = %d, want %d; body=%s", response.Code, http.StatusServiceUnavailable, response.Body.String())
+	}
+	var envelope struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Code != "ERR" {
+		t.Fatalf("error envelope code = %q, want ERR", envelope.Code)
+	}
+}
