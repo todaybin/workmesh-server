@@ -3,8 +3,8 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T12:02:26.629Z。
-共 871 条接口：implemented 863、partial 2、pending 6。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T12:27:22.853Z。
+共 871 条接口：implemented 869、partial 2。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
 
@@ -733,9 +733,9 @@
 | implemented | GET | `/api/v2/runtimes/php/fpm/status/:id` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
 | implemented | GET | `/api/v2/runtimes/supervisor/process/:id` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/runtimes/del` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
-| pending | POST | `/api/v2/runtimes/node/modules` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/runtimes/node/modules/operate` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/runtimes/node/package` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/runtimes/node/modules` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/runtimes/node/modules/operate` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/runtimes/node/package` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/runtimes/operate` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/runtimes/php/config` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/runtimes/php/container/update` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
@@ -1025,8 +1025,8 @@
 | implemented | POST | `/api/v2/websites/proxies/status` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/proxies/update` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/proxy/clear` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| pending | POST | `/api/v2/websites/proxy/config` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
-| pending | POST | `/api/v2/websites/realip/config` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/websites/proxy/config` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/realip/config` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/redirect` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/redirect/file` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/redirect/update` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
@@ -1066,7 +1066,7 @@
 | implemented | POST | `/api/v2/websites/waf/rules` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/waf/rules/delete` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| pending | POST | `/api/v2/websites/waf/test` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | 返回 501/MIGRATION_PENDING 或 StatusNotImplemented |
+| implemented | POST | `/api/v2/websites/waf/test` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 
 ## workmesh
 

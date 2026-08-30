@@ -49,6 +49,26 @@ func TestWebsiteWAFRoutesCRUD(t *testing.T) {
 	}
 }
 
+func TestWebsiteWAFTestDetectsSample(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerWebsiteFunctionalRoutes(mux)
+	create := httptest.NewRequest(http.MethodPost, "/api/v2/websites", bytes.NewBufferString(`{"primaryDomain":"waf-test.example"}`))
+	create.Header.Set("Content-Type", "application/json")
+	created := httptest.NewRecorder()
+	mux.ServeHTTP(created, create)
+	if created.Code != http.StatusOK {
+		t.Fatalf("创建网站失败: %d %s", created.Code, created.Body.String())
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/websites/waf/test", bytes.NewBufferString(`{"websiteID":1,"uri":"/search?q=1 union select 1","method":"GET"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"matched":true`)) {
+		t.Fatalf("WAF 样本检测失败: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestWebsiteAdvancedRoutes(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()

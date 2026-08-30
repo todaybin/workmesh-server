@@ -171,6 +171,13 @@ function hasLocalRegistration(text, route) {
     if (helper.test(text)) return true;
     const loop = new RegExp(`for\\s+_,\\s*([A-Za-z_]\\w*)\\s*:=\\s*range\\s*\\[\\]string\\s*\\{[^}]*["']${escapedPath}["'][^}]*\\}\\s*\\{[\\s\\S]{0,1200}?HandleFunc\\(\\s*["']${method}\\s+["']\\s*\\+\\s*\\1\\b`, 'i');
     if (loop.test(text)) return true;
+    // 网站、运行时等模块通常用 []struct{path, typ string} 描述同一组路由，
+    // 再通过 item.path 拼接 HTTP 方法注册。识别这种真实注册，避免把已实现接口误报为 pending。
+    const structLoop = new RegExp(
+      `range\\s+\\[\\]struct[^{]*\\{[\\s\\S]{0,4000}?["']${escapedPath}["'][\\s\\S]{0,4000}?\\}\\s*\\{[\\s\\S]{0,2400}?HandleFunc\\(\\s*["']${method}\\s+["']\\s*\\+\\s*[A-Za-z_]\\w*\\.(?:path|route)\\b`,
+      'i',
+    );
+    if (structLoop.test(text)) return true;
   }
   return false;
 }

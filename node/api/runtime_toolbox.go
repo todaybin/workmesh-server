@@ -4,11 +4,17 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,12 +22,15 @@ import (
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
+var nodeModuleNamePattern = regexp.MustCompile(`^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$`)
+
 // runtimeRecord 是运行时及其扩展的最小持久化模型。
 type runtimeRecord struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`
 	Type       string    `json:"type"`
 	Version    string    `json:"version"`
+	CodeDir    string    `json:"codeDir,omitempty"`
 	Status     string    `json:"status"`
 	Remark     string    `json:"remark,omitempty"`
 	Extensions []string  `json:"extensions,omitempty"`
@@ -164,7 +173,7 @@ func registerRuntimeRoutes(mux *http.ServeMux, s *runtimeStore) {
 			runtimeErr(w, 400, e.Error())
 			return
 		}
-		item := runtimeRecord{ID: runtimeString(v, "id"), Name: runtimeString(v, "name"), Type: runtimeString(v, "type"), Version: runtimeString(v, "version"), Status: "running", UpdatedAt: time.Now().UTC()}
+		item := runtimeRecord{ID: runtimeString(v, "id"), Name: runtimeString(v, "name"), Type: runtimeString(v, "type"), Version: runtimeString(v, "version"), CodeDir: runtimeString(v, "codeDir", "path"), Status: "running", UpdatedAt: time.Now().UTC()}
 		if item.ID == "" {
 			item.ID = item.Name
 		}
@@ -230,7 +239,8 @@ func registerRuntimeRoutes(mux *http.ServeMux, s *runtimeStore) {
 }
 
 func registerRuntimeSubroutes(mux *http.ServeMux, s *runtimeStore) {
-	paths := []string{"/api/v2/runtimes/php/extensions", "/api/v2/runtimes/php/extensions/search", "/api/v2/runtimes/php/extensions/install", "/api/v2/runtimes/php/extensions/uninstall", "/api/v2/runtimes/php/extensions/update", "/api/v2/runtimes/php/extensions/del", "/api/v2/runtimes/node/modules", "/api/v2/runtimes/node/modules/operate", "/api/v2/runtimes/node/package", "/api/v2/runtimes/php/config", "/api/v2/runtimes/php/file", "/api/v2/runtimes/php/fpm/config", "/api/v2/runtimes/php/container/update", "/api/v2/runtimes/supervisor/process", "/api/v2/runtimes/supervisor/process/file"}
+	registerNodeRuntimeRoutes(mux, s)
+	paths := []string{"/api/v2/runtimes/php/extensions", "/api/v2/runtimes/php/extensions/search", "/api/v2/runtimes/php/extensions/install", "/api/v2/runtimes/php/extensions/uninstall", "/api/v2/runtimes/php/extensions/update", "/api/v2/runtimes/php/extensions/del", "/api/v2/runtimes/php/config", "/api/v2/runtimes/php/file", "/api/v2/runtimes/php/fpm/config", "/api/v2/runtimes/php/container/update", "/api/v2/runtimes/supervisor/process", "/api/v2/runtimes/supervisor/process/file"}
 	for _, p := range paths {
 		mux.HandleFunc("POST "+p, func(w http.ResponseWriter, r *http.Request) {
 			v, e := runtimeBody(r)
@@ -303,6 +313,283 @@ func registerRuntimeSubroutes(mux *http.ServeMux, s *runtimeStore) {
 		}
 		runtimeOK(w, map[string]any{"id": id, "status": "ready", "config": value})
 	})
+}
+
+// registerNodeRuntimeRoutes 注册 Node.js 包脚本、模块查询和受限模块操作接口。
+func registerNodeRuntimeRoutes(mux *http.ServeMux, s *runtimeStore) {
+	mux.HandleFunc("POST /api/v2/runtimes/node/package", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		dir, err := validateNodeRuntimeDirectory(runtimeString(body, "codeDir"))
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		manifest, err := readNodePackage(filepath.Join(dir, "package.json"))
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		keys := make([]string, 0, len(manifest.Scripts))
+		for name := range manifest.Scripts {
+			keys = append(keys, name)
+		}
+		sort.Strings(keys)
+		items := make([]map[string]string, 0, len(keys))
+		for _, name := range keys {
+			items = append(items, map[string]string{"name": name, "script": manifest.Scripts[name]})
+		}
+		runtimeOK(w, items)
+	})
+	mux.HandleFunc("POST /api/v2/runtimes/node/modules", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		record, err := findNodeRuntime(s, runtimeRequestID(body))
+		if err != nil {
+			runtimeErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+		dir, err := validateNodeRuntimeDirectory(record.CodeDir)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		items, err := scanNodeModules(filepath.Join(dir, "node_modules"), 500)
+		if err != nil {
+			runtimeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		runtimeOK(w, items)
+	})
+	mux.HandleFunc("POST /api/v2/runtimes/node/modules/operate", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		record, err := findNodeRuntime(s, runtimeRequestID(body))
+		if err != nil {
+			runtimeErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+		operation := strings.ToLower(runtimeString(body, "operate", "operation"))
+		manager := strings.ToLower(runtimeString(body, "pkgManager", "packageManager"))
+		module := strings.ToLower(runtimeString(body, "module", "name"))
+		if operation != "install" && operation != "uninstall" && operation != "update" {
+			runtimeErr(w, http.StatusBadRequest, "Node 模块操作必须是 install、uninstall 或 update")
+			return
+		}
+		if manager != "npm" && manager != "yarn" {
+			runtimeErr(w, http.StatusBadRequest, "Node 包管理器只允许 npm 或 yarn")
+			return
+		}
+		if module != "" && !nodeModuleNamePattern.MatchString(module) {
+			runtimeErr(w, http.StatusBadRequest, "Node 模块名称无效")
+			return
+		}
+		if module == "" && operation != "update" {
+			runtimeErr(w, http.StatusBadRequest, "安装或卸载时模块名称不能为空")
+			return
+		}
+		dir, err := validateNodeRuntimeDirectory(record.CodeDir)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		binary, err := exec.LookPath(manager)
+		if err != nil {
+			runtimeErr(w, http.StatusServiceUnavailable, manager+" 未安装")
+			return
+		}
+		taskID := "node-module-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+		task := map[string]any{"id": taskID, "runtimeID": record.ID, "operation": operation, "module": module, "packageManager": manager, "status": "queued", "createdAt": time.Now().UTC()}
+		s.mu.Lock()
+		s.state.Settings["node-task:"+taskID] = task
+		_ = s.saveLocked()
+		s.mu.Unlock()
+		go runNodeModuleTask(s, taskID, binary, dir, operation, module)
+		wmhttp.JSON(w, http.StatusAccepted, map[string]any{"code": 200, "data": task})
+	})
+	mux.HandleFunc("GET /api/v2/runtimes/node/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		task := s.state.Settings["node-task:"+r.PathValue("id")]
+		s.mu.RUnlock()
+		if task == nil {
+			runtimeErr(w, http.StatusNotFound, "Node 模块任务不存在")
+			return
+		}
+		runtimeOK(w, task)
+	})
+}
+
+type nodePackageManifest struct {
+	Name        string            `json:"name"`
+	Version     string            `json:"version"`
+	License     string            `json:"license"`
+	Description string            `json:"description"`
+	Scripts     map[string]string `json:"scripts"`
+}
+
+func runtimeRequestID(body map[string]any) string {
+	if value := runtimeString(body, "id", "runtimeId", "ID"); value != "" {
+		return value
+	}
+	for _, key := range []string{"id", "runtimeId", "ID"} {
+		if value, ok := body[key].(float64); ok && value > 0 && value == float64(uint64(value)) {
+			return strconv.FormatUint(uint64(value), 10)
+		}
+	}
+	return ""
+}
+
+func findNodeRuntime(s *runtimeStore, id string) (runtimeRecord, error) {
+	if id == "" {
+		return runtimeRecord{}, errors.New("运行时 ID 不能为空")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.state.Runtimes {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return runtimeRecord{}, errors.New("运行时不存在")
+}
+
+func validateNodeRuntimeDirectory(value string) (string, error) {
+	if strings.TrimSpace(value) == "" {
+		return "", errors.New("Node 运行时工作目录不能为空")
+	}
+	dir, err := filepath.Abs(filepath.Clean(value))
+	if err != nil {
+		return "", errors.New("Node 运行时工作目录无效")
+	}
+	if root := strings.TrimSpace(os.Getenv("WORKMESH_WORKSPACE_ROOT")); root != "" {
+		rootAbs, rootErr := filepath.Abs(filepath.Clean(root))
+		if rootErr != nil {
+			return "", errors.New("WORKMESH_WORKSPACE_ROOT 配置无效")
+		}
+		relative, relErr := filepath.Rel(rootAbs, dir)
+		if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return "", errors.New("Node 运行时工作目录超出允许范围")
+		}
+	}
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return "", errors.New("Node 运行时工作目录不存在")
+	}
+	return dir, nil
+}
+
+func readNodePackage(path string) (nodePackageManifest, error) {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return nodePackageManifest{}, errors.New("package.json 不存在")
+	}
+	if info.Size() > 2<<20 {
+		return nodePackageManifest{}, errors.New("package.json 超过 2 MiB 限制")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nodePackageManifest{}, errors.New("读取 package.json 失败")
+	}
+	var manifest nodePackageManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nodePackageManifest{}, errors.New("package.json 格式无效")
+	}
+	if manifest.Scripts == nil {
+		manifest.Scripts = map[string]string{}
+	}
+	return manifest, nil
+}
+
+func scanNodeModules(root string, limit int) ([]nodePackageManifest, error) {
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return []nodePackageManifest{}, nil
+	}
+	if err != nil {
+		return nil, errors.New("读取 node_modules 失败")
+	}
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		base := filepath.Join(root, entry.Name())
+		if strings.HasPrefix(entry.Name(), "@") {
+			scoped, scopedErr := os.ReadDir(base)
+			if scopedErr != nil {
+				continue
+			}
+			for _, child := range scoped {
+				if child.IsDir() {
+					paths = append(paths, filepath.Join(base, child.Name(), "package.json"))
+				}
+			}
+		} else {
+			paths = append(paths, filepath.Join(base, "package.json"))
+		}
+	}
+	sort.Strings(paths)
+	items := make([]nodePackageManifest, 0, len(paths))
+	for _, path := range paths {
+		if len(items) >= limit {
+			break
+		}
+		manifest, readErr := readNodePackage(path)
+		if readErr == nil {
+			manifest.Scripts = nil
+			items = append(items, manifest)
+		}
+	}
+	return items, nil
+}
+
+func runNodeModuleTask(s *runtimeStore, taskID, binary, dir, operation, module string) {
+	update := func(status, message string) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		value, _ := s.state.Settings["node-task:"+taskID].(map[string]any)
+		if value == nil {
+			return
+		}
+		value["status"] = status
+		value["updatedAt"] = time.Now().UTC()
+		if message != "" {
+			value["error"] = message
+		}
+		s.state.Settings["node-task:"+taskID] = value
+		_ = s.saveLocked()
+	}
+	update("running", "")
+	args := []string{operation}
+	if module != "" {
+		args = append(args, module)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "CI=true")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		message := strings.TrimSpace(string(output))
+		if len(message) > 512 {
+			message = message[:512]
+		}
+		if message == "" {
+			message = err.Error()
+		}
+		update("failed", message)
+		return
+	}
+	update("completed", "")
 }
 
 func registerTerminalRoutes(mux *http.ServeMux) {

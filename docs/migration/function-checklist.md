@@ -34,6 +34,14 @@
 | PHP 扩展及配置查询 | `apps/workmesh-node/agent/app/service/runtime.go` | `GET /api/v2/runtimes/php/:id/extensions`、`config`、`container`、`fpm/config`、`fpm/status` | `apps/workmesh-server/node/api/runtime_toolbox.go:registerRuntimeSubroutes` | 同左 | 节点会话鉴权 | 运行时记录及扩展列表 | `runtime.json` | `node/api/runtime_toolbox_test.go` | `go test ./node/api -run Runtime` | 待制品部署 | implemented | FPM 深度指标待接入系统探针 |
 | Supervisor 进程详情 | `apps/workmesh-node/agent/app/service/runtime.go` | `GET /api/v2/runtimes/supervisor/process/:id` | `apps/workmesh-server/node/api/runtime_toolbox.go:registerRuntimeSubroutes` | 同左 | 节点会话鉴权 | `runtime.json` supervisor 配置 | `runtime.json` | `node/api/runtime_toolbox_test.go` | `go test ./node/api -run Runtime` | 待制品部署 | implemented | 未配置进程返回 not_configured |
 
+## 2026-08-30 Node 运行时包管理批次
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Node package.json 脚本读取 | `apps/workmesh-node/agent/app/service/runtime.go:GetNodePackageRunScript` | `POST /api/v2/runtimes/node/package` | `node/api/runtime_toolbox.go:registerNodeRuntimeRoutes` | `POST /api/v2/runtimes/node/package` | 节点会话鉴权；工作目录受 `WORKMESH_WORKSPACE_ROOT` 限制 | 目标目录 `package.json`，大小上限 2 MiB | 无状态读取 | `node/api/runtime_toolbox_test.go:TestNodeRuntimePackageAndModules` | `go test ./node/api -run NodeRuntime` | 待节点制品部署 | implemented | 不执行 package.json 中的脚本，仅返回 scripts 清单 |
+| Node modules 元数据扫描 | `apps/workmesh-node/agent/app/service/runtime.go:GetNodeModules` | `POST /api/v2/runtimes/node/modules` | `node/api/runtime_toolbox.go:registerNodeRuntimeRoutes` | `POST /api/v2/runtimes/node/modules` | 节点会话鉴权；运行时 ID 归属校验 | `node_modules/*/package.json`，最多 500 项 | 无状态读取 | `node/api/runtime_toolbox_test.go:TestNodeRuntimePackageAndModules` | `go test ./node/api -run NodeRuntime` | 待节点制品部署 | implemented | 仅读取包元数据，不加载或执行包代码 |
+| Node 模块安装/更新/卸载 | `apps/workmesh-node/agent/app/service/runtime.go:OperateNodeModules` | `POST /api/v2/runtimes/node/modules/operate` | `node/api/runtime_toolbox.go:registerNodeRuntimeRoutes/runNodeModuleTask` | `POST /api/v2/runtimes/node/modules/operate`、`GET /api/v2/runtimes/node/tasks/:id` | 节点会话；包管理器和模块名白名单 | 本机 npm/yarn，工作目录校验 | `runtime.json` 的任务状态原子保存 | `node/api/runtime_toolbox_test.go` | `go test ./node/api -run NodeRuntime` | 需人工确认 npm/yarn 与外网源后验证 | implemented | 任务执行受 20 分钟超时；生产环境需配置命令白名单和镜像源 |
+
 # WorkMesh 功能迁移清单
 
 ## 2026-08-30 网站配置别名批次
@@ -45,7 +53,7 @@
 | 网站 DNS 查询与删除 | `apps/workmesh-node/agent/router/ro_website.go` | `POST /api/v2/websites/dns/search`, `/dns/del` | `node/api/website.go:registerWebsiteAdvancedRoutes` | POST | 节点会话、网站 ID 校验 | WebsiteService 配置 | `website-configs.json` | `node/api/website_test.go` | `go test ./node/api -run WebsiteConfigAliases` | 待双节点部署 | implemented | 删除采用标记并保留审计字段 |
 | 网站监控配置与统计别名 | `apps/workmesh-node/agent/router/ro_website.go` | `GET/POST /api/v2/websites/monitor/config/*`, `/monitor/{stat,qps,rank,trend,visitors}` | `node/api/website.go:registerWebsiteAdvancedRoutes`、`node/api/analytics.go` | GET/POST | 节点会话 | analytics 状态采集 | `domains.json` 设置区 | `node/api/website_test.go:TestWebsiteConfigAliasesPersist` | `go test ./node/api -run WebsiteConfigAliases` | 待双节点部署 | implemented | 统计采集器接入真实访问日志后增强 |
 
-本清单以旧 `apps/workmesh-node/core` 与 `agent` 的 863 条路由为基线（含隐藏 helper 注册和去品牌化静态入口）。状态必须以真实副作用或端到端响应确认，不能仅以路由注册作为完成依据。
+本清单以旧 `apps/workmesh-node/core` 与 `agent` 的 871 条路由为基线（含隐藏 helper 注册和去品牌化静态入口）。状态必须以真实副作用或端到端响应确认，不能仅以路由注册作为完成依据。
 
 非路由的初始化、后台作业、中间件、国际化、日志、任务和协议升级能力见 [`hidden-function-checklist.md`](./hidden-function-checklist.md)，两份清单必须同步维护。
 
@@ -112,7 +120,7 @@
 | 单文件存在检查 | `apps/workmesh-node/agent/app/api/v2/file.go:CheckFile` | `POST /files/check` | `node/api/files_routes.go:fileAdvancedHandler` | `POST /api/v2/files/check` | 节点会话 | `os.Stat` / Mkdir | 文件系统副作用（withInit） | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileBatch` | 待制品部署 | implemented | withInit 只创建目录 |
 | 收藏分页查询 | `apps/workmesh-node/agent/app/api/v2/favorite.go:SearchFavorite` | `POST /files/favorite/search` | `node/api/files_routes.go:fileAdvancedHandler` | `POST /api/v2/files/favorite/search` | 节点会话 | `files.json` favorites | `WORKMESH_DATA_DIR/files.json` | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileFavorite` | 待制品部署 | implemented | page/pageSize 上限 200 |
 
-实现扫描器当前结果以 [`function-checklist-generated.md`](./function-checklist-generated.md) 和 `.tmp/implementation-status.json` 为准（基于 863 条路由）。隐藏初始化文件中的路由也已纳入去重统计。`partial` 与 `compatibility` 仍需按真实副作用逐项验收，不得仅凭路由注册宣称完成。
+实现扫描器当前结果以 [`function-checklist-generated.md`](./function-checklist-generated.md) 和 `.tmp/implementation-status.json` 为准（基于 871 条路由：implemented 869、partial 2、pending 0）。隐藏初始化文件中的路由也已纳入去重统计。`partial` 与 `compatibility` 仍需按真实副作用逐项验收，不得仅凭路由注册宣称完成。
 
 - 主机与系统：主机列表、连接测试、系统信息、命令历史和终端。
 - 文件：分享、回收站、压缩/解压、上传下载、权限和内容搜索。

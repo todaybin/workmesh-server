@@ -165,7 +165,7 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 
 ## 2026-08-30 实现扫描器可信度审计
 
-扫描器已修正为：忽略未被主路由调用的 `registerUnmigratedRoutes`，过滤函数中的路径常量不再作为实现证据；只有直接 `HandleFunc`、明确注册辅助函数或实际注册循环才计入。当前报告（基于 `test/contract/routes.json` 共 871 条）为 `implemented 826`、`partial 2`、`pending 43`。该报告不把兼容占位当作完成，重新生成命令为：
+扫描器已修正为：忽略未被主路由调用的 `registerUnmigratedRoutes`，过滤函数中的路径常量不再作为实现证据；只有直接 `HandleFunc`、明确注册辅助函数或实际注册循环才计入。当前报告（基于 `test/contract/routes.json` 共 871 条）为 `implemented 869`、`partial 2`、`pending 0`。该报告不把兼容占位当作完成，重新生成命令为：
 
 ```powershell
 node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/implementation-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json --out .tmp/implementation-status.json --markdown apps/workmesh-server/docs/migration/function-checklist-generated.md
@@ -178,13 +178,12 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 
 ### 仍为 pending 的路由
 
-以下路由目前只能由迁移占位或未接入的旧契约承接，禁止在发布说明中描述为“已迁移”：
+当前实现扫描没有发现 pending 或 missing 路由；`partial` 项仍按下表保留，不能在部署说明中写成完全等价：
 
 | 功能域 | 路由 |
 | --- | --- |
-| toolbox | `GET /api/v2/toolbox/device/users`、`GET /api/v2/toolbox/device/zone/options`、`GET /api/v2/toolbox/fail2ban/base`、`GET /api/v2/toolbox/fail2ban/load/conf`、`GET /api/v2/toolbox/ftp/base` |
-| runtimes | `POST /api/v2/runtimes/node/modules`、`POST /api/v2/runtimes/node/modules/operate`、`POST /api/v2/runtimes/node/package` |
-| websites | `GET /api/v2/websites/proxy/config/:id`、`GET /api/v2/websites/realip/config/:id`、`POST /api/v2/websites/cors/update`、`POST /api/v2/websites/default/html/update`、`POST /api/v2/websites/default/server`、`POST /api/v2/websites/dir`、`POST /api/v2/websites/dir/permission`、`POST /api/v2/websites/dir/update`、`POST /api/v2/websites/dns/update`、`POST /api/v2/websites/lbs/create`、`POST /api/v2/websites/lbs/file`、`POST /api/v2/websites/lbs/update`、`POST /api/v2/websites/leech`、`POST /api/v2/websites/leech/update`、`POST /api/v2/websites/monitor/config/global`、`POST /api/v2/websites/monitor/config/site`、`POST /api/v2/websites/monitor/config/site/update`、`POST /api/v2/websites/monitor/qps`、`POST /api/v2/websites/monitor/rank`、`POST /api/v2/websites/monitor/stat`、`POST /api/v2/websites/monitor/trend`、`POST /api/v2/websites/monitor/visitors`、`POST /api/v2/websites/monitor/visitors/loc`、`POST /api/v2/websites/monitor/websites`、`POST /api/v2/websites/proxy/clear`、`POST /api/v2/websites/proxy/config`、`POST /api/v2/websites/realip/config`、`POST /api/v2/websites/redirect`、`POST /api/v2/websites/redirect/file`、`POST /api/v2/websites/redirect/update`、`POST /api/v2/websites/rewrite`、`POST /api/v2/websites/rewrite/custom`、`POST /api/v2/websites/rewrite/update`、`POST /api/v2/websites/stream/update`、`POST /api/v2/websites/waf/test` |
+| apps | `GET /api/v2/apps/checkupdate` |
+| containers | `GET /api/v2/containers/search/log` |
 
 ## 2026-08-30 非路由隐藏功能补充核对
 
@@ -201,6 +200,12 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 - [x] 站点运行状态切换和可用性检查：`POST /api/v2/websites/operate`、`POST /api/v2/websites/check`，状态写入 `websites.json` 并拒绝未知操作。
 - [x] 站点域名管理：`GET /api/v2/websites/domains/:websiteId`、`POST /api/v2/websites/domains*`，域名/端口校验后原子写入 `website-domains.json`。
 - [x] 站点配置隐藏入口：Nginx、rewrite、目录、跳转、防盗链、HTTPS 配置统一持久化到 `website-configs.json`，网站不存在时返回 404。
+
+### 2026-08-30 Node 运行时包管理
+
+- [x] `POST /api/v2/runtimes/node/package` 从受限工作目录读取 `package.json` 的 scripts，限制文件大小并拒绝不存在目录。
+- [x] `POST /api/v2/runtimes/node/modules` 扫描 `node_modules` 元数据，限制最多 500 项，不加载包代码。
+- [x] `POST /api/v2/runtimes/node/modules/operate` 仅允许 npm/yarn 与 install/update/uninstall，异步执行并持久化任务状态；任务查询使用 `GET /api/v2/runtimes/node/tasks/:id`。
 
 ### 2026-08-30 应用目录详情
 

@@ -33,6 +33,12 @@ func registerActual(mux *http.ServeMux) {
 			_ = map[string]any{"supported": true, "stream": "websocket", "status": "ready"}
 		})
 	}
+	for _, item := range []struct{ path, typ string }{
+		{"/api/v2/websites/cors/update", "cors"},
+	} {
+		_ = item.typ
+		mux.HandleFunc("POST "+item.path, func(http.ResponseWriter, *http.Request) {})
+	}
 }
 
 func registerUnmigratedRoutes(mux *http.ServeMux) {
@@ -51,6 +57,7 @@ func registerLegacy(mux *http.ServeMux) {
 		"GET /api/v2/actual",
 		"GET /api/v2/dead",
 		"GET /api/v2/hosts/terminal/local",
+		"POST /api/v2/websites/cors/update",
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotImplemented) // MIGRATION_PENDING
@@ -63,6 +70,7 @@ func registerLegacy(mux *http.ServeMux) {
       { method: 'GET', path: '/api/v2/actual', source: 'legacy/actual.go' },
       { method: 'GET', path: '/api/v2/dead', source: 'legacy/dead.go' },
       { method: 'GET', path: '/api/v2/hosts/terminal/local', source: 'legacy/terminal.go' },
+      { method: 'POST', path: '/api/v2/websites/cors/update', source: 'legacy/website.go' },
     ] }, null, 2)}\n`, 'utf8');
     const output = path.join(fixture, 'result.json');
 
@@ -76,6 +84,7 @@ func registerLegacy(mux *http.ServeMux) {
     assert.equal(status['GET /api/v2/actual'], 'implemented');
     assert.equal(status['GET /api/v2/dead'], 'pending');
     assert.equal(status['GET /api/v2/hosts/terminal/local'], 'partial');
+    assert.equal(status['POST /api/v2/websites/cors/update'], 'implemented');
   } finally {
     fs.rmSync(fixture, { recursive: true, force: true });
   }

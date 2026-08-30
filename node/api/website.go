@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -280,6 +281,8 @@ func registerWebsiteConfigRoutes(mux *http.ServeMux, svc *service.WebsiteService
 		{"/api/v2/websites/lbs/update", "lbs"},
 		{"/api/v2/websites/lbs/file", "lbs-file"},
 		{"/api/v2/websites/proxy/clear", "proxy"},
+		{"/api/v2/websites/proxy/config", "proxy"},
+		{"/api/v2/websites/realip/config", "realip"},
 		{"/api/v2/websites/stream/update", "stream"},
 		{"/api/v2/websites/default/server", "default-server"},
 		{"/api/v2/websites/default/html/update", "default-html"},
@@ -839,6 +842,57 @@ func registerWAFRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 	mux.HandleFunc("GET /api/v2/websites/waf/global", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": svc.GetGlobal()})
 	})
+	// WAF 测试只在内存中分析请求样本，不转发请求，也不执行 OpenResty 命令。
+	mux.HandleFunc("POST /api/v2/websites/waf/test", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			WebsiteID uint              `json:"websiteID"`
+			URI       string            `json:"uri"`
+			Query     string            `json:"query"`
+			Body      string            `json:"body"`
+			Method    string            `json:"method"`
+			IP        string            `json:"ip"`
+			Headers   map[string]string `json:"headers"`
+			Cookies   map[string]string `json:"cookies"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if req.WebsiteID != 0 {
+			if _, err := svc.ListRules(req.WebsiteID); err != nil {
+				writeError(w, http.StatusNotFound, err)
+				return
+			}
+		}
+		parts := []string{req.URI, req.Query, req.Body, req.Method, req.IP}
+		for key, value := range req.Headers {
+			parts = append(parts, key, value)
+		}
+		for key, value := range req.Cookies {
+			parts = append(parts, key, value)
+		}
+		sample := strings.Join(parts, "\n")
+		patterns := []struct {
+			id       string
+			category string
+			pattern  *regexp.Regexp
+		}{
+			{"CRS-942100", "sql_injection", regexp.MustCompile(`(?i)\bunion\s+select\b|\b(or|and)\s+['\"]?1['\"]?\s*=\s*['\"]?1`)},
+			{"CRS-941100", "xss", regexp.MustCompile(`(?i)<script\b|javascript:`)},
+			{"CRS-930110", "path_traversal", regexp.MustCompile(`(?:\.\./|/etc/passwd|boot\.ini)`)},
+		}
+		matched := make([]map[string]string, 0, len(patterns))
+		for _, item := range patterns {
+			if item.pattern.MatchString(sample) {
+				matched = append(matched, map[string]string{"id": item.id, "category": item.category})
+			}
+		}
+		action := "allow"
+		if len(matched) > 0 && svc.GetGlobal().Mode == "block" {
+			action = "block"
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"matched": len(matched) > 0, "action": action, "rules": matched}})
+	})
 }
 
 func registerOpenRestyRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
@@ -881,7 +935,10 @@ func registerOpenRestyRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 func openRestyUpdate(svc *service.WebsiteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req model.OpenRestyConfig
-		_ = decodeJSON(r, &req)
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 		cfg := svc.GetOpenResty()
 		if req.Version != "" {
 			cfg.Version = req.Version
@@ -890,6 +947,19 @@ func openRestyUpdate(svc *service.WebsiteService) http.HandlerFunc {
 			cfg.ConfigContent = req.ConfigContent
 		}
 		if req.Modules != nil {
+			seen := make(map[string]struct{}, len(req.Modules))
+			for _, module := range req.Modules {
+				name := strings.TrimSpace(module.Name)
+				if name == "" {
+					writeError(w, http.StatusBadRequest, errors.New("OpenResty module name is required"))
+					return
+				}
+				if _, ok := seen[name]; ok {
+					writeError(w, http.StatusBadRequest, errors.New("duplicate OpenResty module"))
+					return
+				}
+				seen[name] = struct{}{}
+			}
 			cfg.Modules = req.Modules
 		}
 		result, err := svc.UpdateOpenResty(cfg)
