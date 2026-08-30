@@ -72,3 +72,50 @@ func TestFileShareLifecycle(t *testing.T) {
 		t.Fatalf("delete status=%d body=%s", res.Code, res.Body.String())
 	}
 }
+
+func TestFileFavoriteAndRecycleLifecycle(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	path := filepath.Join(root, "note.txt")
+	if err := os.WriteFile(path, []byte("note"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+	post := func(route string, value map[string]any) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(value)
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, route, bytes.NewReader(body)))
+		return res
+	}
+	if res := post("/api/v2/files/favorite", map[string]any{"path": path}); res.Code != http.StatusOK {
+		t.Fatalf("favorite create status=%d body=%s", res.Code, res.Body.String())
+	}
+	if res := post("/api/v2/files/favorite/search", map[string]any{"page": 1, "pageSize": 10}); res.Code != http.StatusOK || !bytes.Contains(res.Body.Bytes(), []byte("note.txt")) {
+		t.Fatalf("favorite search=%d body=%s", res.Code, res.Body.String())
+	}
+	res := post("/api/v2/files/del", map[string]any{"path": path, "forceDelete": false})
+	if res.Code != http.StatusOK || func() bool { _, err := os.Stat(path); return !os.IsNotExist(err) }() {
+		t.Fatalf("recycle delete=%d body=%s", res.Code, res.Body.String())
+	}
+	search := post("/api/v2/files/recycle/search", map[string]any{"page": 1, "pageSize": 10})
+	if search.Code != http.StatusOK || !bytes.Contains(search.Body.Bytes(), []byte("originalPath")) {
+		t.Fatalf("recycle search=%d body=%s", search.Code, search.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Items []struct {
+				ID string `json:"id"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(search.Body.Bytes(), &envelope); err != nil || len(envelope.Data.Items) != 1 {
+		t.Fatalf("recycle item=%s", search.Body.String())
+	}
+	if res := post("/api/v2/files/recycle/reduce", map[string]any{"id": envelope.Data.Items[0].ID}); res.Code != http.StatusOK {
+		t.Fatalf("recycle reduce=%d body=%s", res.Code, res.Body.String())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("restored file missing: %v", err)
+	}
+}

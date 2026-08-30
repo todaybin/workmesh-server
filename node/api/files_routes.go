@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,16 +45,145 @@ func isFileRoute(pattern string) bool {
 }
 
 type fileAdvancedRequest struct {
-	Path  string `json:"path"`
-	Dst   string `json:"dst"`
-	URL   string `json:"url"`
-	Token string `json:"token"`
+	Path     string `json:"path"`
+	Dst      string `json:"dst"`
+	URL      string `json:"url"`
+	Token    string `json:"token"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
 }
 
 type fileShare struct {
 	Token     string    `json:"token"`
 	Path      string    `json:"path"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+type fileFavorite struct {
+	ID        string    `json:"id"`
+	Path      string    `json:"path"`
+	Name      string    `json:"name"`
+	IsDir     bool      `json:"isDir"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type fileRecycleItem struct {
+	ID           string    `json:"id"`
+	OriginalPath string    `json:"originalPath"`
+	TrashPath    string    `json:"trashPath"`
+	Name         string    `json:"name"`
+	Size         int64     `json:"size"`
+	IsDir        bool      `json:"isDir"`
+	DeletedAt    time.Time `json:"deletedAt"`
+}
+
+type fileUploadItem struct {
+	ID        string    `json:"id"`
+	Path      string    `json:"path"`
+	Name      string    `json:"name"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type fileAuxState struct {
+	Favorites []fileFavorite    `json:"favorites"`
+	Recycle   []fileRecycleItem `json:"recycle"`
+	Uploads   []fileUploadItem  `json:"uploads"`
+}
+
+var fileAux struct {
+	sync.Mutex
+	loaded bool
+	path   string
+	data   fileAuxState
+}
+
+func fileAuxPath() string {
+	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
+	if dir == "" {
+		dir = ".workmesh-data"
+	}
+	return filepath.Join(dir, "files.json")
+}
+
+func loadFileAuxLocked() {
+	path := fileAuxPath()
+	if fileAux.loaded && fileAux.path == path {
+		return
+	}
+	fileAux.loaded, fileAux.path = true, path
+	fileAux.data = fileAuxState{Favorites: []fileFavorite{}, Recycle: []fileRecycleItem{}, Uploads: []fileUploadItem{}}
+	if raw, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(raw, &fileAux.data)
+	}
+	if fileAux.data.Favorites == nil {
+		fileAux.data.Favorites = []fileFavorite{}
+	}
+	if fileAux.data.Recycle == nil {
+		fileAux.data.Recycle = []fileRecycleItem{}
+	}
+	if fileAux.data.Uploads == nil {
+		fileAux.data.Uploads = []fileUploadItem{}
+	}
+}
+
+func saveFileAuxLocked() error {
+	if err := os.MkdirAll(filepath.Dir(fileAux.path), 0o750); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(fileAux.data)
+	if err != nil {
+		return err
+	}
+	tmp := fileAux.path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, fileAux.path)
+}
+
+func fileAuxID(prefix string) string {
+	return prefix + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+}
+
+func fileAuxSearch(path string, req fileAdvancedRequest) ([]any, int) {
+	fileAux.Lock()
+	defer fileAux.Unlock()
+	loadFileAuxLocked()
+	page, size := req.Page, req.PageSize
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 || size > 200 {
+		size = 50
+	}
+	var source []any
+	switch path {
+	case "recycle/search":
+		for _, item := range fileAux.data.Recycle {
+			source = append(source, item)
+		}
+	case "favorite/search":
+		for _, item := range fileAux.data.Favorites {
+			source = append(source, item)
+		}
+	case "upload/search":
+		for _, item := range fileAux.data.Uploads {
+			source = append(source, item)
+		}
+	}
+	total := len(source)
+	start := (page - 1) * size
+	if start > total {
+		start = total
+	}
+	end := start + size
+	if end > total {
+		end = total
+	}
+	return source[start:end], total
 }
 
 var fileShareState struct {
@@ -116,7 +246,11 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		switch path {
 		case "recycle/status":
-			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"enabled": true, "items": 0}})
+			fileAux.Lock()
+			loadFileAuxLocked()
+			count := len(fileAux.data.Recycle)
+			fileAux.Unlock()
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"enabled": true, "items": count}})
 		case "share/check", "share/info", "share/qrcode":
 			share, ok := findFileShare(r.URL.Query().Get("token"))
 			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": share.Path, "exists": ok, "token": share.Token, "createdAt": share.CreatedAt}})
@@ -143,6 +277,64 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch path {
+	case "favorite":
+		clean, err := cleanFilePath(req.Path)
+		if err != nil {
+			fileError(w, http.StatusBadRequest, err)
+			return
+		}
+		info, err := os.Stat(clean)
+		if err != nil {
+			fileError(w, http.StatusNotFound, err)
+			return
+		}
+		fileAux.Lock()
+		loadFileAuxLocked()
+		for _, item := range fileAux.data.Favorites {
+			if item.Path == clean {
+				fileAux.Unlock()
+				wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
+				return
+			}
+		}
+		item := fileFavorite{ID: fileAuxID("favorite"), Path: clean, Name: info.Name(), IsDir: info.IsDir(), CreatedAt: time.Now().UTC()}
+		fileAux.data.Favorites = append(fileAux.data.Favorites, item)
+		err = saveFileAuxLocked()
+		fileAux.Unlock()
+		if err != nil {
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
+	case "favorite/del":
+		fileAux.Lock()
+		loadFileAuxLocked()
+		id := strings.TrimSpace(req.ID)
+		if id == "" {
+			id = strings.TrimSpace(req.Token)
+		}
+		pathValue := strings.TrimSpace(req.Path)
+		kept := fileAux.data.Favorites[:0]
+		removed := false
+		for _, item := range fileAux.data.Favorites {
+			if (id != "" && item.ID == id) || (pathValue != "" && item.Path == pathValue) {
+				removed = true
+				continue
+			}
+			kept = append(kept, item)
+		}
+		fileAux.data.Favorites = kept
+		err := saveFileAuxLocked()
+		fileAux.Unlock()
+		if err != nil {
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !removed {
+			fileError(w, http.StatusNotFound, errors.New("收藏不存在"))
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"deleted": true}})
 	case "compress":
 		if err := zipPath(req.Path, req.Dst); err != nil {
 			fileError(w, http.StatusBadRequest, err)
@@ -214,8 +406,76 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		fileShareState.Unlock()
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
 	case "recycle/search", "favorite/search", "upload/search":
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": []any{}, "total": 0}})
-	case "recycle/clear", "recycle/reduce", "wget/stop", "compress/stop", "decompress/stop", "chunkupload/stop", "move/stop":
+		items, total := fileAuxSearch(path, req)
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": total, "page": 1, "pageSize": len(items)}})
+	case "recycle/clear":
+		fileAux.Lock()
+		loadFileAuxLocked()
+		var firstErr error
+		for _, item := range fileAux.data.Recycle {
+			if err := os.RemoveAll(item.TrashPath); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		fileAux.data.Recycle = []fileRecycleItem{}
+		err := saveFileAuxLocked()
+		fileAux.Unlock()
+		if firstErr != nil {
+			fileError(w, http.StatusInternalServerError, firstErr)
+			return
+		}
+		if err != nil {
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"cleared": true}})
+	case "recycle/reduce":
+		id := strings.TrimSpace(req.ID)
+		if id == "" {
+			id = strings.TrimSpace(req.Token)
+		}
+		if id == "" {
+			id = strings.TrimSpace(req.Path)
+		}
+		fileAux.Lock()
+		loadFileAuxLocked()
+		index := -1
+		for i, item := range fileAux.data.Recycle {
+			if item.ID == id || item.OriginalPath == id {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			fileAux.Unlock()
+			fileError(w, http.StatusNotFound, errors.New("回收站文件不存在"))
+			return
+		}
+		item := fileAux.data.Recycle[index]
+		if _, statErr := os.Stat(item.OriginalPath); statErr == nil {
+			fileAux.Unlock()
+			fileError(w, http.StatusConflict, errors.New("原路径已存在，无法恢复"))
+			return
+		}
+		if err := os.MkdirAll(filepath.Dir(item.OriginalPath), 0o750); err != nil {
+			fileAux.Unlock()
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if err := os.Rename(item.TrashPath, item.OriginalPath); err != nil {
+			fileAux.Unlock()
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		fileAux.data.Recycle = append(fileAux.data.Recycle[:index], fileAux.data.Recycle[index+1:]...)
+		err := saveFileAuxLocked()
+		fileAux.Unlock()
+		if err != nil {
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
+	case "wget/stop", "compress/stop", "decompress/stop", "chunkupload/stop", "move/stop":
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"stopped": true}})
 	default:
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"accepted": true, "operation": path}})

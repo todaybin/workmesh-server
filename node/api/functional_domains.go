@@ -236,10 +236,27 @@ func registerBackupRoutes(mux *http.ServeMux, s *domainStore) {
 		if !containsBackupAccount(accounts, "local", "localhost") {
 			items = append(items, backupAccount{ID: "local", Name: "localhost", Type: "local", IsPublic: false, BackupPath: backupDataDir(), RememberAuth: false})
 		}
+		total := len(items)
+		page, pageSize := intValue(v, "page"), intValue(v, "pageSize")
+		if page < 1 {
+			page = 1
+		}
+		if pageSize <= 0 || pageSize > 200 {
+			pageSize = 50
+		}
+		start := (page - 1) * pageSize
+		if start > total {
+			start = total
+		}
+		end := start + pageSize
+		if end > total {
+			end = total
+		}
+		items = items[start:end]
 		for i := range items {
 			items[i] = sanitizeBackupAccount(items[i])
 		}
-		success(w, map[string]any{"items": items, "total": len(items)})
+		success(w, map[string]any{"items": items, "total": total, "page": page, "pageSize": pageSize})
 	}
 	mux.HandleFunc("GET /api/v2/backups/local", func(w http.ResponseWriter, _ *http.Request) { success(w, backupDataDir()) })
 	mux.HandleFunc("GET /api/v2/backups/options", func(w http.ResponseWriter, _ *http.Request) {

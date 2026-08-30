@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
@@ -155,7 +156,24 @@ func handleFilesDelete(w http.ResponseWriter, r *http.Request) {
 	if req.ForceDelete {
 		err = os.RemoveAll(path)
 	} else {
-		err = os.Remove(path)
+		// 非强制删除进入本服务自己的回收目录，保留原路径以支持恢复。
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			fileError(w, http.StatusNotFound, statErr)
+			return
+		}
+		trashRoot := filepath.Join(filepath.Dir(fileAuxPath()), "recycle")
+		if err = os.MkdirAll(trashRoot, 0o750); err == nil {
+			trashPath := filepath.Join(trashRoot, fileAuxID("item"))
+			err = os.Rename(path, trashPath)
+			if err == nil {
+				fileAux.Lock()
+				loadFileAuxLocked()
+				fileAux.data.Recycle = append(fileAux.data.Recycle, fileRecycleItem{ID: fileAuxID("recycle"), OriginalPath: path, TrashPath: trashPath, Name: info.Name(), Size: info.Size(), IsDir: info.IsDir(), DeletedAt: time.Now().UTC()})
+				err = saveFileAuxLocked()
+				fileAux.Unlock()
+			}
+		}
 	}
 	if err != nil {
 		fileError(w, 404, err)
@@ -293,6 +311,13 @@ func handleFilesUpload(w http.ResponseWriter, r *http.Request) {
 			if e != nil {
 				fileError(w, 500, e)
 				return
+			}
+			if info, statErr := os.Stat(dst); statErr == nil {
+				fileAux.Lock()
+				loadFileAuxLocked()
+				fileAux.data.Uploads = append(fileAux.data.Uploads, fileUploadItem{ID: fileAuxID("upload"), Path: dst, Name: info.Name(), Size: info.Size(), CreatedAt: time.Now().UTC()})
+				_ = saveFileAuxLocked()
+				fileAux.Unlock()
 			}
 		}
 	}
