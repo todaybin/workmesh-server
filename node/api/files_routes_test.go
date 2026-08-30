@@ -267,3 +267,26 @@ func TestFileShareQueryAliasesAndWgetKeys(t *testing.T) {
 		t.Fatalf("wget keys=%d %s", res.Code, res.Body.String())
 	}
 }
+
+func TestFileReadTypeMountAndUserGroup(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	path := filepath.Join(t.TempDir(), "lines.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+	body, _ := json.Marshal(map[string]any{"path": path})
+	read := httptest.NewRecorder()
+	mux.ServeHTTP(read, httptest.NewRequest(http.MethodPost, "/api/v2/files/read/text", bytes.NewReader(body)))
+	if read.Code != http.StatusOK || !bytes.Contains(read.Body.Bytes(), []byte("one")) {
+		t.Fatalf("read type=%d %s", read.Code, read.Body.String())
+	}
+	for _, endpoint := range []string{"mount", "user/group"} {
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/files/"+endpoint, bytes.NewBufferString(`{}`)))
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s=%d %s", endpoint, res.Code, res.Body.String())
+		}
+	}
+}

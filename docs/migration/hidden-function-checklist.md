@@ -1,4 +1,12 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
+
+## 2026-08-31 别名与文件系统隐藏能力
+
+| 隐藏能力 | 发现位置 | 实现位置 | 状态 | 说明 |
+|---|---|---|---|---|
+| xpack 监控/WAF 别名方法路由 | `apps/workmesh-node/agent/router/ro_website.go` | `node/api/website.go` | implemented | 修复 ServeMux 方法模式拼接，别名进入真实 analytics/WAF 处理器 |
+| 网站资源与负载均衡查询 | `apps/workmesh-node/agent/app/service/website.go` | `node/api/website.go`、`website_extensions.go` | implemented | 读取网站配置、域名并返回资源列表 |
+| 文件 owner、挂载点、用户组查询 | `apps/workmesh-node/agent/app/api/v2/file.go` | `node/api/files_routes.go` | implemented | Linux 使用 os/user 与 Chown，Windows 返回明确不支持 |
 <!-- Copyright (c) 2026 WorkMesh contributors -->
 
 ## 2026-08-30 核心认证与执行入口
@@ -244,6 +252,11 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | 任务记录上限 | agent cronjobRepo | node/service/cronjob.go | implemented | 每任务最多保留 1000 条 |
 | MCP 连接协议探测 | `apps/workmesh-node/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 实际执行 Streamable HTTP initialize 或 SSE Content-Type 校验，失败不返回成功 |
 | Agent 渠道配对命令 | `apps/workmesh-node/agent/app/service/agents_channels.go:ApproveChannelPairing` | `node/api/ai_execution.go:handleAgentPairingApprove` | implemented | 仅对已登记容器执行固定 Docker 参数，容器缺失返回不可用 |
+
+| 文件分片上传状态 | `apps/workmesh-node/agent/app/api/v2/file.go:UploadChunkFiles` | `node/api/files_routes.go:handleChunkUpload` | implemented | 分片目录受 `WORKMESH_DATA_DIR` 控制，偏移和总大小校验，完成后原子提交 |
+| 文件历史版本快照 | `apps/workmesh-node/agent/app/service/file_history.go` | `node/api/files.go:handleFilesSave`、`files_routes.go:history/*` | implemented | 保存前记录最多 200 条快照，支持恢复和删除 |
+| 日志分页与类型清理 | `apps/workmesh-node/agent/app/api/v2/task.go`、`core/app/api/v2/logs.go` | `node/api/functional_domains.go:registerLogRoutes` | implemented | 日志检索支持关键字/类型/级别和分页，清理按类型过滤 |
+| 压缩包安全解压 | `apps/workmesh-node/agent/app/service/file.go` | `node/api/files_routes.go:unzipPath` | implemented | 拒绝路径穿越与符号链接，条目临时文件原子替换 |
 
 ## 2026-08-31 AI 流式与 MCP 隐藏能力
 

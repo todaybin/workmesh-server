@@ -1,5 +1,13 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
+## 2026-08-31 路由别名与文件高级操作补齐
+
+| 功能名称 | 旧源码位置 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|
+| xpack 监控/WAF 别名 | `apps/workmesh-node/agent/router/ro_website.go` | `node/api/website.go` | GET/POST `/api/v2/xpack/monitor/*`、`/api/v2/xpack/waf/*` | 节点会话 | analytics、网站 WAF 服务 | 网站配置文件 | `node/api/website_test.go` | implemented | 外部 OpenResty 可用性依赖部署环境 |
+| 网站负载均衡与资源查询 | `apps/workmesh-node/agent/app/api/v2/website.go` | `node/api/website.go`、`node/api/website_extensions.go` | GET `/api/v2/websites/:id/lbs`、`/api/v2/websites/resource/:id` | 节点会话 | 网站配置与域名记录 | 网站状态文件 | `node/api/website_test.go` | implemented | 数据库资源关联需凭据后接入 |
+| 文件分片、历史与高级操作 | `apps/workmesh-node/agent/app/api/v2/file.go` | `node/api/files_routes.go` | POST `/api/v2/files/chunkupload`、`history/*`、`depth/size`、`mode`、`read/:type`、`share/detail`、`mount`、`user/group` | 节点会话 | 本地文件系统 | 原子文件与 file-aux 状态 | `node/api/files_routes_test.go` | implemented | Windows owner 修改明确不支持 |
+
 ## 2026-08-30 数据服务与 OpenResty 真实运行时补齐
 
 ## 2026-08-31 数据库管理控制面
@@ -215,6 +223,16 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 | 应用详情与运行服务 | `apps/workmesh-node/agent/app/api/v2/app.go:GetApp*` | `GET /api/v2/apps/:key`、`GET /api/v2/apps/detail/*`、`GET /api/v2/apps/services/:key` | `node/api/apps.go:appCatalogGet` | 同左 | 节点会话鉴权（上层中间件） | `apps.json` catalog/apps 记录及配置中的 services/params | `WORKMESH_DATA_DIR/apps.json` 原子写入 | `node/api/apps_test.go:TestAppDerivedDetailsAndDeleteCheck` | `go test ./node/api -run App` | 本地 HTTP 已验证 | implemented | 未接入远程应用商店 SDK |
 | 已安装应用信息与删除检查 | `apps/workmesh-node/agent/app/api/v2/app.go` | `GET /api/v2/apps/installed/info/:appInstallId`、`GET /api/v2/apps/installed/params/:appInstallId`、`GET /api/v2/apps/installed/delete/check/:appInstallId` | `node/api/apps.go:appInstalledGet` | 同左 | 节点会话鉴权（上层中间件） | 安装记录、容器名称和参数 | `apps.json` 原子写入 | `node/api/apps_test.go:TestAppDerivedDetailsAndDeleteCheck` | `go test ./node/api -run AppDerived` | 本地 HTTP 已验证 | implemented | 容器资源删除仍需容器域执行 |
 | 应用版本更新查询 | `apps/workmesh-node/agent/app/api/v2/app.go` | `POST /api/v2/apps/installed/update/versions` | `node/api/apps.go:handleAppPost` | `POST /api/v2/apps/installed/update/versions` | 节点会话鉴权（上层中间件） | catalog 中匹配应用的版本记录 | 无额外写入 | `node/api/apps_test.go` | `go test ./node/api -run App` | 本地 HTTP 已验证 | implemented | 远程版本同步依赖 Gateway 配置 |
+
+## 文件、备份与日志增强批次（2026-08-31）
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 文件分片上传与断点合并 | `apps/workmesh-node/agent/app/api/v2/file.go:UploadChunkFiles` | `POST /api/v2/files/chunkupload` | `node/api/files_routes.go:handleChunkUpload` | multipart 分片、偏移校验、完成后原子 rename | 节点会话/HMAC（上层中间件） | 本地文件分片 | `WORKMESH_DATA_DIR/chunks` 临时分片，目标文件原子提交 | `node/api/files_routes_test.go:TestChunkUploadAndDownload` | `go test ./node/api -run Chunk` | 本地 HTTP 已验证 | implemented | 跨节点分片同步待接入 |
+| 文件分片下载 | `apps/workmesh-node/agent/app/api/v2/file.go:DownloadChunkFiles` | `POST /api/v2/files/chunkdownload` | `node/api/files_routes.go:handleChunkDownload` | Range/offset 流式读取 | 节点会话/HMAC | 本地文件 | 无状态 | `node/api/files_routes_test.go:TestChunkUploadAndDownload` | `go test ./node/api -run Chunk` | 本地 HTTP 已验证 | implemented | 下载审计日志待接入 |
+| 文件历史版本与备注 | `apps/workmesh-node/agent/app/service/file_history.go`、`file.go` | `/api/v2/files/history/*`、`/remarks`、`/remark` | `node/api/files.go`、`node/api/files_routes.go` | 保存前快照、查询、恢复、删除、备注读写 | 节点会话/HMAC | 文件内容与请求参数 | `WORKMESH_DATA_DIR/files.json` 原子写入，最多保留 200 条历史 | `node/api/files_routes_test.go:TestFileHistoryAndAdvancedOperations` | `go test ./node/api -run History` | 本地 HTTP 已验证 | implemented | 大文件历史快照按大小跳过 |
+| 压缩/解压原子写入 | `apps/workmesh-node/agent/app/api/v2/file.go` | `POST /api/v2/files/compress`、`decompress` | `node/api/files_routes.go:zipPath/unzipPath` | ZIP 创建、路径穿越和符号链接拒绝 | 节点会话/HMAC | 本地文件 | 同目录临时文件后原子 rename | `node/api/files_routes_test.go:TestZipAndUnzipPath` | `go test ./node/api -run Zip` | 本地 HTTP 已验证 | implemented | 长任务取消接口待接入任务调度器 |
+| 日志检索分页与按类型清理 | `apps/workmesh-node/agent/app/api/v2/logs.go`、`core/app/api/v2/logs.go` | `/api/v2/logs/*`、`/api/v2/core/logs/*` | `node/api/functional_domains.go:registerLogRoutes` | 关键字、类型、级别过滤及分页；清理支持 logType | 节点会话/HMAC | 运行时日志状态与受控日志文件 | `WORKMESH_DATA_DIR/domains.json` 原子写入 | `node/api/functional_domains_test.go`、`logs_runtime_test.go` | `go test ./node/api -run 'Log|Backup'` | 本地 HTTP 已验证 | implemented | 生产日志采集器需按部署启用 |
 # 计划任务与命令脚本补齐记录（2026-08-31）
 
 | 功能名称 | 来源模块 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 当前状态 | 剩余缺口 |

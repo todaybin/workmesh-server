@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T19:07:09.709Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T19:50:39.989Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -691,9 +691,9 @@
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/api/v2/process/:pid` | apps/workmesh-server/node/api/process.go | unknown | unknown | present | - |
-| implemented | GET | `/api/v2/process/ws` | apps/workmesh-server/node/api/process.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/process/listening` | apps/workmesh-server/node/api/process.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/process/stop` | apps/workmesh-server/node/api/process.go | unknown | memory | present | - |
+| implemented | GET | `/api/v2/process/ws` | apps/workmesh-server/node/api/process.go | required | memory | present | - |
+| implemented | POST | `/api/v2/process/listening` | apps/workmesh-server/node/api/process.go | required | memory | present | - |
+| implemented | POST | `/api/v2/process/stop` | apps/workmesh-server/node/api/process.go | required | memory | present | - |
 
 ## qps
 

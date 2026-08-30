@@ -123,6 +123,26 @@ func TestWebsiteAdvancedRoutes(t *testing.T) {
 	}
 }
 
+func TestWebsiteLBSAndResourceRoutes(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerWebsiteFunctionalRoutes(mux)
+	create := httptest.NewRequest(http.MethodPost, "/api/v2/websites", bytes.NewBufferString(`{"primaryDomain":"resource.example"}`))
+	create.Header.Set("Content-Type", "application/json")
+	created := httptest.NewRecorder()
+	mux.ServeHTTP(created, create)
+	if created.Code != http.StatusOK {
+		t.Fatalf("网站创建失败: %d %s", created.Code, created.Body.String())
+	}
+	for _, path := range []string{"/api/v2/websites/1/lbs", "/api/v2/websites/resource/1"} {
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s 返回 %d: %s", path, res.Code, res.Body.String())
+		}
+	}
+}
+
 func TestWebsiteAdvancedRouteValidation(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -213,5 +233,28 @@ func TestOpenRestyBuildRequiresRealBinary(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable || !bytes.Contains(rec.Body.Bytes(), []byte("OpenResty 构建前检查失败")) {
 		t.Fatalf("缺少 OpenResty 二进制时应明确返回不可用: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestXPackAliasesUseServeMuxMethodPatterns 验证 xpack 旧路径别名进入真实处理器。
+func TestXPackAliasesUseServeMuxMethodPatterns(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerWebsiteFunctionalRoutes(mux)
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v2/xpack/monitor/status"},
+		{http.MethodPost, "/api/v2/xpack/monitor/stat"},
+		{http.MethodGet, "/api/v2/xpack/waf/status"},
+		{http.MethodGet, "/api/v2/xpack/waf/standard-rules"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(`{}`))
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, req)
+		if res.Code == http.StatusNotFound {
+			t.Fatalf("alias %s %s returned 404", tc.method, tc.path)
+		}
 	}
 }

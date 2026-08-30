@@ -168,6 +168,47 @@ func registerDomainRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 			wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
 			return
 		}
+		if r.PathValue("second") == "lbs" {
+			id, err := parseID(r.PathValue("first"))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			if _, err := svc.Get(id); err != nil {
+				writeError(w, http.StatusNotFound, err)
+				return
+			}
+			cfg, err := svc.GetConfig(id, "lbs")
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			upstreams := cfg["upstreams"]
+			if upstreams == nil {
+				upstreams = []any{}
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": upstreams})
+			return
+		}
+		if r.PathValue("first") == "resource" {
+			id, err := parseID(r.PathValue("second"))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			website, err := svc.Get(id)
+			if err != nil {
+				writeError(w, http.StatusNotFound, err)
+				return
+			}
+			domains, _ := svc.ListDomains(id)
+			resources := []map[string]any{{"name": website.PrimaryDomain, "type": "website", "resourceID": website.ID, "detail": website}}
+			for _, domain := range domains {
+				resources = append(resources, map[string]any{"name": domain.Domain, "type": "domain", "resourceID": domain.ID, "detail": domain})
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": resources})
+			return
+		}
 		websiteFallbackHandler(w, r)
 	})
 	mux.HandleFunc("POST /api/v2/websites/domains", func(w http.ResponseWriter, r *http.Request) {
@@ -469,7 +510,8 @@ func websiteConfigWriteType(svc *service.WebsiteService, typ string, w http.Resp
 func registerXPackWebsiteAliases(mux *http.ServeMux, svc *service.WebsiteService) {
 	// 使用显式模式便于契约扫描器发现每一条隐藏路由，并保留方法级约束。
 	register := func(method, source, target string) {
-		mux.HandleFunc(method+source, proxyFunctionalPath(target, http.HandlerFunc(analyticsHandler)))
+		// ServeMux 模式必须使用“方法 + 空格 + 路径”，否则会被当作普通路径而永远无法匹配。
+		mux.HandleFunc(method+" "+source, proxyFunctionalPath(target, http.HandlerFunc(analyticsHandler)))
 	}
 	register("GET", "/api/v2/xpack/monitor/status", "/api/v2/status")
 	register("POST", "/api/v2/xpack/monitor/stat", "/api/v2/stat")
@@ -490,7 +532,7 @@ func registerXPackWebsiteAliases(mux *http.ServeMux, svc *service.WebsiteService
 	wafMux := http.NewServeMux()
 	registerWAFRoutes(wafMux, svc)
 	waf := func(method, source, target string) {
-		mux.HandleFunc(method+source, proxyFunctionalPath(target, wafMux))
+		mux.HandleFunc(method+" "+source, proxyFunctionalPath(target, wafMux))
 	}
 	waf("GET", "/api/v2/xpack/waf/status", "/api/v2/websites/waf/status")
 	waf("GET", "/api/v2/xpack/waf/standard-rules", "/api/v2/websites/waf/standard-rules")

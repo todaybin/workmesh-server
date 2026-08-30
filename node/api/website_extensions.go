@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -200,6 +201,45 @@ func registerWebsiteExtensionRoutes(mux *http.ServeMux) {
 			extensionError(w, http.StatusNotFound, errors.New("证书账户不存在"))
 		case len(parts) == 3 && parts[0] == "default" && parts[1] == "html":
 			extensionJSON(w, map[string]any{"type": parts[2], "content": "", "source": "local"})
+		case len(parts) == 2 && parts[1] == "lbs":
+			id, err := parseID(parts[0])
+			if err != nil {
+				extensionError(w, http.StatusBadRequest, err)
+				return
+			}
+			svc := service.NewWebsiteService("")
+			if _, err := svc.Get(id); err != nil {
+				extensionError(w, http.StatusNotFound, err)
+				return
+			}
+			cfg, err := svc.GetConfig(id, "lbs")
+			if err != nil {
+				extensionError(w, http.StatusInternalServerError, err)
+				return
+			}
+			upstreams := cfg["upstreams"]
+			if upstreams == nil {
+				upstreams = []any{}
+			}
+			extensionJSON(w, upstreams)
+		case len(parts) == 2 && parts[0] == "resource":
+			id, err := parseID(parts[1])
+			if err != nil {
+				extensionError(w, http.StatusBadRequest, err)
+				return
+			}
+			svc := service.NewWebsiteService("")
+			website, err := svc.Get(id)
+			if err != nil {
+				extensionError(w, http.StatusNotFound, err)
+				return
+			}
+			domains, _ := svc.ListDomains(id)
+			resources := []map[string]any{{"name": website.PrimaryDomain, "type": "website", "resourceID": website.ID, "detail": website}}
+			for _, domain := range domains {
+				resources = append(resources, map[string]any{"name": domain.Domain, "type": "domain", "resourceID": domain.ID, "detail": domain})
+			}
+			extensionJSON(w, resources)
 		default:
 			extensionError(w, http.StatusNotFound, errors.New("网站扩展接口不存在"))
 		}

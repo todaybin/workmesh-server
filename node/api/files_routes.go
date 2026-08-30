@@ -15,8 +15,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	osuser "os/user"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -312,6 +314,11 @@ func findFileShare(token string) (fileShare, bool) {
 
 func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v2/files/"), "/")
+	// 旧接口将读取类型编码在路径中（read/:type），统一映射到同一读取实现。
+	operationPath := path
+	if strings.HasPrefix(path, "read/") {
+		operationPath = "read"
+	}
 	// 分片上传使用 multipart/form-data，必须在 JSON 解码前单独处理。
 	if r.Method == http.MethodPost && path == "chunkupload" {
 		handleChunkUpload(w, r)
@@ -772,7 +779,40 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": clean, "mode": req.Mode}})
 	case "owner":
-		fileError(w, http.StatusNotImplemented, errors.New("当前平台未提供安全的 owner 修改器"))
+		clean, err := cleanFilePath(req.Path)
+		if err != nil || (req.User == "" && req.Group == "") {
+			if err == nil {
+				err = errors.New("user 或 group 不能为空")
+			}
+			fileError(w, http.StatusBadRequest, err)
+			return
+		}
+		if runtime.GOOS == "windows" {
+			fileError(w, http.StatusNotImplemented, errors.New("Windows 不支持修改文件 owner"))
+			return
+		}
+		uid, gid := -1, -1
+		if req.User != "" {
+			u, e := osuser.Lookup(req.User)
+			if e != nil {
+				fileError(w, http.StatusBadRequest, e)
+				return
+			}
+			uid, _ = strconv.Atoi(u.Uid)
+		}
+		if req.Group != "" {
+			g, e := osuser.LookupGroup(req.Group)
+			if e != nil {
+				fileError(w, http.StatusBadRequest, e)
+				return
+			}
+			gid, _ = strconv.Atoi(g.Gid)
+		}
+		if err := os.Chown(clean, uid, gid); err != nil {
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": clean, "user": req.User, "group": req.Group}})
 	case "preview", "content":
 		clean, err := cleanFilePath(req.Path)
 		if err != nil {
@@ -925,7 +965,57 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": found.Path, "restored": true}})
+	case "share/detail":
+		token := strings.TrimSpace(req.Token)
+		if token == "" {
+			token = strings.TrimSpace(req.Code)
+		}
+		share, ok := findFileShare(token)
+		if !ok {
+			fileError(w, http.StatusNotFound, errors.New("分享不存在或文件已删除"))
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": share})
+	case "mount":
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": listAlertDisks()})
+	case "user/group":
+		users := make([]map[string]string, 0, 32)
+		if raw, err := os.ReadFile("/etc/passwd"); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				fields := strings.Split(line, ":")
+				if len(fields) > 2 {
+					users = append(users, map[string]string{"name": fields[0], "uid": fields[2]})
+				}
+			}
+		}
+		groups := make([]map[string]string, 0, 32)
+		if raw, err := os.ReadFile("/etc/group"); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				fields := strings.Split(line, ":")
+				if len(fields) > 2 {
+					groups = append(groups, map[string]string{"name": fields[0], "gid": fields[2]})
+				}
+			}
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"users": users, "groups": groups}})
 	default:
+		if operationPath == "read" {
+			// 继续复用 read 分页逻辑，路径参数 type 仅用于客户端展示。
+			path = "read"
+			clean, err := cleanFilePath(req.Path)
+			if err != nil {
+				fileError(w, http.StatusBadRequest, err)
+				return
+			}
+			b, err := os.ReadFile(clean)
+			if err != nil {
+				fileError(w, http.StatusNotFound, err)
+				return
+			}
+			lines := strings.Split(strings.TrimRight(string(b), "\r\n"), "\n")
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": clean, "lines": lines, "totalLines": len(lines), "type": strings.TrimPrefix(operationPath, "read/")}})
+			return
+		}
 		fileError(w, http.StatusNotImplemented, fmt.Errorf("文件操作 %q 尚未实现", path))
 	}
 }
