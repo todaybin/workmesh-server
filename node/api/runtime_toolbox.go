@@ -336,13 +336,22 @@ func registerSSHRoutes(mux *http.ServeMux, s *runtimeStore) {
 }
 
 func registerToolboxRoutes(mux *http.ServeMux, s *runtimeStore) {
-	paths := []string{"/api/v2/toolbox/device/users", "/api/v2/toolbox/device/zone/options", "/api/v2/toolbox/fail2ban/base", "/api/v2/toolbox/fail2ban/load/conf", "/api/v2/toolbox/ftp/base"}
-	for _, p := range paths {
-		path := p
-		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, _ *http.Request) {
-			runtimeOK(w, toolboxGetData(s, path))
-		})
-	}
+	// 显式注册查询路由，便于契约扫描和文档准确发现每个功能。
+	mux.HandleFunc("GET /api/v2/toolbox/device/users", func(w http.ResponseWriter, _ *http.Request) {
+		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/device/users"))
+	})
+	mux.HandleFunc("GET /api/v2/toolbox/device/zone/options", func(w http.ResponseWriter, _ *http.Request) {
+		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/device/zone/options"))
+	})
+	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/base", func(w http.ResponseWriter, _ *http.Request) {
+		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/fail2ban/base"))
+	})
+	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/load/conf", func(w http.ResponseWriter, _ *http.Request) {
+		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/fail2ban/load/conf"))
+	})
+	mux.HandleFunc("GET /api/v2/toolbox/ftp/base", func(w http.ResponseWriter, _ *http.Request) {
+		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/ftp/base"))
+	})
 	for _, p := range []string{"/api/v2/toolbox/device/base", "/api/v2/toolbox/device/check/dns", "/api/v2/toolbox/device/conf", "/api/v2/toolbox/device/update/byconf", "/api/v2/toolbox/device/update/conf", "/api/v2/toolbox/device/update/host", "/api/v2/toolbox/device/update/passwd", "/api/v2/toolbox/device/update/swap", "/api/v2/toolbox/fail2ban/operate", "/api/v2/toolbox/fail2ban/operate/sshd", "/api/v2/toolbox/fail2ban/search", "/api/v2/toolbox/fail2ban/update", "/api/v2/toolbox/fail2ban/update/byconf", "/api/v2/toolbox/ftp", "/api/v2/toolbox/ftp/del", "/api/v2/toolbox/ftp/log/search", "/api/v2/toolbox/ftp/operate", "/api/v2/toolbox/ftp/search", "/api/v2/toolbox/ftp/sync", "/api/v2/toolbox/ftp/update", "/api/v2/toolbox/clam", "/api/v2/toolbox/clam/base", "/api/v2/toolbox/clam/del", "/api/v2/toolbox/clam/file/search", "/api/v2/toolbox/clam/file/update", "/api/v2/toolbox/clam/handle", "/api/v2/toolbox/clam/operate", "/api/v2/toolbox/clam/record/clean", "/api/v2/toolbox/clam/record/search", "/api/v2/toolbox/clam/search", "/api/v2/toolbox/clam/status/update", "/api/v2/toolbox/clam/update", "/api/v2/toolbox/clean", "/api/v2/toolbox/scan", "/api/v2/settings/terminal/ai/search", "/api/v2/settings/terminal/ai/update"} {
 		mux.HandleFunc("POST "+p, func(w http.ResponseWriter, r *http.Request) {
 			v, _ := runtimeBody(r)

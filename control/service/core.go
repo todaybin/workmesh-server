@@ -79,6 +79,19 @@ func NewCoreService() *CoreService {
 	return s
 }
 
+// ListUsers 返回脱敏后的本地用户列表，不包含密码和 API 密钥。
+func (s *CoreService) ListUsers() []User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]User, 0, len(s.users))
+	for _, user := range s.users {
+		user.Password = ""
+		user.API = APIConfig{}
+		result = append(result, user)
+	}
+	return result
+}
+
 func (s *CoreService) loadPasskeys() {
 	raw, err := os.ReadFile(s.passkeyPath)
 	if err != nil {

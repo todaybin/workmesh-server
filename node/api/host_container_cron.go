@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -19,12 +20,19 @@ import (
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
+var sharedCronjobs = service.NewCronjobService()
+
+// StartBackgroundTasks 启动节点级后台调度任务，调用方应在进程退出时取消 ctx。
+func StartBackgroundTasks(ctx context.Context) {
+	sharedCronjobs.Start(ctx)
+}
+
 // RegisterHostContainerCronRoutes 注册首批主机、容器和计划任务接口。
 // 未迁移的旧路径仍注册并返回明确的 501，便于前端和契约扫描发现缺口。
 func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	commands := service.CommandService{}
 	docker := service.NewDockerService()
-	cronjobs := service.NewCronjobService()
+	cronjobs := sharedCronjobs
 
 	mux.HandleFunc("POST /api/v2/system/command", func(w http.ResponseWriter, r *http.Request) {
 		if token := os.Getenv("WORKMESH_COMMAND_TOKEN"); token == "" || r.Header.Get("X-WorkMesh-Token") != token {
@@ -219,7 +227,12 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "spec is required"})
 			return
 		}
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": []string{time.Now().UTC().Add(time.Hour).Format(time.RFC3339)}})
+		next, ok := service.NextRun(in.Spec, time.Now().UTC())
+		if !ok {
+			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "无效的 cron 表达式"})
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": []string{next.Format(time.RFC3339)}})
 	})
 	mux.HandleFunc("POST /api/v2/cronjobs/stop", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -228,6 +241,10 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 		_ = decodeJSON(r, &in)
 		if in.ID == "" {
 			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "id is required"})
+			return
+		}
+		if err := cronjobs.Stop(in.ID); err != nil {
+			wmhttp.JSON(w, http.StatusNotFound, map[string]any{"code": "ERR", "message": err.Error()})
 			return
 		}
 		wmhttp.JSON(w, 200, map[string]any{"code": 200})

@@ -40,4 +40,6 @@ type Cronjob struct {
 	Type      string `json:"type,omitempty"`
 	CreatedAt string `json:"createdAt,omitempty"`
 	UpdatedAt string `json:"updatedAt,omitempty"`
+	LastRunAt string `json:"lastRunAt,omitempty"`
+	NextRunAt string `json:"nextRunAt,omitempty"`
 }

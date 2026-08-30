@@ -6,6 +6,8 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,7 +28,18 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if handled, err := runCLI(os.Args[1:], cfg.DataDir); handled {
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	logger := log.New(nil)
+	if logWriter, openErr := log.Open(log.Config{Path: filepath.Join(cfg.DataDir, "logs", "server.log")}); openErr == nil {
+		defer logWriter.Close()
+		logger = log.New(io.MultiWriter(os.Stderr, logWriter))
+	}
 	stateStore, err := store.Open(filepath.Join(cfg.DataDir, "state.json"))
 	if err != nil {
 		logger.Error("打开状态存储失败", "error", err)
@@ -42,6 +55,7 @@ func main() {
 	defer stop()
 	scheduler := schedule.New()
 	scheduler.Start(ctx)
+	nodeapi.StartBackgroundTasks(ctx)
 	defer scheduler.Stop()
 
 	mux, gatewayStore := httpMux(cfg)

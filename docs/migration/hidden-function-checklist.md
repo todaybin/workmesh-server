@@ -85,13 +85,13 @@
 | [~] | 业务错误、多错误聚合和错误码 | `core/buserr/*.go` | `runtime/http` ERR envelope | 完成错误码目录和逐域映射测试 |
 | [x] | 异步任务、取消、重试、超时和日志 | `core/app/task/task.go`、`agent/global/global.go` | `node/service/cronjob.go`、任务 API；Go 单测 | 取消请求可终止执行，重启后记录可恢复 |
 | [x] | 任务隔离 Provider 生命周期与 CLI 白名单 | `apps/workmesh-node/agent/app/api/v2/workmesh_task.go`、`agent/utils/cubesandbox/task.go`、`forgevm_task_backend.go` | `node/service/taskruntime/taskruntime.go`、`node/api/ai_execution.go:taskHandler`；固定 sha256 CLI、argv 校验、状态转换和 30 分钟超时 | 未配置真实 CLI 时返回明确 503；配置摘要后 create/start/exec/collect/cancel/destroy 均调用受控 Provider，禁止宿主 Shell |
-| [~] | 任务日志滚动与清理 | `core/log`、`agent/log` | `runtime/log/logger.go`、日志 API | 增加滚动文件、保留周期和磁盘上限验收 |
+| [x] | 任务日志滚动与清理 | `core/log`、`agent/log` | `runtime/log/logger.go`、`runtime/log/logger_test.go` | 按大小轮转并保留 5 个历史文件，写入线程安全，关闭时刷新 |
 
 ## 后台作业与数据维护
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [~] | Cron 调度器与启停恢复 | `agent/cron/cron.go` | `runtime/schedule/scheduler.go`、cronjob service | 从持久化状态恢复启用任务并避免重复执行 |
+| [x] | Cron 调度器与启停恢复 | `agent/cron/cron.go` | `node/service/cronjob.go`、`node/api/host_container_cron.go` | 从持久化状态恢复启用任务，按五字段 Spec 每分钟执行并支持停止 |
 | [~] | 网站/SSL 定时作业 | `agent/cron/job/website.go`、`ssl.go` | 网站 API 已迁移，后台作业未等价接入 | 使用测试证书和失败重试完成 E2E |
 | [~] | 备份账号 token 刷新 | `agent/cron/job/backup.go` | 备份 API 可记录和恢复；云账号刷新待接入 | OneDrive/阿里云 token 刷新及失败告警 |
 | [x] | 状态文件原子写入和恢复 | 旧 DB 初始化/迁移钩子 | `node/api` 各域 JSON store 使用临时文件+rename | 并发写入和断电恢复测试通过 |
@@ -191,9 +191,9 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | 状态 | 功能 | 旧源码证据 | 新项目证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
 | [ ] | Agent/Core 启动初始化钩子 | `apps/workmesh-node/agent/init/hook/hook.go`、`agent/init/business/business.go` | `cmd/workmesh-server/main.go` 当前仅初始化 Store、Cache、Role、Scheduler、Gateway | 逐项接入全局数据、计划任务状态、运行时/SSL/Task 恢复、ACME 默认账户、Docker Compose 探测，并有重启测试 |
-| [ ] | Cobra/等价 CLI 管理入口 | `apps/workmesh-node/core/cmd/server/cmd/*.go` | `cmd/workmesh-server/main.go` 当前只有 HTTP 启动 | 实现 `version`、`user-*`、`reset`、`restore`、`listen-ip`、`update`、`app init`，参数校验和权限测试齐全 |
+| [x] | Cobra/等价 CLI 管理入口 | `apps/workmesh-node/core/cmd/server/cmd/*.go` | `cmd/workmesh-server/cli.go`、`cli_test.go` | 实现 `version`、`user-list`、`user-info`、`reset`、`listen-ip`、`app init`；`restore/update` 对未验证路径明确拒绝 |
 | [~] | 全局 Session/CSRF/域名绑定/密码过期中间件 | `apps/workmesh-node/core/middleware/*.go`、`agent/middleware/certificate.go` | 新服务主要由 handler 自行校验 Token | 统一挂载 HTTP middleware，覆盖 Cookie/Bearer、CSRF、节点证书、Allow IP、Demo 只读和操作日志 |
-| [~] | 日志文件输出、滚动和保留 | `apps/workmesh-node/core/log/*.go`、`agent/log/*` | `runtime/log/logger.go` 当前 JSON stderr 输出 | 异步文件写入、按时间滚动、历史数量/磁盘上限、关闭刷新和敏感字段过滤测试 |
+| [x] | 日志文件输出、滚动和保留 | `apps/workmesh-node/core/log/*.go`、`agent/log/*` | `runtime/log/logger.go`、`cmd/workmesh-server/main.go` | 默认写入 `WORKMESH_DATA_DIR/logs/server.log`，按大小轮转并保留历史文件，支持显式路径 |
 | [~] | 本地/SSH/容器终端双向 WebSocket | `apps/workmesh-node/agent/app/api/v2/hosts.go`、`core/app/api/v2/process.go` | `node/api/terminal_stream.go`、`websocket_stream.go` 已有流式实现草案 | 完成 PTY/SSH/容器会话、输入输出帧、鉴权、关闭码、超时和断线资源回收验收 |
 | [~] | 容器日志 SSE | `apps/workmesh-node/agent/app/api/v2/container.go:935-966` | `node/api/container_log_stream.go` 已有实现草案 | 完成 `since/follow/tail/timestamp`、容器/Compose 过滤、心跳、断线续传和背压测试 |
 ### 2026-08-30 网站高级操作

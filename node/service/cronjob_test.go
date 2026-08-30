@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/todaybin/workmesh-server/node/model"
 )
@@ -21,5 +22,16 @@ func TestCronjobCreateListDelete(t *testing.T) {
 	}
 	if err := service.Delete(context.Background(), job.ID); err != nil {
 		t.Fatalf("删除计划任务失败: %v", err)
+	}
+}
+
+func TestNextRunCronExpression(t *testing.T) {
+	from := time.Date(2026, 8, 30, 10, 1, 0, 0, time.UTC)
+	next, ok := NextRun("*/5 * * * *", from)
+	if !ok || !next.Equal(time.Date(2026, 8, 30, 10, 5, 0, 0, time.UTC)) {
+		t.Fatalf("unexpected next run: %v %v", next, ok)
+	}
+	if _, ok := NextRun("invalid", from); ok {
+		t.Fatal("invalid expression should fail")
 	}
 }
