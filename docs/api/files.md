@@ -14,5 +14,9 @@
 - `POST /api/v2/files/rename`、`POST /api/v2/files/move`：重命名和移动。
 - `POST /api/v2/files/size`：递归计算目录大小。
 - `GET /api/v2/files/download?path=...`：下载文件并设置附件响应头。
+- `POST /api/v2/files/share/create`：为现有文件或目录创建随机 token 分享，记录持久化到 `WORKMESH_DATA_DIR/file-shares.json`。
+- `GET /api/v2/files/share/check?token=...`、`share/info`、`share/qrcode`：校验 token 和目标是否仍存在。
+- `GET /api/v2/files/share/download?token=...`：仅对有效 token 提供附件下载。
+- `POST /api/v2/files/share/search`、`share/del`：查询或撤销本地分享记录。
 
 压缩、分片上传、回收站、分享和远程 wget 等长耗时能力继续沿用兼容路由，后续迁移时应异步化并增加任务状态查询。

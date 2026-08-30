@@ -276,16 +276,16 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 		handleDashboardQuickOption(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/databases/db/:name", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		databaseRoute(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/databases/db/item/:type", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		databaseRoute(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/databases/db/list/:type", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		databaseRoute(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/databases/redis/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		databaseRoute(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/deployment/status", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
@@ -294,19 +294,19 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 		handleFilesDownload(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/files/recycle/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		fileAdvancedHandler(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/files/share/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		fileAdvancedHandler(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/files/share/download", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		fileAdvancedHandler(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/files/share/info", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		fileAdvancedHandler(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/files/share/qrcode", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		fileAdvancedHandler(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/files/wget/process", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
@@ -1339,7 +1339,7 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 		handleDatabaseSearch(w, r)
 	})
 	mux.HandleFunc("POST /api/v2/databases/db/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		handleDatabaseUpdate(w, r)
 	})
 	mux.HandleFunc("POST /api/v2/databases/del", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})

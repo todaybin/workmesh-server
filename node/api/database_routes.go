@@ -20,6 +20,7 @@ func registerDatabaseRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/databases/db/check", handleDatabaseCheck)
 	mux.HandleFunc("POST /api/v2/databases/db/del", handleDatabaseDelete)
 	mux.HandleFunc("POST /api/v2/databases/db/search", handleDatabaseSearch)
+	mux.HandleFunc("POST /api/v2/databases/db/update", handleDatabaseUpdate)
 	mux.HandleFunc("/api/v2/databases/", databaseRoute)
 }
 
@@ -35,7 +36,15 @@ func isDatabaseRoute(pattern string) bool {
 func databaseRoute(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v2/databases/"), "/")
 	if r.Method == http.MethodGet {
-		items := databaseService.Search(r.Context(), "", r.URL.Query().Get("name"))
+		typ, name := "", r.URL.Query().Get("name")
+		segments := strings.Split(path, "/")
+		if len(segments) == 2 && segments[0] == "db" {
+			name = segments[1]
+		}
+		if len(segments) == 3 && segments[0] == "db" && segments[1] == "list" {
+			typ = segments[2]
+		}
+		items := databaseService.Search(r.Context(), typ, name)
 		if strings.HasSuffix(path, "/check") {
 			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"available": true}})
 			return

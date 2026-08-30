@@ -20,6 +20,7 @@
 | 计划任务 | `/api/v2/cronjobs/*` | 任务持久化、启停、单次执行、执行记录、清理、导入导出 | `go test ./node/service ./node/api` |
 | Gateway 客户端 | `/api/v2/workmesh/gateway/*` | 登录、注册、心跳、解绑、授权刷新、Ed25519 签名 | Gateway 契约测试 |
 | 节点链路 | handshake/heartbeat/sync/fencing | HMAC、时间戳、nonce、防重放和角色 fencing | `go test ./runtime/link ./control/api` |
+| 文件/数据库首批扩展 | `/api/v2/files/share/*`、`/api/v2/databases/db/update` | 分享 token 与数据库登记持久化、输入校验、分页和更新 | `go test ./node/api ./node/service` |
 
 ## 进行中
 
@@ -47,4 +48,3 @@
 ```powershell
 node scripts/with-dev-env.mjs -- node test/contract/implementation-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --out .tmp/implementation-status.json
 ```
-

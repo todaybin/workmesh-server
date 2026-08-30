@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
@@ -48,13 +50,85 @@ type fileAdvancedRequest struct {
 	Token string `json:"token"`
 }
 
+type fileShare struct {
+	Token     string    `json:"token"`
+	Path      string    `json:"path"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+var fileShareState struct {
+	sync.Mutex
+	loaded bool
+	items  map[string]fileShare
+}
+
+func fileShareFile() string {
+	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
+	if dir == "" {
+		dir = ".workmesh-data"
+	}
+	return filepath.Join(dir, "file-shares.json")
+}
+
+func loadFileSharesLocked() {
+	if fileShareState.loaded {
+		return
+	}
+	fileShareState.loaded = true
+	fileShareState.items = make(map[string]fileShare)
+	b, err := os.ReadFile(fileShareFile())
+	if err == nil {
+		_ = json.Unmarshal(b, &fileShareState.items)
+	}
+}
+
+func saveFileSharesLocked() error {
+	if err := os.MkdirAll(filepath.Dir(fileShareFile()), 0o750); err != nil {
+		return err
+	}
+	b, err := json.Marshal(fileShareState.items)
+	if err != nil {
+		return err
+	}
+	tmp := fileShareFile() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, fileShareFile())
+}
+
+func findFileShare(token string) (fileShare, bool) {
+	fileShareState.Lock()
+	defer fileShareState.Unlock()
+	loadFileSharesLocked()
+	item, ok := fileShareState.items[strings.TrimSpace(token)]
+	if !ok {
+		return fileShare{}, false
+	}
+	if _, err := os.Stat(item.Path); err != nil {
+		return item, false
+	}
+	return item, true
+}
+
 func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v2/files/"), "/")
 	if r.Method == http.MethodGet {
 		switch path {
 		case "recycle/status":
 			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"enabled": true, "items": 0}})
-		case "share/check", "share/info", "share/qrcode", "share/download", "wget/process", "wget/process/keys":
+		case "share/check", "share/info", "share/qrcode":
+			share, ok := findFileShare(r.URL.Query().Get("token"))
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": share.Path, "exists": ok, "token": share.Token, "createdAt": share.CreatedAt}})
+		case "share/download":
+			share, ok := findFileShare(r.URL.Query().Get("token"))
+			if !ok {
+				fileError(w, http.StatusNotFound, errors.New("分享不存在或文件已删除"))
+				return
+			}
+			w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(share.Path)+"\"")
+			http.ServeFile(w, r, share.Path)
+		case "wget/process", "wget/process/keys":
 			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": r.URL.Query().Get("path"), "exists": false, "items": []any{}}})
 		default:
 			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": path, "items": []any{}}})
@@ -82,12 +156,66 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": req.Dst}})
 	case "share/create":
+		clean, err := cleanFilePath(req.Path)
+		if err != nil {
+			fileError(w, http.StatusBadRequest, err)
+			return
+		}
+		if _, err := os.Stat(clean); err != nil {
+			fileError(w, http.StatusNotFound, err)
+			return
+		}
 		var raw [12]byte
-		_, _ = rand.Read(raw[:])
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"token": hex.EncodeToString(raw[:]), "path": req.Path}})
-	case "recycle/search", "favorite/search", "share/search", "upload/search":
+		if _, err := rand.Read(raw[:]); err != nil {
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		share := fileShare{Token: hex.EncodeToString(raw[:]), Path: clean, CreatedAt: time.Now().UTC()}
+		fileShareState.Lock()
+		loadFileSharesLocked()
+		fileShareState.items[share.Token] = share
+		err = saveFileSharesLocked()
+		fileShareState.Unlock()
+		if err != nil {
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": share})
+	case "share/del":
+		token := strings.TrimSpace(req.Token)
+		if token == "" {
+			fileError(w, http.StatusBadRequest, errors.New("分享 token 不能为空"))
+			return
+		}
+		fileShareState.Lock()
+		loadFileSharesLocked()
+		if _, ok := fileShareState.items[token]; !ok {
+			fileShareState.Unlock()
+			fileError(w, http.StatusNotFound, errors.New("分享不存在"))
+			return
+		}
+		delete(fileShareState.items, token)
+		err := saveFileSharesLocked()
+		fileShareState.Unlock()
+		if err != nil {
+			fileError(w, http.StatusInternalServerError, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"deleted": true, "token": token}})
+	case "share/search":
+		fileShareState.Lock()
+		loadFileSharesLocked()
+		items := make([]fileShare, 0, len(fileShareState.items))
+		for _, item := range fileShareState.items {
+			if _, err := os.Stat(item.Path); err == nil {
+				items = append(items, item)
+			}
+		}
+		fileShareState.Unlock()
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
+	case "recycle/search", "favorite/search", "upload/search":
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": []any{}, "total": 0}})
-	case "recycle/clear", "recycle/reduce", "share/del", "wget/stop", "compress/stop", "decompress/stop", "chunkupload/stop", "move/stop":
+	case "recycle/clear", "recycle/reduce", "wget/stop", "compress/stop", "decompress/stop", "chunkupload/stop", "move/stop":
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"stopped": true}})
 	default:
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"accepted": true, "operation": path}})
