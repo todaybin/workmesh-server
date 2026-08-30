@@ -8,6 +8,12 @@
 | [x] | 脚本库运行入口 | `apps/workmesh-node/core/app/api/v2/script_library.go:RunScript` | `node/api/core_resources.go:handleScriptRun`，仅接受已登记 `script_id` 且有令牌 | 未配置令牌或脚本时明确错误，禁止任意命令 |
 | [x] | 进程 PID 详情采集 | `apps/workmesh-node/agent/app/service/process.go` | `node/api/process.go:readProcessDetails`，读取 procfs 内存和用户 | PID 校验、资源不存在 404、平台降级 |
 
+## 2026-08-30 命令执行入口审计
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | 命令模板和脚本库受控执行 | `apps/workmesh-node/core/app/api/v2/script_library.go`、`agent/app/service/command.go` | `node/api/core_resources.go`、`node/service/taskruntime`；脚本 ID 白名单、令牌校验、超时和输出上限 | 禁止任意命令，外部进程失败可观测，长任务可查询 |
+
 ## 2026-08-30 日志后台能力
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
@@ -65,6 +71,13 @@
 | [x] | 敏感字段脱敏与请求体上限 | 旧 controller/service 约束 | AI、Gateway、兼容入口均限制 2 MiB 并脱敏 | 安全扫描不得出现明文 secret |
 
 ## 国际化、错误和任务基础设施
+
+### 2026-08-30 双服务语言资源完整性
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | Core 与 Agent 语言键集合合并 | `apps/workmesh-node/core/i18n/lang/*.yaml`、`apps/workmesh-node/agent/i18n/lang/*.yaml` | `i18n/lang/*.yaml` 每种语言 1037 个键；`i18n/i18n.go` 启动一次解析并缓存 | 12 种语言键集合一致，模板占位符一致，未知语言回退中文 |
+| [x] | 前端语言选择入口 | `apps/workmesh-node/frontend/src/lang`、登录/设置/分享入口 | `web/src/lang`、`App.vue`、登录页两个菜单、设置页、分享页 | 12 种语言模块键结构一致且可从每个入口选择 |
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
@@ -149,6 +162,40 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 ```
 
 5. 发现旧源码中新增 `init`、`cron/job`、`middleware`、`i18n`、`log`、`ws`、`sse` 或命令入口时，先补充本清单，再实现代码。
+
+## 2026-08-30 实现扫描器可信度审计
+
+扫描器已修正为：忽略未被主路由调用的 `registerUnmigratedRoutes`，过滤函数中的路径常量不再作为实现证据；只有直接 `HandleFunc`、明确注册辅助函数或实际注册循环才计入。当前报告（基于 `test/contract/routes.json` 共 871 条）为 `implemented 826`、`partial 2`、`pending 43`。该报告不把兼容占位当作完成，重新生成命令为：
+
+```powershell
+node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/implementation-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json --out .tmp/implementation-status.json --markdown apps/workmesh-server/docs/migration/function-checklist-generated.md
+```
+
+| 状态 | 路由 | 当前证据 | 剩余缺口 |
+| --- | --- | --- | --- |
+| partial | `GET /api/v2/apps/checkupdate` | `node/api/apps.go` 返回固定 `canUpdate=false` | 接入应用目录同步状态、版本比较和异步更新任务 |
+| partial | `GET /api/v2/containers/search/log` | `node/api/containers.go` 已有入口；旧 SSE 语义需以 `Accept: text/event-stream` 持续输出 | 容器日志跟随、since/tail/timestamp、断开释放和背压测试 |
+
+### 仍为 pending 的路由
+
+以下路由目前只能由迁移占位或未接入的旧契约承接，禁止在发布说明中描述为“已迁移”：
+
+| 功能域 | 路由 |
+| --- | --- |
+| toolbox | `GET /api/v2/toolbox/device/users`、`GET /api/v2/toolbox/device/zone/options`、`GET /api/v2/toolbox/fail2ban/base`、`GET /api/v2/toolbox/fail2ban/load/conf`、`GET /api/v2/toolbox/ftp/base` |
+| runtimes | `POST /api/v2/runtimes/node/modules`、`POST /api/v2/runtimes/node/modules/operate`、`POST /api/v2/runtimes/node/package` |
+| websites | `GET /api/v2/websites/proxy/config/:id`、`GET /api/v2/websites/realip/config/:id`、`POST /api/v2/websites/cors/update`、`POST /api/v2/websites/default/html/update`、`POST /api/v2/websites/default/server`、`POST /api/v2/websites/dir`、`POST /api/v2/websites/dir/permission`、`POST /api/v2/websites/dir/update`、`POST /api/v2/websites/dns/update`、`POST /api/v2/websites/lbs/create`、`POST /api/v2/websites/lbs/file`、`POST /api/v2/websites/lbs/update`、`POST /api/v2/websites/leech`、`POST /api/v2/websites/leech/update`、`POST /api/v2/websites/monitor/config/global`、`POST /api/v2/websites/monitor/config/site`、`POST /api/v2/websites/monitor/config/site/update`、`POST /api/v2/websites/monitor/qps`、`POST /api/v2/websites/monitor/rank`、`POST /api/v2/websites/monitor/stat`、`POST /api/v2/websites/monitor/trend`、`POST /api/v2/websites/monitor/visitors`、`POST /api/v2/websites/monitor/visitors/loc`、`POST /api/v2/websites/monitor/websites`、`POST /api/v2/websites/proxy/clear`、`POST /api/v2/websites/proxy/config`、`POST /api/v2/websites/realip/config`、`POST /api/v2/websites/redirect`、`POST /api/v2/websites/redirect/file`、`POST /api/v2/websites/redirect/update`、`POST /api/v2/websites/rewrite`、`POST /api/v2/websites/rewrite/custom`、`POST /api/v2/websites/rewrite/update`、`POST /api/v2/websites/stream/update`、`POST /api/v2/websites/waf/test` |
+
+## 2026-08-30 非路由隐藏功能补充核对
+
+| 状态 | 功能 | 旧源码证据 | 新项目证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [ ] | Agent/Core 启动初始化钩子 | `apps/workmesh-node/agent/init/hook/hook.go`、`agent/init/business/business.go` | `cmd/workmesh-server/main.go` 当前仅初始化 Store、Cache、Role、Scheduler、Gateway | 逐项接入全局数据、计划任务状态、运行时/SSL/Task 恢复、ACME 默认账户、Docker Compose 探测，并有重启测试 |
+| [ ] | Cobra/等价 CLI 管理入口 | `apps/workmesh-node/core/cmd/server/cmd/*.go` | `cmd/workmesh-server/main.go` 当前只有 HTTP 启动 | 实现 `version`、`user-*`、`reset`、`restore`、`listen-ip`、`update`、`app init`，参数校验和权限测试齐全 |
+| [~] | 全局 Session/CSRF/域名绑定/密码过期中间件 | `apps/workmesh-node/core/middleware/*.go`、`agent/middleware/certificate.go` | 新服务主要由 handler 自行校验 Token | 统一挂载 HTTP middleware，覆盖 Cookie/Bearer、CSRF、节点证书、Allow IP、Demo 只读和操作日志 |
+| [~] | 日志文件输出、滚动和保留 | `apps/workmesh-node/core/log/*.go`、`agent/log/*` | `runtime/log/logger.go` 当前 JSON stderr 输出 | 异步文件写入、按时间滚动、历史数量/磁盘上限、关闭刷新和敏感字段过滤测试 |
+| [~] | 本地/SSH/容器终端双向 WebSocket | `apps/workmesh-node/agent/app/api/v2/hosts.go`、`core/app/api/v2/process.go` | `node/api/terminal_stream.go`、`websocket_stream.go` 已有流式实现草案 | 完成 PTY/SSH/容器会话、输入输出帧、鉴权、关闭码、超时和断线资源回收验收 |
+| [~] | 容器日志 SSE | `apps/workmesh-node/agent/app/api/v2/container.go:935-966` | `node/api/container_log_stream.go` 已有实现草案 | 完成 `since/follow/tail/timestamp`、容器/Compose 过滤、心跳、断线续传和背压测试 |
 ### 2026-08-30 网站高级操作
 
 - [x] 站点运行状态切换和可用性检查：`POST /api/v2/websites/operate`、`POST /api/v2/websites/check`，状态写入 `websites.json` 并拒绝未知操作。

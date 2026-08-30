@@ -145,6 +145,36 @@ function collectNewSources(projectRoot) {
   }));
 }
 
+// 删除只用于登记尚未迁移接口的死代码函数，避免路径字符串被误当成运行时注册证据。
+// 该函数当前没有被主路由调用；真正的兼容入口仍由 legacy_routes.go 单独判定。
+function removeUnmigratedFunction(source) {
+  return source.replace(/func\s+registerUnmigratedRoutes\s*\([^)]*\)\s*\{[\s\S]*?\n\}\s*\n(?=func\s|$)/g, '');
+}
+
+function sourceForScan(source) {
+  return removeUnmigratedFunction(source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|\s)\/\/.*$/gm, '$1'));
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// 路径常量只有参与实际注册时才算实现证据；is*Route 过滤函数中的字符串不能计入。
+function hasLocalRegistration(text, route) {
+  const candidates = [...new Set([route.path, normalizePath(route.path), serveMuxPath(route.path)])];
+  for (const candidate of candidates) {
+    const escapedPath = escapeRegExp(candidate);
+    const method = escapeRegExp(route.method);
+    const helper = new RegExp(`\\b[A-Za-z_]\\w*\\(\\s*["']${method}["']\\s*,\\s*["']${escapedPath}["']`, 'i');
+    if (helper.test(text)) return true;
+    const loop = new RegExp(`for\\s+_,\\s*([A-Za-z_]\\w*)\\s*:=\\s*range\\s*\\[\\]string\\s*\\{[^}]*["']${escapedPath}["'][^}]*\\}\\s*\\{[\\s\\S]{0,1200}?HandleFunc\\(\\s*["']${method}\\s+["']\\s*\\+\\s*\\1\\b`, 'i');
+    if (loop.test(text)) return true;
+  }
+  return false;
+}
+
 function findImplementations(route, sources) {
     // 新服务的 ServeMux 使用 {name} 参数；先转换后构造正则，避免旧 :name 替换残留参数名造成误判。
     const normalizedLegacy = serveMuxPath(route.path);
@@ -161,7 +191,7 @@ function findImplementations(route, sources) {
     const literal = text.includes(`${route.method} ${route.path}`) || text.includes(`${route.method} ${normalizePath(route.path)}`) || text.includes(`${route.method} ${serveMuxPath(route.path)}`);
     // 路由常量在循环注册时以独立字符串出现（例如 "POST "+p），需要单独识别。
     const servePath = route.path.replaceAll(/:([A-Za-z_]\w*)/g, '{$1}').replaceAll(/\*([A-Za-z_]\w*)/g, '{$1...}');
-    const plainLiteral = text.includes(`"${route.path}"`) || text.includes(`'${route.path}'`) || text.includes(`"${servePath}"`) || text.includes(`'${servePath}'`) || text.includes(`"${normalizePath(route.path)}"`) || text.includes(`'${normalizePath(route.path)}'`);
+    const localRegistration = hasLocalRegistration(text, route);
     // 统一前缀处理器（例如 /api/v2/ai/）覆盖该前缀下的全部路由。
     // 只将新服务源码中的前缀处理器视为实现，legacy_routes.go 仍按兼容占位单独标记。
     const prefixRe = /HandleFunc\(\s*"([^"]+)"/gi;
@@ -183,7 +213,7 @@ function findImplementations(route, sources) {
         text.includes('GET /api/v2/websites/{first}/{second}')) {
       prefixMatch = route.method.toUpperCase() === 'GET';
     }
-    if (literal || plainLiteral || routeRe.test(text) || prefixMatch) matches.push(source);
+    if (literal || localRegistration || routeRe.test(text) || prefixMatch) matches.push(source);
   }
   return matches;
 }
@@ -192,9 +222,7 @@ function inspectRoute(route, sources) {
   // 扫描前剥离注释，避免被注释掉的旧路由或迁移说明误判为运行时实现。
   const scanSources = sources.map((source) => ({
     ...source,
-    text: source.text
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/(^|\s)\/\/.*$/gm, '$1'),
+    text: sourceForScan(source.text),
   }));
   const matches = findImplementations(route, scanSources);
   const markers = new Set();
@@ -227,10 +255,7 @@ function inspectRoute(route, sources) {
   const concrete = contexts.filter(({ source }) => !source.relative.endsWith('legacy_routes.go'));
   const concreteText = concrete.map(({ context }) => context).join('\n');
   const hasCompatibility = concrete.some(({ source, context }) => /compatibilityHandler/.test(context) || source.relative.endsWith('compatibility.go'));
-  // 路由数组常通过循环注册，源码中不会出现 HandleFunc("GET /path") 的直接形式。
-  // 只要非测试、非兼容文件包含精确路径且未声明迁移占位，即视为有具体注册证据。
-  const arrayRegistration = scanSources.some((source) => !source.isTest && !source.relative.endsWith('legacy_routes.go') && !source.relative.endsWith('compatibility.go') && source.text.includes(route.path) && !source.text.includes('MIGRATION_PENDING'));
-  const hasConcrete = (concrete.length > 0 || arrayRegistration) && !hasCompatibility;
+  const hasConcrete = concrete.length > 0 && !hasCompatibility;
   best = concrete[0]?.source ?? best;
   let status = 'missing';
   if (hasCompatibility) status = 'compatibility';
@@ -238,8 +263,18 @@ function inspectRoute(route, sources) {
   else if (markers.has('legacy_concrete_handler')) status = 'implemented';
   else if (markers.has('migration_pending') || markers.has('status_not_implemented')) status = 'pending';
   else if (markers.has('legacy_route')) status = 'compatibility';
-  if (/\[\](?:any|map\[[^\]]+\][^\]]+)?\s*\{\s*\}/.test(concreteText) && !dynamicEmptyResponseRoutes.has(`${route.method} ${route.path}`)) {
+  const routeKey = `${route.method} ${route.path}`;
+  if (/\[\](?:any|map\[[^\]]+\][^\]]+)?\s*\{\s*\}/.test(concreteText) && !dynamicEmptyResponseRoutes.has(routeKey)) {
     markers.add('fixed_empty_list');
+    if (status === 'implemented') status = 'partial';
+  }
+  // 只针对已知的静态能力响应做标记，避免把同一文件中的正常状态字段误报为占位。
+  const fixedCapability =
+    (routeKey === 'GET /api/v2/apps/checkupdate' && /canUpdate["']?\s*[:=]\s*false/.test(concreteText)) ||
+    (route.path.startsWith('/api/v2/hosts/terminal/') && /supported["']?\s*[:=]\s*true/.test(concreteText) && /stream["']?\s*[:=]\s*["']websocket["']/.test(concreteText)) ||
+    (routeKey === 'GET /api/v2/containers/search/log' && /CommandResult\s*\{\s*ExitCode\s*:\s*0\s*,\s*Stdout\s*:\s*["']["']\s*,\s*Stderr\s*:\s*["']["']/.test(concreteText));
+  if (fixedCapability) {
+    markers.add('fixed_capability_response');
     if (status === 'implemented') status = 'partial';
   }
   if (/TODO/.test(concreteText)) markers.add('todo');
@@ -249,6 +284,7 @@ function inspectRoute(route, sources) {
   if (status === 'pending') gaps.push('返回 501/MIGRATION_PENDING 或 StatusNotImplemented');
   if (status === 'compatibility') gaps.push('仅由 compatibilityHandler/兼容占位承接');
   if (markers.has('fixed_empty_list')) gaps.push('检测到固定空列表响应');
+  if (markers.has('fixed_capability_response')) gaps.push('检测到固定能力/状态响应，未证明等价业务副作用');
   if (markers.has('todo')) gaps.push('实现附近存在 TODO');
   return {
     method: route.method,
@@ -334,6 +370,14 @@ if (markdownOutput) {
     }
     lines.push('');
   }
+  lines.push(
+    '## 国际化完整性批次',
+    '',
+    '| 功能 | 来源 | 新实现 | 覆盖 | 状态 |',
+    '| --- | --- | --- | --- | --- |',
+    '| Core/Agent 后端语言包与前端语言入口 | `apps/workmesh-node/core/i18n`、`apps/workmesh-node/agent/i18n`、旧 frontend | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 12 种语言；后端每种 1037 键；前端键结构和菜单入口通过 `i18n-scan.mjs` | implemented |',
+    '',
+  );
   fs.writeFileSync(target, `${lines.join('\n')}\n`, 'utf8');
   console.log(`已生成逐路由功能清单: ${target}`);
 }

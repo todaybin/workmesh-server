@@ -16,7 +16,7 @@ for (let i = 2; i < process.argv.length; i += 1) {
 const legacy = path.resolve(args.get('--legacy') || 'apps/workmesh-node');
 const project = path.resolve(args.get('--project') || 'apps/workmesh-server');
 const out = args.get('--out') ? path.resolve(args.get('--out')) : null;
-const categories = ['init', 'middleware', 'i18n', 'log', 'cron'];
+const categories = ['init', 'middleware', 'i18n', 'log', 'cron', 'ws', 'sse', 'command', 'background'];
 
 function filesUnder(root) {
   if (!fs.existsSync(root)) return [];
@@ -37,6 +37,10 @@ const sectionHeadings = {
   i18n: '## 国际化、错误和任务基础设施',
   log: '## 国际化、错误和任务基础设施',
   cron: '## 后台作业与数据维护',
+  ws: '## 协议与执行通道',
+  sse: '## 协议与执行通道',
+  command: '## 2026-08-30 核心认证与执行入口',
+  background: '## 后台作业与数据维护',
 };
 const report = {
   schema: 1,
@@ -50,8 +54,27 @@ for (const category of categories) {
   const files = [];
   for (const area of ['core', 'agent']) {
     const root = path.join(legacy, area, category);
-    for (const file of filesUnder(root)) {
-      files.push(path.relative(legacy, file).replaceAll('\\', '/'));
+    if (fs.existsSync(root)) {
+      for (const file of filesUnder(root)) {
+        files.push(path.relative(legacy, file).replaceAll('\\', '/'));
+      }
+    }
+  }
+  // ws/sse/命令和后台作业并不总有独立目录，按源码特征补充扫描。
+  if (['ws', 'sse', 'command', 'background'].includes(category)) {
+    for (const area of ['core', 'agent']) {
+      const root = path.join(legacy, area);
+      for (const file of filesUnder(root)) {
+        const relative = path.relative(legacy, file).replaceAll('\\', '/');
+        const source = fs.readFileSync(file, 'utf8');
+        const matched = {
+          ws: /websocket|gorilla\/websocket|Upgrader|WSHub/i.test(source) || /(^|\/)(ws|websocket)(\/|\.)/i.test(relative),
+          sse: /text\/event-stream|EventSource|Server-Sent Events|SSE/i.test(source) || /(^|\/)(sse|event)(\/|\.)/i.test(relative),
+          command: /exec\.Command(?:Context)?|RunCommand|命令执行|command runner/i.test(source) || relative.startsWith(`${area}/cmd/`),
+          background: /time\.NewTicker|time\.Tick|go\s+func\s*\(|cron|scheduler|后台任务/i.test(source) || /(^|\/)(cron|job|jobs|task|scheduler)(\/|\.)/i.test(relative),
+        }[category];
+        if (matched) files.push(relative);
+      }
     }
   }
   files.sort();
