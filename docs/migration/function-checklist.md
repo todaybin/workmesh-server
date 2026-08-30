@@ -1,5 +1,11 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
+## 2026-08-31 容器日志与下载进度闭环
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 容器日志实时跟随与下载 | `apps/workmesh-node/agent/app/api/v2/container.go:ContainerStreamLogs`、`service/container.go:DownloadContainerLogs` | `GET /api/v2/containers/search/log`、`POST /api/v2/containers/download/log` | `node/api/container_log_stream.go`、`node/api/containers.go` | GET SSE `/api/v2/containers/search/log`；POST `/api/v2/containers/download/log` | 流令牌或本地会话；节点 API 鉴权 | Docker CLI 日志输出，Compose 支持多文件 | 流接口无状态；下载响应临时内存受限 | `node/api/container_log_stream_test.go`、`node/api/stream_protocol_test.go` | `go test -count=1 ./node/api -run ContainerLog` | 待 Docker 节点联调 | implemented | 需生产 Docker/Compose 实例验证日志格式 |
+| wget 下载实时进度与停止 | `apps/workmesh-node/agent/app/api/v2/file.go:WgetProcess/StopWget` | `GET /api/v2/files/wget/process`、`GET .../keys`、`POST /api/v2/files/wget/stop` | `node/api/files_routes.go`、`node/api/wget_progress_stream.go` | WebSocket 进度、HTTP keys、POST stop（支持 `key`） | 节点会话；WebSocket 流令牌或会话 | HTTP(S) 响应流实时累计字节 | 有界进程内状态，目标文件临时写入后原子 rename | `node/api/wget_progress_test.go`、`node/api/files_routes_test.go` | `go test -count=1 ./node/api -run Wget` | 待远程大文件和断开联调 | implemented | 服务重启后进行中的任务不恢复 |
+
 ## 2026-08-31 路由别名与文件高级操作补齐
 
 | 功能名称 | 旧源码位置 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 当前状态 | 剩余缺口 |

@@ -57,6 +57,7 @@ type fileAdvancedRequest struct {
 	URL               string            `json:"url"`
 	Name              string            `json:"name"`
 	Token             string            `json:"token"`
+	Key               string            `json:"key"`
 	ID                string            `json:"id"`
 	Code              string            `json:"code"`
 	Query             string            `json:"query"`
@@ -137,6 +138,24 @@ func initFileWgetState() {
 		fileWgetState.cancel = make(map[string]context.CancelFunc)
 	}
 	fileWgetState.Unlock()
+}
+
+// wgetProgressWriter 在写入目标文件的同时累计字节数，供进度接口实时读取。
+type wgetProgressWriter struct {
+	dst io.Writer
+	key string
+}
+
+func (w *wgetProgressWriter) Write(p []byte) (int, error) {
+	n, err := w.dst.Write(p)
+	if n > 0 {
+		fileWgetState.Lock()
+		if item := fileWgetState.items[w.key]; item != nil {
+			item.Downloaded += int64(n)
+		}
+		fileWgetState.Unlock()
+	}
+	return n, err
 }
 
 type fileShare struct {
@@ -529,6 +548,9 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimSpace(req.ID)
 		if key == "" {
 			key = strings.TrimSpace(req.Token)
+		}
+		if key == "" {
+			key = strings.TrimSpace(req.Key)
 		}
 		if key == "" {
 			fileError(w, http.StatusBadRequest, errors.New("下载任务 key 不能为空"))
@@ -1320,11 +1342,12 @@ func handleFileWget(w http.ResponseWriter, r *http.Request, req fileAdvancedRequ
 					var out *os.File
 					out, reqErr = os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 					if reqErr == nil {
-						var n int64
-						n, reqErr = io.Copy(out, resp.Body)
 						fileWgetState.Lock()
-						proc.Total, proc.Downloaded = resp.ContentLength, n
+						proc.Total, proc.Downloaded = resp.ContentLength, 0
 						fileWgetState.Unlock()
+						// 每次写入后更新已下载字节，WebSocket 进度查询可实时反映长任务状态。
+						counter := &wgetProgressWriter{dst: out, key: key}
+						_, reqErr = io.Copy(counter, resp.Body)
 						_ = out.Close()
 						if reqErr == nil {
 							reqErr = os.Rename(tmp, proc.Path)

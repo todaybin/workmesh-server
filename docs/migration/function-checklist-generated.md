@@ -279,7 +279,7 @@
 | implemented | GET | `/api/v2/containers/list/stats` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/network` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/repo` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
-| implemented | GET | `/api/v2/containers/search/log` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
+| implemented | GET | `/api/v2/containers/search/log` | apps/workmesh-server/node/api/container_log_stream.go | stream token/session | stateless Docker stream | present | Compose 多文件、tail=0/since=all、断开取消已覆盖 |
 | implemented | GET | `/api/v2/containers/stats/:id` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/status` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
 | implemented | GET | `/api/v2/containers/template` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |

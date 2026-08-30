@@ -183,7 +183,7 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | 状态 | 路由 | 当前证据 | 剩余缺口 |
 | --- | --- | --- | --- |
 | implemented | `GET /api/v2/apps/checkupdate` | `node/api/apps.go:refreshCatalogLocked`、`latestCatalogVersion` | 从 `WORKMESH_APP_CATALOG` 有界读取应用元数据，按 key/id/name 取最高版本与已安装版本比较；目录版本、lastModified、同步时间原子持久化，配置错误返回明确 502 |
-| partial | `GET /api/v2/containers/search/log` | `node/api/containers.go` 已有入口；旧 SSE 语义需以 `Accept: text/event-stream` 持续输出 | 容器日志跟随、since/tail/timestamp、断开释放和背压测试 |
+| implemented | `GET /api/v2/containers/search/log` | `node/api/container_log_stream.go` 使用 Docker 日志流；默认 SSE message 事件与前端 EventSource 兼容 | `since=all`、`tail=0`、Compose 多文件、心跳、断开取消、输出背压和参数安全均有测试 |
 
 ### 仍为 pending 的路由
 
@@ -203,7 +203,7 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | [~] | 全局 Session/CSRF/域名绑定/密码过期中间件 | `apps/workmesh-node/core/middleware/*.go`、`agent/middleware/certificate.go` | 新服务主要由 handler 自行校验 Token | 统一挂载 HTTP middleware，覆盖 Cookie/Bearer、CSRF、节点证书、Allow IP、Demo 只读和操作日志 |
 | [x] | 日志文件输出、滚动和保留 | `apps/workmesh-node/core/log/*.go`、`agent/log/*` | `runtime/log/logger.go`、`cmd/workmesh-server/main.go` | 默认写入 `WORKMESH_DATA_DIR/logs/server.log`，按大小轮转并保留历史文件，支持显式路径 |
 | [~] | 本地/SSH/容器终端双向 WebSocket | `apps/workmesh-node/agent/app/api/v2/hosts.go`、`core/app/api/v2/process.go` | `node/api/terminal_stream.go`、`websocket_stream.go` 已有流式实现草案 | 完成 PTY/SSH/容器会话、输入输出帧、鉴权、关闭码、超时和断线资源回收验收 |
-| [~] | 容器日志 SSE | `apps/workmesh-node/agent/app/api/v2/container.go:935-966` | `node/api/container_log_stream.go` 已有实现草案 | 完成 `since/follow/tail/timestamp`、容器/Compose 过滤、心跳、断线续传和背压测试 |
+| [x] | 容器日志 SSE | `apps/workmesh-node/agent/app/api/v2/container.go:935-966` | `node/api/container_log_stream.go` | 完成 `since/follow/tail/timestamp`、容器/Compose 过滤、心跳、断开取消和背压测试；日志使用默认 `message` 事件 |
 ### 2026-08-30 网站高级操作
 
 - [x] 站点运行状态切换和可用性检查：`POST /api/v2/websites/operate`、`POST /api/v2/websites/check`，状态写入 `websites.json` 并拒绝未知操作。
