@@ -1,6 +1,13 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <!-- Copyright (c) 2026 WorkMesh contributors -->
 
+## 2026-08-30 核心认证与执行入口
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | Passkey 注册挑战、凭据列表与删除 | `apps/workmesh-node/core/app/service/auth.go` | `control/service/core.go`、`node/api/core_handlers.go`，挑战 5 分钟过期并持久化元数据 | 需要会话鉴权、重复凭据拒绝和重启后加载 |
+| [x] | 脚本库运行入口 | `apps/workmesh-node/core/app/api/v2/script_library.go:RunScript` | `node/api/core_resources.go:handleScriptRun`，仅接受已登记 `script_id` 且有令牌 | 未配置令牌或脚本时明确错误，禁止任意命令 |
+| [x] | 进程 PID 详情采集 | `apps/workmesh-node/agent/app/service/process.go` | `node/api/process.go:readProcessDetails`，读取 procfs 内存和用户 | PID 校验、资源不存在 404、平台降级 |
+
 ## 2026-08-30 日志后台能力
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |

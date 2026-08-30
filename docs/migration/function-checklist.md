@@ -1,4 +1,12 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
+
+## 2026-08-30 核心认证、脚本与进程批次
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Passkey 凭据元数据管理 | `apps/workmesh-node/core/app/service/auth.go` | `GET /api/v2/core/auth/passkey/list`、`POST /api/v2/core/auth/passkey/register/*`、`POST /api/v2/core/auth/passkey/del` | `control/service/core.go`、`node/api/core_handlers.go` | 同左 | Session/Cookie 或 Bearer；注册挑战 5 分钟有效 | 凭据 ID、名称、创建时间 | `WORKMESH_DATA_DIR/passkeys.json`，临时文件原子替换 | `node/api/core_handlers_test.go:TestCorePasskeyRegistrationLifecycle` | `go test ./node/api -run CorePasskey` | 待双节点制品部署 | implemented | 未接入浏览器 WebAuthn 验证器时，空 credentialId 会明确拒绝 |
+| 脚本库受控执行 | `apps/workmesh-node/core/app/api/v2/script_library.go:RunScript` | `GET /api/v2/core/script/run` | `node/api/core_resources.go:handleScriptRun` | `GET /api/v2/core/script/run` | `X-WorkMesh-Token` 与 `WORKMESH_COMMAND_TOKEN` | 已登记脚本库记录，不接受直接 command 参数 | core resource store | `node/api/core_resources_test.go` | `go test ./node/api -run ScriptRun` | 待真实脚本库部署验证 | implemented | 仅允许 script_id 对应脚本，禁止任意宿主命令 |
+| 进程详情采集 | `apps/workmesh-node/agent/app/service/process.go:GetProcessInfoByPID` | `GET /api/v2/process/:pid` | `node/api/process.go:handleProcessByID` | `GET /api/v2/process/:pid` | 节点会话鉴权 | `/proc/<pid>/cmdline`、`/proc/<pid>/status` | 无状态实时采集 | `node/api/process_test.go` | `go test ./node/api -run Process` | 待 Linux 节点验证 | implemented | Windows 无 procfs 时仅返回可访问字段 |
 <!-- Copyright (c) 2026 WorkMesh contributors -->
 
 ## 2026-08-30 日志读取批次
