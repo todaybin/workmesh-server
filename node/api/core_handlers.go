@@ -265,13 +265,20 @@ func handleCoreAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	coreJSON(w, nil)
 }
 func handleCoreCaptcha(w http.ResponseWriter, _ *http.Request) {
+	clearLegacyPasswordKey(w)
 	coreJSON(w, map[string]any{"captchaID": "disabled", "required": false})
 }
 func handleCoreWelcome(w http.ResponseWriter, _ *http.Request) {
 	coreJSON(w, map[string]string{"status": "ready"})
 }
 func handleCoreAuthSetting(w http.ResponseWriter, _ *http.Request) {
+	clearLegacyPasswordKey(w)
 	coreJSON(w, map[string]any{"mfa": false, "passkey": false})
+}
+
+// clearLegacyPasswordKey 清理旧前端遗留的 RSA 公钥 Cookie，避免新服务收到无法解密的密码密文。
+func clearLegacyPasswordKey(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{Name: "panel_public_key", Value: "", Path: "/", MaxAge: -1, Expires: time.Unix(1, 0), HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
 func handleCoreGroups(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(r.URL.Path, "/search") {

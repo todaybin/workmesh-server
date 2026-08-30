@@ -118,3 +118,13 @@ func TestCorePasskeyRegistrationLifecycle(t *testing.T) {
 		t.Fatalf("list missing credential: %s", list.Body.String())
 	}
 }
+
+func TestCoreAuthPreflightClearsLegacyPasswordCookie(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/core/auth/setting", nil)
+	rec := httptest.NewRecorder()
+	handleCoreAuthSetting(rec, req)
+	cookie := rec.Header().Get("Set-Cookie")
+	if !strings.Contains(cookie, "panel_public_key=") || !strings.Contains(cookie, "Max-Age=0") {
+		t.Fatalf("旧密码 Cookie 未清理: %q", cookie)
+	}
+}
