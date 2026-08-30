@@ -150,6 +150,15 @@ func (s *domainStore) saveLocked() error {
 	return os.Rename(tmp, s.path)
 }
 
+func validBackupPath(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsAny(value, "\x00\r\n") || len(value) > 4096 {
+		return false
+	}
+	clean := filepath.Clean(value)
+	return clean != "." && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
+}
+
 func idToken() string {
 	var raw [12]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -782,6 +791,10 @@ func handleBackupRecordDownload(w http.ResponseWriter, r *http.Request, s *domai
 	if source == "" {
 		source = filepath.Join(valueString(v, "fileDir"), filepath.Base(valueString(v, "fileName")))
 	}
+	if !validBackupPath(source) || !isWithin(source, backupDataDir()) {
+		domainError(w, 404, "NOT_FOUND", "备份文件不存在")
+		return
+	}
 	if _, err := os.Stat(source); err != nil {
 		domainError(w, 404, "NOT_FOUND", "备份文件不存在")
 		return
@@ -818,6 +831,10 @@ func handleBackupRecover(w http.ResponseWriter, r *http.Request, s *domainStore,
 	target := valueString(v, "target", "targetPath", "destination")
 	if target == "" {
 		success(w, map[string]any{"path": source, "restored": true, "uploaded": byUpload})
+		return
+	}
+	if !validBackupPath(target) {
+		domainError(w, 400, "INVALID_TARGET", "恢复目标路径无效")
 		return
 	}
 	if err := copyBackupFile(source, target, 128<<20); err != nil {
@@ -859,6 +876,10 @@ func handleBackupUpload(w http.ResponseWriter, r *http.Request, _ *domainStore) 
 	}
 	if targetDir == "" {
 		targetDir = backupDataDir()
+	}
+	if !validBackupPath(source) || !validBackupPath(targetDir) {
+		domainError(w, 400, "INVALID_TARGET", "上传路径无效")
+		return
 	}
 	if err := os.MkdirAll(targetDir, 0o750); err != nil {
 		domainError(w, 500, "BACKUP_STORAGE", err.Error())
@@ -1095,6 +1116,9 @@ func copyBackupTree(source, target string) error {
 	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return errors.New("备份目录不允许包含符号链接")
 		}
 		rel, relErr := filepath.Rel(source, path)
 		if relErr != nil {
