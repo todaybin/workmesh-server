@@ -21,6 +21,44 @@ func registerWebsiteFunctionalRoutes(mux *http.ServeMux) {
 	registerWebsiteCRUD(mux, svc)
 	registerWAFRoutes(mux, svc)
 	registerOpenRestyRoutes(mux, svc)
+	registerXPackWebsiteAliases(mux)
+}
+
+// registerXPackWebsiteAliases 保留旧 Agent 的 xpack 监控/WAF 路径。
+// 专用统计采集器接入前，先使用统一兼容存储承接请求，避免隐藏路由返回 404。
+func registerXPackWebsiteAliases(mux *http.ServeMux) {
+	// 使用显式模式便于契约扫描器发现每一条隐藏路由，并保留方法级约束。
+	mux.HandleFunc("GET /api/v2/xpack/monitor/status", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/stat", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/visitors", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/visitors/loc", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/qps", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/rank", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/trend", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/logs/search", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/logs/stat", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/logs/detail", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/logs/clear", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/websites", compatibilityHandler)
+	mux.HandleFunc("GET /api/v2/xpack/monitor/config/global", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/config/global", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/config/site", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/monitor/config/site/update", compatibilityHandler)
+	mux.HandleFunc("GET /api/v2/xpack/waf/status", compatibilityHandler)
+	mux.HandleFunc("GET /api/v2/xpack/waf/standard-rules", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/waf/test", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/waf/global", compatibilityHandler)
+	mux.HandleFunc("GET /api/v2/xpack/waf/sites", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/waf/sites", compatibilityHandler)
+	mux.HandleFunc("GET /api/v2/xpack/waf/sites/{id}/rules", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/waf/rules", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/waf/rules/delete", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/waf/attack/stat", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/waf/log/search", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/waf/block/search", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/waf/relation/stat", compatibilityHandler)
+	mux.HandleFunc("GET /api/v2/xpack/waf/access-lists", compatibilityHandler)
+	mux.HandleFunc("POST /api/v2/xpack/waf/access-lists", compatibilityHandler)
 }
 
 // isFunctionalDomainRoute 让 legacy 路由过滤器跳过已经实现的占位契约。

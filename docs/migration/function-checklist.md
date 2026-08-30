@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移清单
 
-本清单以旧 `apps/workmesh-node/core` 与 `agent` 的 831 条路由为基线。状态必须以真实副作用或端到端响应确认，不能仅以路由注册作为完成依据。
+本清单以旧 `apps/workmesh-node/core` 与 `agent` 的 863 条路由为基线（含隐藏 helper 注册和去品牌化静态入口）。状态必须以真实副作用或端到端响应确认，不能仅以路由注册作为完成依据。
 
 非路由的初始化、后台作业、中间件、国际化、日志、任务和协议升级能力见 [`hidden-function-checklist.md`](./hidden-function-checklist.md)，两份清单必须同步维护。
 
@@ -32,7 +32,7 @@
 
 ## 进行中
 
-实现扫描器当前结果：`implemented 463`、`partial 230`、`compatibility 138`、`pending 0`、`missing 0`（基于 Core/Agent 全源码扫描，生成时间以报告为准）。隐藏初始化文件中的路由也已纳入去重统计。逐路由证据清单见 [`function-checklist-generated.md`](./function-checklist-generated.md)。`partial` 与 `compatibility` 仍需按真实副作用逐项验收，不得仅凭路由注册宣称完成。
+实现扫描器当前结果以 [`function-checklist-generated.md`](./function-checklist-generated.md) 和 `.tmp/implementation-status.json` 为准（基于 863 条路由）。隐藏初始化文件中的路由也已纳入去重统计。`partial` 与 `compatibility` 仍需按真实副作用逐项验收，不得仅凭路由注册宣称完成。
 
 - 主机与系统：主机列表、连接测试、系统信息、命令历史和终端。
 - 文件：分享、回收站、压缩/解压、上传下载、权限和内容搜索。

@@ -3,8 +3,8 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T04:50:16.553Z。
-共 831 条接口：implemented 463、partial 230、compatibility 138。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T05:31:16.430Z。
+共 870 条接口：implemented 468、partial 230、compatibility 169、missing 3。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
 
@@ -913,6 +913,14 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
 | implemented | GET | `/assets/*filepath` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
+| implemented | GET | `/favicon.ico` | apps/workmesh-server/cmd/workmesh-server/main.go | unknown | memory | present | - |
+| implemented | GET | `/favicon.ico/*filepath` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
+| implemented | GET | `/public/*filepath` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
+| implemented | GET | `/swagger/*any` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
+| missing | HEAD | `/assets/*filepath` | - | unknown | unknown | missing | 新服务未发现对应路由注册 |
+| implemented | HEAD | `/favicon.ico` | - | unknown | unknown | missing | - |
+| missing | HEAD | `/favicon.ico/*filepath` | - | unknown | unknown | missing | 新服务未发现对应路由注册 |
+| missing | HEAD | `/public/*filepath` | - | unknown | unknown | missing | 新服务未发现对应路由注册 |
 
 ## visitors
 
@@ -1073,4 +1081,40 @@
 | partial | POST | `/api/v2/workmesh/tasks/destroy` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/workmesh/tasks/exec` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
 | partial | POST | `/api/v2/workmesh/tasks/start` | apps/workmesh-server/node/api/ai_execution.go | required | memory | present | 检测到固定空列表响应 |
+
+## xpack
+
+| 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| compatibility | GET | `/api/v2/xpack/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | GET | `/api/v2/xpack/monitor/status` | apps/workmesh-server/node/api/website.go | unknown | external | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | GET | `/api/v2/xpack/waf/access-lists` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | GET | `/api/v2/xpack/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | GET | `/api/v2/xpack/waf/sites/:id/rules` | apps/workmesh-server/node/api/website.go | unknown | database | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | GET | `/api/v2/xpack/waf/standard-rules` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | GET | `/api/v2/xpack/waf/status` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/config/site` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/config/site/update` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/logs/clear` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/logs/detail` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/logs/search` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/logs/stat` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/qps` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/rank` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/stat` | apps/workmesh-server/node/api/website.go | unknown | external | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/trend` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/visitors` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/visitors/loc` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/monitor/websites` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/waf/access-lists` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/waf/attack/stat` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/waf/block/search` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/waf/global` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/waf/log/search` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/waf/relation/stat` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/waf/rules` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/waf/rules/delete` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
+| compatibility | POST | `/api/v2/xpack/waf/test` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | 仅由 compatibilityHandler/兼容占位承接 |
 

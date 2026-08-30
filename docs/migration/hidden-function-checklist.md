@@ -3,7 +3,7 @@
 
 # 隐藏功能迁移清单
 
-本清单覆盖旧 `apps/workmesh-node/core` 与 `agent` 中不一定表现为 HTTP 路由的能力。路由清单（831 条）只能证明接口可发现；本文件用于防止初始化钩子、后台作业、中间件和协议升级能力在迁移时遗漏。
+本清单覆盖旧 `apps/workmesh-node/core` 与 `agent` 中不一定表现为 HTTP 路由的能力。当前路由清单为 863 条（包含 helper 注册和去品牌化静态入口）；本文件用于防止初始化钩子、后台作业、中间件和协议升级能力在迁移时遗漏。
 
 状态定义：
 
@@ -57,6 +57,20 @@
 | [x] | 节点 handshake/heartbeat/sync | xpack multi-node provider | `runtime/link`；HMAC、timestamp、nonce、防重放测试 | 双节点公网链路和 fencing 验收 |
 | [~] | Gateway 登录、注册、心跳和解绑 | WorkMesh gateway router | `runtime/gateway/http_client.go` | 写入真实 Gateway 凭据后状态必须为 `registered/connected` |
 
+## 路由扫描盲区与隐藏注册
+
+`route-scan.mjs` 已展开 helper 调用中的 Group 前缀，并将旧品牌 Swagger 路径映射为 `/swagger/*any`；Gin 的 `StaticFS` 仍需单独验收以下静态行为：
+
+| 状态 | 隐藏注册 | 旧源码证据 | 当前风险与完成条件 |
+| --- | --- | --- | --- |
+| [~] | `xpack/monitor` 监控别名 15 条：`GET /api/v2/xpack/monitor/status`、`POST /api/v2/xpack/monitor/{stat,visitors,visitors/loc,qps,rank,trend,logs/search,logs/stat,logs/detail,logs/clear,websites,config/global,config/site,config/site/update}` | `apps/workmesh-node/agent/router/ro_website.go:130-154`；新 `node/api/website.go` 已显式注册 | 当前由兼容处理器防止 404；应与 `/api/v2/websites/monitor/*` 使用同一真实监控服务并增加 E2E。 |
+| [~] | `xpack/waf` WAF 别名 15 条：`GET /api/v2/xpack/waf/{status,standard-rules,sites,sites/:id/rules,access-lists}`、`POST /api/v2/xpack/waf/{test,global,sites,rules,rules/delete,attack/stat,log/search,block/search,relation/stat,access-lists}` | `apps/workmesh-node/agent/router/ro_website.go:131,157-172`；新 `node/api/website.go` 已显式注册 | 当前由兼容处理器防止 404；应绑定 `WebsiteService` 的 WAF 存储并覆盖读写测试。 |
+| [ ] | Swagger 文档 `GET /1panel/swagger/*any` | `apps/workmesh-node/core/init/router/router.go:77-79` | 新服务没有同等文档入口；需提供去品牌化路径（如 `/swagger/*any`）或明确兼容重定向，并验证鉴权。 |
+| [~] | 静态文件 `GET/HEAD /public/*filepath`、`GET/HEAD /favicon.ico/*filepath`、`GET/HEAD /assets/*filepath` | `apps/workmesh-node/core/init/router/router.go:25-39` | 新服务仅显式托管 `/assets/{filepath...}`、`/api/v2/images/*`、`/api/v2/static/*`；需验证 favicon/public 和 HEAD 响应的 MIME、缓存及路径穿越策略。 |
+| [~] | 动态安全入口 `GET /{securityEntrance}` 与根页面安全检查 | `apps/workmesh-node/core/init/router/router.go:43-63` | 新服务根 Handler 对任意路径直接提供 SPA，未复刻 security entrance、Cookie 设置和安全检查；需在认证 E2E 中验证未授权访问行为。 |
+
+实现状态扫描结果见逐路由清单，当前基线为 863 条路径；不能替代本节隐藏注册验收。特别关注以下固定/降级响应：`POST /api/v2/ai/agents/agent/list`、`POST /api/v2/ai/agents/agent/channels`、`POST /api/v2/ai/agents/overview`、GPU 无硬件时的空设备列表、`GET /api/v2/process/:pid`、文件回收站/收藏/上传查询、PHP/Node 运行时详情和工具箱配置。这些路径虽有处理器，仍需真实副作用或明确的能力不可用契约后才能将 `[~]` 改为 `[x]`。
+
 ## 迁移验收规则
 
 1. 每勾选一项，必须在本表“新实现/证据”列写入代码路径、测试命令或部署记录。
@@ -72,4 +86,3 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 ```
 
 5. 发现旧源码中新增 `init`、`cron/job`、`middleware`、`i18n`、`log`、`ws`、`sse` 或命令入口时，先补充本清单，再实现代码。
-

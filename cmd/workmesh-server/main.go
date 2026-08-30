@@ -88,6 +88,47 @@ func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) 
 		}
 		http.ServeFile(w, r, file)
 	}
+	// 兼容旧前端的公开静态入口，路径已移除旧产品品牌前缀。
+	mux.HandleFunc("GET /public/{filepath...}", func(w http.ResponseWriter, r *http.Request) {
+		relative := strings.TrimPrefix(r.URL.Path, "/public/")
+		clean := filepath.Clean(filepath.FromSlash(relative))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "INVALID_ASSET_PATH"}})
+			return
+		}
+		file := filepath.Join(publicRoot, clean)
+		if _, err := os.Stat(file); err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		http.ServeFile(w, r, file)
+	})
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		file := filepath.Join(publicRoot, "favicon.ico")
+		if _, err := os.Stat(file); err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		http.ServeFile(w, r, file)
+	})
+	mux.HandleFunc("GET /favicon.ico/{filepath...}", func(w http.ResponseWriter, r *http.Request) {
+		relative := strings.TrimPrefix(r.URL.Path, "/favicon.ico/")
+		clean := filepath.Clean(filepath.FromSlash(relative))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		file := filepath.Join(publicRoot, clean)
+		if _, err := os.Stat(file); err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		http.ServeFile(w, r, file)
+	})
+	// Swagger 文档入口保留功能但使用 WorkMesh 无品牌路径；具体文档由发布包提供时再替换响应体。
+	mux.HandleFunc("GET /swagger/{any...}", func(w http.ResponseWriter, _ *http.Request) {
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"openapi": "3.0.0", "info": map[string]any{"title": "WorkMesh Server API", "version": "v2"}, "servers": []any{map[string]any{"url": "/api/v2"}}})
+	})
 	mux.HandleFunc("GET /api/v2/images/{filename...}", servePublic)
 	mux.HandleFunc("GET /api/v2/static/{filename...}", servePublic)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

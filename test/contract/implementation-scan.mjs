@@ -242,7 +242,7 @@ function inspectRoute(route, sources) {
 }
 
 function usage() {
-  console.error('用法: node implementation-scan.mjs [--legacy <apps/workmesh-node>] [--project <apps/workmesh-server>] [--out <implementation-status.json>] [--markdown <function-checklist.md>]');
+  console.error('用法: node implementation-scan.mjs [--legacy <apps/workmesh-node>] [--project <apps/workmesh-server>] [--manifest <routes.json>] [--out <implementation-status.json>] [--markdown <function-checklist.md>]');
 }
 
 const args = process.argv.slice(2);
@@ -252,7 +252,13 @@ const projectRoot = path.resolve(option('--project', process.cwd()));
 const legacyRoot = path.resolve(option('--legacy', path.resolve(projectRoot, '../workmesh-node')));
 const output = option('--out', null);
 const markdownOutput = option('--markdown', null);
-const routes = scanLegacy(legacyRoot);
+const manifestPath = option('--manifest', null);
+let routes = scanLegacy(legacyRoot);
+if (manifestPath) {
+  const manifest = path.resolve(manifestPath);
+  if (!fs.existsSync(manifest)) throw new Error(`路由清单不存在: ${manifest}`);
+  routes = JSON.parse(fs.readFileSync(manifest, 'utf8')).routes ?? [];
+}
 if (!routes.length) throw new Error(`未发现旧 Core/Agent 路由: ${legacyRoot}`);
 const sources = collectNewSources(projectRoot);
 const interfaces = routes.map((route) => inspectRoute(route, sources));

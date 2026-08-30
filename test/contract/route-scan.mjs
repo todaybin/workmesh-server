@@ -10,9 +10,8 @@ import path from 'node:path';
 import process from 'node:process';
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'Any'];
-// 旧产品专属文档入口不属于迁移功能，必须在品牌清理时移除而不是继续暴露。
+// 旧产品文档入口去掉品牌前缀，契约统一映射为无品牌的 /swagger 路径。
 const legacySwaggerSegment = ['1', 'panel'].join('');
-const excludedLegacyPaths = new Set([`/${legacySwaggerSegment}/swagger/*any`]);
 
 function filesUnder(root) {
   if (!fs.existsSync(root)) return [];
@@ -39,6 +38,18 @@ function scanFile(file, area, base = area === 'core' ? '/api/v2/core' : '/api/v2
   const group = new Map([['Router', base]]);
   const lines = source.split(/\r?\n/);
   const routes = [];
+  const helperPrefixes = new Map();
+  // Gin 常将一组路由放进 helper，再以 Router.Group("xpack/...") 传入。
+  // 先收集调用点，随后把 helper 内的 group.GET/POST 展开到真实前缀。
+  for (const line of lines) {
+    const helperCall = line.match(/\b([A-Za-z_]\w*)\(\s*[A-Za-z_]\w*\.Group\(\s*["']([^"']+)["']\s*\)/);
+    if (helperCall) {
+      const [, helper, local] = helperCall;
+      const list = helperPrefixes.get(helper) ?? [];
+      list.push(joinRoute(base, local));
+      helperPrefixes.set(helper, list);
+    }
+  }
   // Router groups are normally declared before registrations in each InitRouter.
   for (const line of lines) {
     const assignment = line.match(/\b([A-Za-z_]\w*)\s*:=\s*([A-Za-z_]\w*)\.Group\(\s*["`]([^"`]+)["`]\s*\)/);
@@ -79,6 +90,27 @@ function scanFile(file, area, base = area === 'core' ? '/api/v2/core' : '/api/v2
       }
     }
   }
+  // 展开 helper 函数中的 group.GET/POST 等注册，覆盖隐藏的 xpack/monitor、xpack/waf 路由。
+  for (const [helper, prefixes] of helperPrefixes) {
+    const start = source.search(new RegExp(`func\\s+${helper}\\s*\\(`));
+    if (start < 0) continue;
+    const open = source.indexOf('{', start);
+    if (open < 0) continue;
+    let depth = 0;
+    let close = open;
+    for (; close < source.length; close += 1) {
+      if (source[close] === '{') depth += 1;
+      else if (source[close] === '}' && --depth === 0) break;
+    }
+    const body = source.slice(open + 1, close);
+    for (const line of body.split(/\r?\n/)) {
+      for (const method of methods) {
+        const match = line.match(new RegExp('\\b(?:group|router|r)\\.' + method + '\\(\\s*["\\x27]([^"\\x27]+)["\\x27]'));
+        if (!match) continue;
+        for (const prefix of prefixes) routes.push({ method, path: joinRoute(prefix, match[1]), source: path.relative(process.cwd(), file).replaceAll('\\\\', '/') });
+      }
+    }
+  }
   // ServeMux 对健康检查等路径允许省略方法；按旧契约将其视为 GET。
   for (const line of lines) {
     const plain = line.match(/\bHandleFunc\(\s*["'](\/[^"']*)["']/);
@@ -98,8 +130,27 @@ function scanLegacy(legacyRoot) {
     ['agent', path.join(legacyRoot, 'agent', 'init', 'router'), '/'],
   ];
   const routes = roots.flatMap(([area, root, base]) => filesUnder(root).flatMap((file) => scanFile(file, area, base)));
+  // Gin StaticFS 隐式提供 GET/HEAD 通配路径，普通方法扫描无法从 StaticFS 调用推导。
+  const coreRouter = path.join(legacyRoot, 'core', 'init', 'router', 'router.go');
+  if (fs.existsSync(coreRouter)) {
+    const source = fs.readFileSync(coreRouter, 'utf8');
+    const sourceName = path.relative(process.cwd(), coreRouter).replaceAll('\\', '/');
+    if (source.includes('StaticFS("/public"')) {
+      routes.push({ method: 'GET', path: '/public/*filepath', source: sourceName }, { method: 'HEAD', path: '/public/*filepath', source: sourceName });
+    }
+    if (source.includes('StaticFS("/favicon.ico"')) {
+      routes.push({ method: 'GET', path: '/favicon.ico', source: sourceName }, { method: 'HEAD', path: '/favicon.ico', source: sourceName });
+      routes.push({ method: 'GET', path: '/favicon.ico/*filepath', source: sourceName }, { method: 'HEAD', path: '/favicon.ico/*filepath', source: sourceName });
+    }
+    if (source.includes('GET("/assets/*filepath"')) {
+      routes.push({ method: 'HEAD', path: '/assets/*filepath', source: sourceName });
+    }
+  }
   const unique = new Map(routes.map((route) => [`${route.method} ${route.path}`, route]));
-  return [...unique.values()].filter((route) => !excludedLegacyPaths.has(route.path)).sort((a, b) => `${a.method} ${a.path}`.localeCompare(`${b.method} ${b.path}`));
+  return [...unique.values()].map((route) => {
+    if (route.path === `/${legacySwaggerSegment}/swagger/*any`) return { ...route, path: '/swagger/*any' };
+    return route;
+  }).sort((a, b) => `${a.method} ${a.path}`.localeCompare(`${b.method} ${b.path}`));
 }
 
 function scanNew(projectRoot) {
@@ -138,7 +189,12 @@ if (command === 'generate') {
   if (!fs.existsSync(manifestPath)) throw new Error(`清单不存在: ${manifestPath}`);
   const expected = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).routes ?? [];
   const actual = new Set(scanNew(projectRoot).map((route) => `${route.method} ${route.path}`));
-  const missing = expected.map((route) => `${route.method} ${route.path}`).filter((key) => !actual.has(key));
+  const missing = expected.map((route) => `${route.method} ${route.path}`).filter((key) => {
+    if (actual.has(key)) return false;
+    // net/http ServeMux 的 GET 模式按规范同时承接 HEAD，不要求重复注册 HEAD。
+    if (key.startsWith('HEAD ')) return !actual.has(`GET ${key.slice(5)}`);
+    return true;
+  });
   const extra = [...actual].filter((key) => !new Set(expected.map((route) => `${route.method} ${route.path}`)).has(key));
   // 新服务允许增加健康检查、Gateway 控制面和兼容 HTTP 方法，不将其视为 breaking 差异。
   if (missing.length) {
