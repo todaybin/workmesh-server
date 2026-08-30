@@ -28,6 +28,8 @@ var (
 // GatewayStateStore 保存本机 Gateway 授权摘要；访问令牌不会序列化到响应。
 type GatewayStateStore struct {
 	mu      sync.RWMutex
+	startMu sync.Mutex
+	started bool
 	status  gateway.Status
 	auth    gateway.Authorization
 	client  gateway.ProtocolClient
@@ -35,7 +37,8 @@ type GatewayStateStore struct {
 	// gatewayURL 缓存绑定时使用的地址；即使环境变量未注入，重启后也能恢复连接。
 	gatewayURL string
 	// statePath 位于数据目录内，仅保存本机绑定快照和受限访问令牌。
-	statePath string
+	statePath    string
+	identityPath string
 }
 
 // persistedGatewayState 是磁盘上的绑定快照。AccessToken 不会通过 HTTP 响应序列化。
@@ -72,6 +75,13 @@ type gatewayRegisterRequest struct {
 
 // Start 启动节点自动注册和周期心跳；未配置云端客户端时不创建后台任务。
 func (s *GatewayStateStore) Start(ctx context.Context, capabilities []string) {
+	s.startMu.Lock()
+	if s.started {
+		s.startMu.Unlock()
+		return
+	}
+	s.started = true
+	s.startMu.Unlock()
 	if s.client == nil {
 		return
 	}
@@ -79,7 +89,7 @@ func (s *GatewayStateStore) Start(ctx context.Context, capabilities []string) {
 		connect := func() {
 			s.mu.RLock()
 			bound := s.status.Registration == gateway.RegistrationRegistered && s.auth.BindingID != ""
-			registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Registered: bound}
+			registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Role: s.status.Role, Registered: bound}
 			s.mu.RUnlock()
 			// 已绑定节点优先恢复心跳，不再次要求账号登录或创建新绑定。
 			if bound {
@@ -137,7 +147,7 @@ func (s *GatewayStateStore) Start(ctx context.Context, capabilities []string) {
 				return
 			case <-ticker.C:
 				s.mu.RLock()
-				registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Registered: s.status.Registration == gateway.RegistrationRegistered}
+				registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Role: s.status.Role, Registered: s.status.Registration == gateway.RegistrationRegistered}
 				s.mu.RUnlock()
 				if err := s.client.Heartbeat(ctx, registration); err != nil {
 					s.mu.Lock()
@@ -192,7 +202,7 @@ func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string, authorizers 
 	if dataDir == "" {
 		dataDir = "./data"
 	}
-	store := &GatewayStateStore{status: gateway.Status{Registration: gateway.RegistrationUnregistered, NodeID: nodeID, GatewayID: os.Getenv("WORKMESH_GATEWAY_ID"), Role: role}, statePath: filepath.Join(dataDir, "gateway-binding.json")}
+	store := &GatewayStateStore{status: gateway.Status{Registration: gateway.RegistrationUnregistered, NodeID: nodeID, GatewayID: os.Getenv("WORKMESH_GATEWAY_ID"), Role: role}, statePath: filepath.Join(dataDir, "gateway-binding.json"), identityPath: filepath.Join(dataDir, "gateway-identity.ed25519")}
 	store.load()
 	// 配置 Gateway 地址后启用真实云端协议；未配置时保留离线开发模式。
 	baseURL := strings.TrimSpace(os.Getenv("WORKMESH_GATEWAY_URL"))
@@ -203,9 +213,17 @@ func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string, authorizers 
 	}
 	if baseURL != "" {
 		store.gatewayURL = strings.TrimRight(baseURL, "/")
-		store.client = gateway.NewHTTPClient(baseURL, os.Getenv("WORKMESH_GATEWAY_ID"), os.Getenv("WORKMESH_GATEWAY_SECRET"))
+		identity, identityErr := gateway.LoadOrCreateIdentity(store.identityPath)
+		if identityErr != nil {
+			store.status.Registration = gateway.RegistrationPending
+			store.status.Reason = fmt.Sprintf("加载 Gateway 节点身份失败: %v", identityErr)
+		} else {
+			store.client = gateway.NewHTTPClientWithIdentity(baseURL, os.Getenv("WORKMESH_GATEWAY_ID"), os.Getenv("WORKMESH_GATEWAY_SECRET"), identity)
+		}
 		if store.auth.AccessToken != "" {
-			store.client.(*gateway.HTTPClient).AccessToken = store.auth.AccessToken
+			if httpClient, ok := store.client.(*gateway.HTTPClient); ok {
+				httpClient.AccessToken = store.auth.AccessToken
+			}
 		}
 	}
 	var authorize RequestAuthorizer
@@ -249,7 +267,12 @@ func (s *GatewayStateStore) loginHandler(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		client := gateway.NewHTTPClient(baseURL, os.Getenv("WORKMESH_GATEWAY_ID"), os.Getenv("WORKMESH_GATEWAY_SECRET"))
+		identity, identityErr := gateway.LoadOrCreateIdentity(s.identityPath)
+		if identityErr != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("加载 Gateway 节点身份失败: %w", identityErr))
+			return
+		}
+		client := gateway.NewHTTPClientWithIdentity(baseURL, os.Getenv("WORKMESH_GATEWAY_ID"), os.Getenv("WORKMESH_GATEWAY_SECRET"), identity)
 		s.mu.Lock()
 		s.client = client
 		s.gatewayURL = baseURL
@@ -286,7 +309,7 @@ func (s *GatewayStateStore) loginHandler(w http.ResponseWriter, r *http.Request)
 	// 已有绑定先用新登录令牌验证心跳。验证成功时复用 bindingId，保证重复绑定幂等。
 	bound := false
 	if existingBindingID != "" {
-		registration := gateway.Registration{NodeID: nodeID, BindingID: existingBindingID, Registered: true}
+		registration := gateway.Registration{NodeID: nodeID, BindingID: existingBindingID, Role: role, Registered: true}
 		if heartbeatErr := client.Heartbeat(r.Context(), registration); heartbeatErr == nil {
 			auth.BindingID = existingBindingID
 			bound = true
@@ -315,7 +338,7 @@ func (s *GatewayStateStore) loginHandler(w http.ResponseWriter, r *http.Request)
 		if auth.AccessToken == "" {
 			auth.AccessToken = registered.AccessToken
 		}
-		registration := gateway.Registration{NodeID: nodeID, BindingID: auth.BindingID, Registered: true}
+		registration := gateway.Registration{NodeID: nodeID, BindingID: auth.BindingID, Role: role, Registered: true}
 		if heartbeatErr := client.Heartbeat(r.Context(), registration); heartbeatErr != nil {
 			writeError(w, http.StatusBadGateway, fmt.Errorf("Gateway 节点注册后心跳验证失败: %w", heartbeatErr))
 			return
@@ -477,7 +500,7 @@ func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Reque
 func (s *GatewayStateStore) heartbeatHandler(w http.ResponseWriter, r *http.Request) {
 	if s.client != nil {
 		s.mu.RLock()
-		registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Registered: s.status.Registration == gateway.RegistrationRegistered}
+		registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Role: s.status.Role, Registered: s.status.Registration == gateway.RegistrationRegistered}
 		s.mu.RUnlock()
 		if err := s.client.Heartbeat(r.Context(), registration); err != nil {
 			writeError(w, http.StatusBadGateway, err)

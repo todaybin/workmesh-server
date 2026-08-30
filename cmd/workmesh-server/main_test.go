@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,52 @@ import (
 	controlapi "github.com/todaybin/workmesh-server/control/api"
 	nodeapi "github.com/todaybin/workmesh-server/node/api"
 )
+
+func TestSignedNodeRelayPassesOuterAndNodeSessionMiddleware(t *testing.T) {
+	dataDir := t.TempDir()
+	const secret = "relay-secret"
+	remoteMux := http.NewServeMux()
+	remoteMux.HandleFunc("/api/v2/files/search", func(w http.ResponseWriter, r *http.Request) {
+		if !nodeapi.IsForwardedRequestVerified(r) {
+			t.Fatal("目标节点处理器未收到已验签上下文")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	remoteRelay := nodeapi.NewNodeRelay(authenticateNodeAPI(remoteMux), nodeapi.RelayOptions{
+		DataDir: dataDir, NodeID: "secondary", Secret: []byte(secret),
+		RoleEpoch: func(context.Context) (uint64, error) { return 1, nil },
+	})
+	remoteServer := httptest.NewServer(controlapi.NewSecurityMiddleware(remoteRelay, controlapi.SecurityMiddlewareOptions{
+		DataDir: dataDir, Authorize: func(*http.Request) bool { return false },
+	}))
+	defer remoteServer.Close()
+	if err := os.WriteFile(filepath.Join(dataDir, "nodes.json"), []byte(`[{"nodeId":"secondary","addr":"`+remoteServer.URL+`"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	localMux := http.NewServeMux()
+	localMux.HandleFunc("/api/v2/files/search", func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("本地处理器不应被调用")
+	})
+	localRelay := nodeapi.NewNodeRelay(authenticateNodeAPI(localMux), nodeapi.RelayOptions{
+		DataDir: dataDir, NodeID: "primary", Secret: []byte(secret),
+		RoleEpoch: func(context.Context) (uint64, error) { return 1, nil },
+	})
+	handler := controlapi.NewSecurityMiddleware(localRelay, controlapi.SecurityMiddlewareOptions{
+		DataDir: dataDir, Authorize: func(r *http.Request) bool {
+			cookie, err := r.Cookie("workmesh_session")
+			return err == nil && cookie.Value == "local-session"
+		},
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/files/search?operateNode=secondary", strings.NewReader(`{}`))
+	request.AddCookie(&http.Cookie{Name: "workmesh_session", Value: "local-session"})
+	request.AddCookie(&http.Cookie{Name: "pcsrftoken", Value: "csrf"})
+	request.Header.Set("X-CSRF-Token", "csrf")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("签名透传不应被 Session 中间件拦截: %d %s", response.Code, response.Body.String())
+	}
+}
 
 func TestHTTPMuxServesJavaScriptAssetsWithModuleMIME(t *testing.T) {
 	root := t.TempDir()

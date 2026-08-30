@@ -23,8 +23,10 @@ import (
 
 // HTTPClient 通过 HTTPS 调用 Gateway 注册、授权和心跳接口。
 type HTTPClient struct {
-	BaseURL     string
-	GatewayID   string
+	BaseURL   string
+	GatewayID string
+	// NodeID 是注册后用于状态查询和心跳关联的节点标识。
+	NodeID      string
 	Secret      []byte
 	HTTP        *http.Client
 	Timeout     time.Duration
@@ -37,7 +39,18 @@ type HTTPClient struct {
 func NewHTTPClient(baseURL, gatewayID, secret string) *HTTPClient {
 	seed := sha256.Sum256([]byte("workmesh-node:" + gatewayID + ":" + secret))
 	privateKey := ed25519.NewKeyFromSeed(seed[:])
-	return &HTTPClient{BaseURL: strings.TrimRight(baseURL, "/"), GatewayID: gatewayID, Secret: []byte(secret), HTTP: &http.Client{}, Timeout: 15 * time.Second, privateKey: privateKey, publicKey: privateKey.Public().(ed25519.PublicKey)}
+	return &HTTPClient{BaseURL: strings.TrimRight(baseURL, "/"), GatewayID: gatewayID, Secret: []byte(secret), HTTP: &http.Client{Timeout: 15 * time.Second}, Timeout: 15 * time.Second, privateKey: privateKey, publicKey: privateKey.Public().(ed25519.PublicKey)}
+}
+
+// NewHTTPClientWithIdentity 创建使用持久化节点身份的 Gateway 客户端。
+// identity 为空时回退到兼容密钥，仅用于没有数据目录的开发环境。
+func NewHTTPClientWithIdentity(baseURL, gatewayID, secret string, identity *Identity) *HTTPClient {
+	client := NewHTTPClient(baseURL, gatewayID, secret)
+	if identity != nil && len(identity.PrivateKey) == ed25519.PrivateKeySize && len(identity.PublicKey) == ed25519.PublicKeySize {
+		client.privateKey = append(ed25519.PrivateKey(nil), identity.PrivateKey...)
+		client.publicKey = append(ed25519.PublicKey(nil), identity.PublicKey...)
+	}
+	return client
 }
 
 // Login 使用 Gateway 账号换取节点授权摘要。
@@ -61,25 +74,46 @@ func (c *HTTPClient) Login(ctx context.Context, request LoginRequest) (Authoriza
 // Register 将当前节点独立注册到 Gateway。
 func (c *HTTPClient) Register(ctx context.Context, request RegisterRequest) (Authorization, error) {
 	var response struct {
-		BindingID string `json:"bindingId"`
+		BindingID   string   `json:"bindingId"`
+		AccessToken string   `json:"token"`
+		ExpiresAt   string   `json:"expiresAt"`
+		Refreshable bool     `json:"refreshable"`
+		Scopes      []string `json:"scopes"`
+		Item        struct {
+			BindingID string `json:"bindingId"`
+			NodeID    string `json:"nodeId"`
+		} `json:"item"`
 	}
+	c.NodeID = strings.TrimSpace(request.NodeID)
 	request.PublicKey = base64.RawStdEncoding.EncodeToString(c.publicKey)
 	err := c.do(ctx, http.MethodPost, "/workmesh/node/register", request, &response)
 	if err != nil {
 		return Authorization{}, err
 	}
 	if response.BindingID == "" {
-		response.BindingID = request.NodeID
+		response.BindingID = response.Item.BindingID
 	}
-	return Authorization{BindingID: response.BindingID, AccessToken: c.AccessToken, Refreshable: true}, nil
+	if response.BindingID == "" {
+		response.BindingID = response.Item.NodeID
+	}
+	if response.BindingID == "" {
+		return Authorization{}, errors.New("Gateway 注册响应缺少绑定标识")
+	}
+	if response.AccessToken != "" {
+		c.AccessToken = response.AccessToken
+	}
+	return Authorization{BindingID: response.BindingID, AccessToken: c.AccessToken, Scopes: response.Scopes, ExpiresAt: response.ExpiresAt, Refreshable: response.Refreshable || c.AccessToken != ""}, nil
 }
 
 // Heartbeat 上报节点在线状态并保持 Gateway 授权有效。
 func (c *HTTPClient) Heartbeat(ctx context.Context, registration Registration) error {
 	return c.do(ctx, http.MethodPost, "/workmesh/node/heartbeat", map[string]any{
-		"nodeId": registration.NodeID,
-		"status": "online",
-		"sentAt": time.Now().UTC().Format(time.RFC3339),
+		"nodeId":       registration.NodeID,
+		"bindingId":    registration.BindingID,
+		"role":         registration.Role,
+		"capabilities": registration.Capabilities,
+		"status":       "online",
+		"sentAt":       time.Now().UTC().Format(time.RFC3339),
 	}, nil)
 }
 
@@ -95,19 +129,38 @@ func (c *HTTPClient) Status(ctx context.Context) (Status, error) {
 		return Status{}, err
 	}
 	status := Status{Registration: RegistrationUnregistered, GatewayID: c.GatewayID}
-	if len(response.Items) > 0 {
+	for _, item := range response.Items {
+		if c.NodeID != "" && item.NodeID != c.NodeID {
+			continue
+		}
 		status.Registration = RegistrationRegistered
-		status.NodeID = response.Items[0].NodeID
-		status.Connected = response.Items[0].Status == "online" || response.Items[0].Status == "ready"
+		status.NodeID = item.NodeID
+		status.Connected = item.Status == "online" || item.Status == "ready" || item.Status == "busy"
+		break
 	}
 	return status, nil
 }
 
 // Refresh 刷新节点云端授权。
 func (c *HTTPClient) Refresh(ctx context.Context) (Authorization, error) {
-	var response Authorization
-	err := c.do(ctx, http.MethodPost, "/api/workmesh/v1/nodes/authorization/refresh", nil, &response)
-	return response, err
+	var response struct {
+		Token       string   `json:"token"`
+		ExpiresAt   string   `json:"expiresAt"`
+		ExpiresIn   int64    `json:"expiresIn"`
+		BindingID   string   `json:"bindingId"`
+		Scopes      []string `json:"scopes"`
+		Refreshable bool     `json:"refreshable"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/workmesh/v1/nodes/authorization/refresh", nil, &response); err != nil {
+		return Authorization{}, err
+	}
+	if response.Token != "" {
+		c.AccessToken = response.Token
+	}
+	if response.ExpiresAt == "" && response.ExpiresIn > 0 {
+		response.ExpiresAt = time.Now().UTC().Add(time.Duration(response.ExpiresIn) * time.Second).Format(time.RFC3339)
+	}
+	return Authorization{BindingID: response.BindingID, Scopes: response.Scopes, ExpiresAt: response.ExpiresAt, Refreshable: response.Refreshable || c.AccessToken != "", AccessToken: c.AccessToken}, nil
 }
 
 // Revoke 撤销当前节点授权。

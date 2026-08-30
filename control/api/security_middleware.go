@@ -73,6 +73,13 @@ func NewSecurityMiddleware(next http.Handler, options SecurityMiddlewareOptions)
 		if !checkBoundDomain(w, r, settings) {
 			return
 		}
+		// 节点透传请求由 NodeRelay 在更内层完成 HMAC、时间戳、nonce 和 epoch 校验。
+		// 在此处跳过本地安全入口、Session、CSRF 和密码过期检查，避免把已认证的
+		// 节点调用误判为浏览器请求；未经 NodeRelay 验证的伪造头部仍会被其拒绝。
+		if isForwardedRelayRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if !checkSecurityEntrance(w, r, settings, options.Authorize) {
 			return
 		}
@@ -104,6 +111,21 @@ func NewSecurityMiddleware(next http.Handler, options SecurityMiddlewareOptions)
 		ensureCSRFToken(w, r)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isForwardedRelayRequest 仅识别节点透传协议标记，实际可信性由 NodeRelay 验签保证。
+func isForwardedRelayRequest(r *http.Request) bool {
+	if r == nil || !isAPIRequest(r.URL.Path) || strings.TrimSpace(r.Header.Get("X-WorkMesh-Forwarded")) != "1" {
+		return false
+	}
+	// 控制面（core、gateway、workmesh）路由直接注册在主 mux 上，不经过 NodeRelay；
+	// 这些请求必须继续执行本地 Session/CSRF 鉴权，不能仅凭透传头部放行。
+	for _, prefix := range []string{"/api/v2/core/", "/api/v2/gateway/", "/api/v2/workmesh/"} {
+		if strings.HasPrefix(r.URL.Path, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 func newSecuritySettingsProvider(dataDir string) *securitySettingsCache {

@@ -46,6 +46,26 @@ func TestSecurityMiddlewareSessionAndCSRF(t *testing.T) {
 	}
 }
 
+func TestSecurityMiddlewareAllowsSignedRelayToReachNodeRelay(t *testing.T) {
+	authorizedCalled := false
+	handler := NewSecurityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), SecurityMiddlewareOptions{Authorize: func(*http.Request) bool {
+		authorizedCalled = true
+		return false
+	}})
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/files/search", strings.NewReader(`{}`))
+	request.Header.Set("X-WorkMesh-Forwarded", "1")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("已标记透传请求应交由 NodeRelay 验签，实际状态 %d", response.Code)
+	}
+	if authorizedCalled {
+		t.Fatal("透传请求不应触发本地 Session 鉴权")
+	}
+}
+
 func TestSecurityMiddlewareMintsCSRFCookie(t *testing.T) {
 	// 使用真实布尔授权器，确保响应中的 token 可被后续请求复用。
 	handler := NewSecurityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -194,14 +194,22 @@ func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) 
 	nodeMux := http.NewServeMux()
 	nodeapi.Register(nodeMux)
 	// 节点执行面统一经过本机会话鉴权；流接口保留各自的短期 Token 校验。
-	mux.Handle("/api/v2/", authenticateNodeAPI(nodeMux))
+	// 节点执行面先进行本机会话校验，再按 CurrentNode/operateNode 透传到已登记节点。
+	// 透传请求由共享密钥和 role epoch 保护，目标节点未登记或签名失效时明确返回错误。
+	securedNodeMux := authenticateNodeAPI(nodeMux)
+	mux.Handle("/api/v2/", nodeapi.NewNodeRelay(securedNodeMux, nodeapi.RelayOptions{
+		DataDir: cfg.DataDir,
+		NodeID:  cfg.NodeID,
+		Secret:  []byte(os.Getenv("WORKMESH_LINK_SECRET")),
+		Timeout: cfg.RequestTimeout,
+	}))
 	return mux, gatewayStore
 }
 
 func authenticateNodeAPI(next *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := next.Handler(r)
-		if pattern == "" || publicNodeAPIPath(r) || selfAuthenticatedStreamPath(r.URL.Path) {
+		if pattern == "" || publicNodeAPIPath(r) || selfAuthenticatedStreamPath(r.URL.Path) || nodeapi.IsForwardedRequestVerified(r) {
 			next.ServeHTTP(w, r)
 			return
 		}

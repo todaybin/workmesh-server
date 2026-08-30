@@ -10,6 +10,7 @@ type Registration struct {
 	NodeID       string   `json:"node_id"`
 	BindingID    string   `json:"binding_id"`
 	Registered   bool     `json:"registered"`
+	Role         string   `json:"role,omitempty"`
 	AccessToken  string   `json:"-"`
 	Capabilities []string `json:"capabilities,omitempty"`
 }

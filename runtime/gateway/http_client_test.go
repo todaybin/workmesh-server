@@ -74,3 +74,48 @@ func TestHTTPClientStatusMapsNodeIndex(t *testing.T) {
 		t.Fatalf("状态映射失败: %+v, %v", status, err)
 	}
 }
+
+func TestHTTPClientStatusSelectsRegisteredNode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"items": []map[string]any{
+			{"nodeId": "other", "status": "online"},
+			{"nodeId": "target", "status": "busy"},
+		}}})
+	}))
+	defer server.Close()
+	client := NewHTTPClient(server.URL, "gateway-test", "secret")
+	client.NodeID = "target"
+	status, err := client.Status(context.Background())
+	if err != nil || status.NodeID != "target" || !status.Connected {
+		t.Fatalf("状态未按节点筛选: %+v, %v", status, err)
+	}
+}
+
+func TestHTTPClientRegisterMapsItemAndRefreshToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/workmesh/node/register" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{
+				"item": map[string]any{"nodeId": "registered-node"}, "token": "node-token", "refreshable": true,
+			}})
+			return
+		}
+		if r.URL.Path == "/api/workmesh/v1/nodes/authorization/refresh" {
+			if r.Header.Get("Authorization") != "Bearer node-token" {
+				t.Fatalf("刷新未携带最新令牌: %q", r.Header.Get("Authorization"))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"token": "refreshed", "expiresIn": 120}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	client := NewHTTPClient(server.URL, "gateway-test", "secret")
+	auth, err := client.Register(context.Background(), RegisterRequest{NodeID: "registered-node"})
+	if err != nil || auth.BindingID != "registered-node" || auth.AccessToken != "node-token" {
+		t.Fatalf("注册响应映射失败: %+v, %v", auth, err)
+	}
+	refreshed, err := client.Refresh(context.Background())
+	if err != nil || refreshed.AccessToken != "refreshed" || refreshed.ExpiresAt == "" {
+		t.Fatalf("刷新响应映射失败: %+v, %v", refreshed, err)
+	}
+}

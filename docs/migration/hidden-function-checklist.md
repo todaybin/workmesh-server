@@ -306,3 +306,10 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | [x] | AI 错误按请求语言本地化 | `apps/workmesh-node/core/i18n`、`agent/app/api/v2/ai.go` | `node/api/errors.go:localizeErrorMessage` 与 `aiHandler` 的 Accept-Language 包装；稳定错误码映射到 12 个服务端语言包 | `TestAIErrorUsesRequestLocale` 验证英文请求不返回固定中文，未知语言回退中文 |
 | [x] | SSE 事件编号与断线续传游标 | `apps/workmesh-node/agent/app/api/v2/container.go:ContainerStreamLogs` | `node/api/container_log_stream.go:containerSSEWriter` 输出 `id`，解析 `Last-Event-ID` 并延续序号，保留心跳与取消 | `TestContainerSSELastEventIDContinuesSequence`、容器日志流回归测试 |
 | [x] | WebSocket 控制帧和正常关闭握手 | `apps/workmesh-node/agent/app/api/v2/terminal.go`、`core/app/api/v2/process.go` | `node/api/websocket_stream.go:closeWithCode/readFrame` 校验控制帧上限、掩码、关闭码；终端回送 Close/Pong | `TestWebSocketRejectsInvalidControlFrames`、`TestWebSocketCloseFrameIncludesCode` |
+
+## 2026-08-31 节点透传安全隐藏能力
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新项目证据 | 完成条件 |
+|---|---|---|---|---|
+| [x] | 透传请求绕过目标本地 Session 的受信上下文 | `apps/workmesh-node/core/init/router/proxy.go`、`agent/utils/nodeclient/client.go` | `node/api/node_relay.go:IsForwardedRequestVerified` 注入进程内上下文；`cmd/workmesh-server/main.go:authenticateNodeAPI` 仅信任该上下文；外层 `control/api/security_middleware.go` 将透传交由 NodeRelay 验签 | `node/api/node_relay_test.go:TestNodeRelayForwardsSignedOperateNodeRequest`、`control/api/security_middleware_test.go:TestSecurityMiddlewareAllowsSignedRelayToReachNodeRelay` |
+| [x] | 空请求体透传防御与大小限制 | `apps/workmesh-node/agent/utils/nodeclient/client.go` | `node/api/node_relay.go:forward/serveForwarded` 对 nil Body 使用 `http.NoBody`，请求/响应均限制 8 MiB | 节点透传测试覆盖请求体读取和超限错误 |

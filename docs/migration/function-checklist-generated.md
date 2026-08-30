@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T22:35:06.693Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T23:14:56.540Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -272,7 +272,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/api/v2/containers/daemonjson` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/daemonjson/file` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
-| implemented | GET | `/api/v2/containers/docker/status` | apps/workmesh-server/node/api/host_container_cron.go、node/service/docker.go | 节点会话/HMAC | exec.LookPath + docker version（10 秒超时） | node/api/hosts_containers_test.go:TestDockerStatusContract、node/service/docker_status_test.go | isExist/isActive/version/error DTO |
+| implemented | GET | `/api/v2/containers/docker/status` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/image` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/image/all` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/limit` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
@@ -1125,9 +1125,10 @@
 | --- | --- | --- | --- | --- |
 | Core/Agent 后端语言包与前端语言入口 | `apps/workmesh-node/core/i18n`、`apps/workmesh-node/agent/i18n`、旧 frontend | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 12 种语言；后端每种 1037 键；前端键结构和菜单入口通过 `i18n-scan.mjs` | implemented |
 
-## 系统环境与备份增量
+## 2026-08-31 节点身份与透传链路
 
 | 功能 | 新实现 | 测试 | 状态 |
-| --- | --- | --- | --- |
-| OpenResty、MySQL、PostgreSQL、Redis、Docker 安装与运行探测 | `node/service/environment.go`、`node/api/apps.go` | `TestProbeApplicationMissingAndUnknown`、`TestProbeApplicationBinaryAndTCPStatus`、`TestAppInstalledCheckUsesEnvironmentProbe` | implemented |
-| 云端备份 Bucket 标准端点查询 | `node/api/functional_domains.go:handleBackupBuckets`、`normalizeBuckets` | `TestBackupCloudEndpointsDoNotFakeSuccess`、`TestBackupBucketsUsesConfiguredProviderEndpoint` | implemented |
+|---|---|---|---|
+| Gateway 节点 Ed25519 身份持久化 | `runtime/gateway/identity.go`、`runtime/gateway/http_client.go`、`control/api/gateway.go`；`gateway-identity.ed25519` 独占创建，注册响应缺少 bindingId 时失败 | `runtime/gateway/identity_test.go`、`runtime/gateway/http_client_test.go` | implemented |
+| CurrentNode/operateNode 通用节点透传 | `node/api/node_relay.go`、`cmd/workmesh-server/main.go`；HMAC、timestamp、nonce、role epoch 验证并注入已验签上下文，8 MiB 限制 | `node/api/node_relay_test.go`、`control/api/security_middleware_test.go`、`cmd/workmesh-server/main_test.go` | implemented |
+| 节点同步快照持久化 | `runtime/link/file_store.go`、`control/api/link.go`；`link-sync.json` 原子写入和 compare-and-set | `runtime/link/file_store_test.go` | implemented |
