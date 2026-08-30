@@ -34,7 +34,7 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/route-s
 node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/implementation-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --out .tmp/implementation-status.json
 ```
 
-实现状态报告：831 条路由，`implemented 130`、`partial 14`、`compatibility 5`、`pending 677`、`missing 5`。剩余状态必须继续逐条迁移，当前不能宣称全量功能完成。
+实现状态报告：831 条路由，`implemented 311`、`partial 69`、`compatibility 137`、`pending 312`、`missing 2`。统一前缀处理器已按源码证据计入；剩余状态必须继续逐条迁移，当前不能宣称全量功能完成。
 
 ## 未完成外部条件
 

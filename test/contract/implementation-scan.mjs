@@ -121,7 +121,19 @@ function findImplementations(route, sources) {
     }
     const routeRe = new RegExp('(?:HandleFunc|\\.(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Any))\\(\\s*["\\\x27](?:' + route.method + '\\s+)?' + normalizedLegacy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll(':', '\\{[^}]+\\}') + '(?:["\\\x27]|/)', 'i');
     const literal = text.includes(`${route.method} ${route.path}`) || text.includes(`${route.method} ${normalizePath(route.path)}`);
-    if (literal || routeRe.test(text)) matches.push(source);
+    // 统一前缀处理器（例如 /api/v2/ai/）覆盖该前缀下的全部路由。
+    // 只将新服务源码中的前缀处理器视为实现，legacy_routes.go 仍按兼容占位单独标记。
+    const prefixRe = /HandleFunc\(\s*["\x27](?:(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Any)\s+)?(\/[^"\x27]*\/)['"\x27]/gi;
+    let prefixMatch = false;
+    for (const match of text.matchAll(prefixRe)) {
+      const method = match[1];
+      const prefix = match[2];
+      if ((!method || method.toUpperCase() === route.method.toUpperCase() || method.toUpperCase() === 'ANY') && route.path.startsWith(prefix)) {
+        prefixMatch = true;
+        break;
+      }
+    }
+    if (literal || routeRe.test(text) || prefixMatch) matches.push(source);
   }
   return matches;
 }

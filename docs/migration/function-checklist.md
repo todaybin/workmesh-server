@@ -25,7 +25,7 @@
 
 ## 进行中
 
-实现扫描器当前结果：`implemented 130`、`partial 14`、`compatibility 5`、`pending 677`、`missing 5`。剩余接口按以下域逐条替换占位实现：
+实现扫描器当前结果：`implemented 311`、`partial 69`、`compatibility 137`、`pending 312`、`missing 2`。剩余接口按以下域逐条替换占位实现；统一前缀处理器已依据源码证据纳入统计。
 
 - 主机与系统：主机列表、连接测试、系统信息、命令历史和终端。
 - 文件：分享、回收站、压缩/解压、上传下载、权限和内容搜索。
