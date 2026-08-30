@@ -56,3 +56,29 @@ func TestAppOperationsAndCatalog(t *testing.T) {
 		t.Fatalf("icon: %d %s", icon.Code, icon.Header().Get("Content-Type"))
 	}
 }
+
+func TestAppDerivedDetailsAndDeleteCheck(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	install := httptest.NewRecorder()
+	mux.ServeHTTP(install, httptest.NewRequest(http.MethodPost, "/api/v2/apps/install", strings.NewReader(`{"id":"99","key":"demo","name":"Demo","version":"1.2","containerName":"demo-web","params":{"port":8080}}`)))
+	if install.Code != http.StatusOK {
+		t.Fatalf("install status=%d", install.Code)
+	}
+	detail := httptest.NewRecorder()
+	mux.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/api/v2/apps/details/99", nil))
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), "port") {
+		t.Fatalf("detail body=%s", detail.Body.String())
+	}
+	check := httptest.NewRecorder()
+	mux.ServeHTTP(check, httptest.NewRequest(http.MethodGet, "/api/v2/apps/installed/delete/check/99", nil))
+	if check.Code != http.StatusOK || !strings.Contains(check.Body.String(), "demo-web") {
+		t.Fatalf("delete check body=%s", check.Body.String())
+	}
+	services := httptest.NewRecorder()
+	mux.ServeHTTP(services, httptest.NewRequest(http.MethodGet, "/api/v2/apps/services/demo", nil))
+	if services.Code != http.StatusOK || !strings.Contains(services.Body.String(), "running") {
+		t.Fatalf("services body=%s", services.Body.String())
+	}
+}

@@ -888,7 +888,7 @@ func handleBackupBuckets(w http.ResponseWriter, r *http.Request, s *domainStore)
 		success(w, buckets)
 		return
 	}
-	success(w, []map[string]any{})
+	success(w, make([]map[string]any, 0))
 }
 
 func handleBackupConnCheck(w http.ResponseWriter, r *http.Request, s *domainStore) {
@@ -1585,7 +1585,8 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 		case "/api/v2/core/settings/upgrade":
 			success(w, map[string]any{"testVersion": "", "newVersion": "", "latestVersion": "", "releaseNote": ""})
 		case "/api/v2/core/settings/upgrade/releases":
-			success(w, []any{})
+			// 当前无远端发布源时返回可迭代的空结果，并保留同步状态字段。
+			success(w, map[string]any{"items": make([]map[string]any, 0), "total": 0, "source": "unconfigured"})
 		case "/api/v2/core/settings/memo":
 			success(w, copy["memo"])
 		default:

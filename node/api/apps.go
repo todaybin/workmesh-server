@@ -66,7 +66,7 @@ func getAppStore() *appStore {
 		state.Catalog = append([]appRecord(nil), state.Apps...)
 	}
 	if state.Ignored == nil {
-		state.Ignored = []map[string]any{}
+		state.Ignored = make([]map[string]any, 0)
 	}
 	appStoreInstance = &appStore{path: path, state: state}
 	return appStoreInstance
@@ -213,12 +213,42 @@ func RegisterAppRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/apps/detail/node/{appKey}/{version}", func(w http.ResponseWriter, r *http.Request) { appCatalogGet(w, s, r.PathValue("appKey")) })
 	mux.HandleFunc("GET /api/v2/apps/details/{id}", func(w http.ResponseWriter, r *http.Request) { appCatalogGet(w, s, r.PathValue("id")) })
 	mux.HandleFunc("GET /api/v2/apps/services/{key}", func(w http.ResponseWriter, r *http.Request) {
-		appOK(w, []map[string]any{{"label": "web", "value": "web", "status": "running", "appKey": r.PathValue("key")}})
+		key := r.PathValue("key")
+		s.mu.RLock()
+		_, item := findApp(s.state.Apps, key)
+		s.mu.RUnlock()
+		services := make([]map[string]any, 0)
+		if item.ID != "" {
+			if raw, ok := item.Config["services"].([]any); ok {
+				for _, service := range raw {
+					if value, ok := service.(map[string]any); ok {
+						services = append(services, value)
+					}
+				}
+			}
+			if len(services) == 0 {
+				services = append(services, map[string]any{"label": item.Name, "value": item.Key, "status": item.Status, "appKey": item.Key})
+			}
+		}
+		appOK(w, services)
 	})
 	mux.HandleFunc("GET /api/v2/apps/icon/{key}", appIcon)
 	mux.HandleFunc("GET /api/v2/apps/installed/info/{appInstallId}", func(w http.ResponseWriter, r *http.Request) { appInstalledGet(w, s, r.PathValue("appInstallId")) })
 	mux.HandleFunc("GET /api/v2/apps/installed/params/{appInstallId}", func(w http.ResponseWriter, r *http.Request) { appInstalledGet(w, s, r.PathValue("appInstallId")) })
-	mux.HandleFunc("GET /api/v2/apps/installed/delete/check/{appInstallId}", func(w http.ResponseWriter, r *http.Request) { appOK(w, []map[string]any{}) })
+	mux.HandleFunc("GET /api/v2/apps/installed/delete/check/{appInstallId}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("appInstallId")
+		s.mu.RLock()
+		_, item := findApp(s.state.Apps, id)
+		s.mu.RUnlock()
+		resources := make([]map[string]any, 0)
+		if item.ID != "" {
+			resources = append(resources, map[string]any{"type": "app", "id": item.ID, "name": item.Name, "status": item.Status})
+			if container := appValue(item.Config, "containerName"); container != "" {
+				resources = append(resources, map[string]any{"type": "container", "name": container})
+			}
+		}
+		appOK(w, map[string]any{"appInstallId": id, "exists": item.ID != "", "canDelete": item.ID != "", "resources": resources})
+	})
 	for _, path := range []string{"/api/v2/apps/install", "/api/v2/apps/installed/check", "/api/v2/apps/installed/conf", "/api/v2/apps/installed/config/update", "/api/v2/apps/installed/conninfo", "/api/v2/apps/installed/ignore", "/api/v2/apps/installed/loadport", "/api/v2/apps/installed/op", "/api/v2/apps/installed/params/update", "/api/v2/apps/installed/port/change", "/api/v2/apps/installed/sort/update", "/api/v2/apps/installed/sync", "/api/v2/apps/installed/update/versions", "/api/v2/apps/ignored/cancel"} {
 		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
 			handleAppPost(w, s, strings.TrimPrefix(r.URL.Path, "/api/v2/apps/"), appBody(r))
@@ -250,7 +280,13 @@ func appCatalogGet(w http.ResponseWriter, s *appStore, id string) {
 	}
 	data := appRecordData(item)
 	data["available"] = true
-	data["details"] = map[string]any{"version": item.Version, "type": "runtime", "params": []any{}, "dockerCompose": ""}
+	params := any(map[string]any{})
+	if item.Config != nil {
+		if configured, ok := item.Config["params"]; ok {
+			params = configured
+		}
+	}
+	data["details"] = map[string]any{"version": item.Version, "type": "runtime", "params": params, "dockerCompose": appValue(item.Config, "dockerCompose", "compose")}
 	appOK(w, data)
 }
 
@@ -306,7 +342,7 @@ func handleAppPost(w http.ResponseWriter, s *appStore, path string, body map[str
 	case "installed/conninfo":
 		appOK(w, map[string]any{"status": "unknown", "username": "", "password": "", "privilege": false, "containerName": appValue(body, "name"), "serviceName": appValue(body, "name"), "systemIP": "127.0.0.1", "port": 0})
 	case "installed/conf":
-		appOK(w, map[string]any{"type": appValue(body, "type"), "name": appValue(body, "name"), "params": []any{}, "dockerCompose": ""})
+		appOK(w, map[string]any{"type": appValue(body, "type"), "name": appValue(body, "name"), "params": make([]any, 0), "dockerCompose": ""})
 	case "installed/op":
 		handleAppOperation(w, s, body)
 	case "installed/port/change", "installed/params/update", "installed/config/update":
@@ -328,7 +364,16 @@ func handleAppPost(w http.ResponseWriter, s *appStore, path string, body map[str
 		s.mu.Unlock()
 		appOK(w, map[string]any{"updated": true})
 	case "installed/update/versions":
-		appOK(w, []map[string]any{})
+		id := appValue(body, "appInstallId", "id", "key", "name")
+		s.mu.RLock()
+		versions := make([]map[string]any, 0)
+		for _, app := range s.state.Catalog {
+			if id == "" || app.Key == id || app.ID == id || app.Name == id {
+				versions = append(versions, map[string]any{"version": app.Version, "appKey": app.Key, "name": app.Name})
+			}
+		}
+		s.mu.RUnlock()
+		appOK(w, versions)
 	case "installed/ignore":
 		s.mu.Lock()
 		s.state.Ignored = append(s.state.Ignored, body)

@@ -56,6 +56,7 @@
 | [~] | 服务端 i18n/localizer | `core/i18n`、`agent/i18n` | 前端 `vue-i18n`；Go 错误仍有中文固定文本 | 提供 zh/en 资源加载、按请求语言返回错误 |
 | [~] | 业务错误、多错误聚合和错误码 | `core/buserr/*.go` | `runtime/http` ERR envelope | 完成错误码目录和逐域映射测试 |
 | [x] | 异步任务、取消、重试、超时和日志 | `core/app/task/task.go`、`agent/global/global.go` | `node/service/cronjob.go`、任务 API；Go 单测 | 取消请求可终止执行，重启后记录可恢复 |
+| [x] | 任务隔离 Provider 生命周期与 CLI 白名单 | `apps/workmesh-node/agent/app/api/v2/workmesh_task.go`、`agent/utils/cubesandbox/task.go`、`forgevm_task_backend.go` | `node/service/taskruntime/taskruntime.go`、`node/api/ai_execution.go:taskHandler`；固定 sha256 CLI、argv 校验、状态转换和 30 分钟超时 | 未配置真实 CLI 时返回明确 503；配置摘要后 create/start/exec/collect/cancel/destroy 均调用受控 Provider，禁止宿主 Shell |
 | [~] | 任务日志滚动与清理 | `core/log`、`agent/log` | `runtime/log/logger.go`、日志 API | 增加滚动文件、保留周期和磁盘上限验收 |
 
 ## 后台作业与数据维护
@@ -138,3 +139,8 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 - [x] 站点运行状态切换和可用性检查：`POST /api/v2/websites/operate`、`POST /api/v2/websites/check`，状态写入 `websites.json` 并拒绝未知操作。
 - [x] 站点域名管理：`GET /api/v2/websites/domains/:websiteId`、`POST /api/v2/websites/domains*`，域名/端口校验后原子写入 `website-domains.json`。
 - [x] 站点配置隐藏入口：Nginx、rewrite、目录、跳转、防盗链、HTTPS 配置统一持久化到 `website-configs.json`，网站不存在时返回 404。
+
+### 2026-08-30 应用目录详情
+
+- [x] 应用详情、服务状态和安装参数从 `apps.json` 真实记录派生；详情中的 params/compose 不再使用固定空数组。
+- [x] 安装删除检查返回应用及容器资源清单；应用版本查询按 catalog 记录过滤并限制在内存状态范围内。
