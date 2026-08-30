@@ -1272,22 +1272,46 @@ func listSystemCronEntries() []map[string]any {
 
 func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 	search := func(w http.ResponseWriter, r *http.Request) {
-		v, _ := requestMap(r)
+		v, err := requestMap(r)
+		if err != nil {
+			domainError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+			return
+		}
 		q := strings.ToLower(valueString(v, "keyword", "search", "message"))
+		typ := strings.ToLower(valueString(v, "type", "logType"))
+		level := strings.ToLower(valueString(v, "level", "status"))
 		s.mu.RLock()
 		items := append([]logItem(nil), s.state.Logs...)
 		s.mu.RUnlock()
 		if q != "" {
 			filtered := items[:0]
 			for _, item := range items {
-				if strings.Contains(strings.ToLower(item.Message), q) {
+				if (q == "" || strings.Contains(strings.ToLower(item.Message), q)) &&
+					(typ == "" || strings.EqualFold(item.Type, typ)) &&
+					(level == "" || strings.EqualFold(item.Level, level)) {
 					filtered = append(filtered, item)
 				}
 			}
 			items = filtered
 		}
 		sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
-		success(w, map[string]any{"items": items, "total": len(items)})
+		page, size := intValue(v, "page"), intValue(v, "pageSize")
+		if page < 1 {
+			page = 1
+		}
+		if size < 1 || size > 200 {
+			size = 50
+		}
+		total := len(items)
+		start := (page - 1) * size
+		if start > total {
+			start = total
+		}
+		end := start + size
+		if end > total {
+			end = total
+		}
+		success(w, map[string]any{"items": items[start:end], "total": total, "page": page, "pageSize": size})
 	}
 	for _, path := range []string{"/api/v2/logs/search", "/api/v2/log/search", "/api/v2/logs/tasks/search", "/api/v2/core/logs/login", "/api/v2/core/logs/operation"} {
 		mux.HandleFunc("POST "+path, search)
@@ -1306,9 +1330,25 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 		domainError(w, 404, "NOT_FOUND", "日志不存在")
 	})
 	for _, path := range []string{"/api/v2/logs/clear", "/api/v2/core/logs/clean"} {
-		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, _ *http.Request) {
+		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
+			v, err := requestMap(r)
+			if err != nil {
+				domainError(w, 400, "INVALID_JSON", err.Error())
+				return
+			}
+			logType := strings.ToLower(valueString(v, "type", "logType"))
 			s.mu.Lock()
-			s.state.Logs = nil
+			if logType == "" {
+				s.state.Logs = nil
+			} else {
+				kept := s.state.Logs[:0]
+				for _, item := range s.state.Logs {
+					if !strings.EqualFold(item.Type, logType) {
+						kept = append(kept, item)
+					}
+				}
+				s.state.Logs = kept
+			}
 			_ = s.saveLocked()
 			s.mu.Unlock()
 			success(w, nil)
