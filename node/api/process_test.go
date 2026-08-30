@@ -40,6 +40,23 @@ func TestProcessWebSocketUpgradeRequiresAuth(t *testing.T) {
 	}
 }
 
+func TestProcessWebSocketRejectsCrossOrigin(t *testing.T) {
+	t.Setenv("WORKMESH_PROCESS_TOKEN", "process-secret")
+	mux := http.NewServeMux()
+	registerProcessRoutes(mux)
+	req := httptest.NewRequest(http.MethodGet, "http://node.example/api/v2/process/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	req.Header.Set("X-WorkMesh-Token", "process-secret")
+	req.Header.Set("Origin", "https://evil.example")
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin websocket status = %d, want 403", res.Code)
+	}
+}
+
 func TestWriteWebSocketTextFrameExtendedLength(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()

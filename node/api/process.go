@@ -38,6 +38,10 @@ func handleProcessWebSocket(w http.ResponseWriter, r *http.Request) {
 	if !requireStreamAuth(w, r, "WORKMESH_PROCESS_TOKEN", "WORKMESH_STREAM_TOKEN") {
 		return
 	}
+	if !validStreamOrigin(r) {
+		wmhttp.JSON(w, http.StatusForbidden, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "WEBSOCKET_ORIGIN_DENIED"}})
+		return
+	}
 	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
 	if key == "" {
 		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "WEBSOCKET_KEY_REQUIRED"}})
@@ -56,7 +60,7 @@ func handleProcessWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 	sum := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
 	accept := base64.StdEncoding.EncodeToString(sum[:])
-	_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: " + accept + "\\r\\n\\r\\n")
+	_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n")
 	if err := rw.Flush(); err != nil {
 		return
 	}
