@@ -66,6 +66,7 @@ type CoreService struct {
 	passkeys        map[string]Passkey
 	passkeySessions map[string]time.Time
 	passkeyPath     string
+	usersPath       string
 }
 
 // NewCoreService 创建默认管理员和基础设置。
@@ -74,9 +75,55 @@ func NewCoreService() *CoreService {
 	if dataDir == "" {
 		dataDir = ".workmesh-data"
 	}
-	s := &CoreService{users: map[string]User{"admin": {ID: "admin", Name: "admin", Role: "ADMIN", Password: hashPassword("admin"), Groups: []string{"administrators"}}}, sessions: make(map[string]Session), groups: make(map[string]map[string]any), settings: map[string]string{"language": "zh", "theme": "system", "securityEntrance": ""}, passkeys: make(map[string]Passkey), passkeySessions: make(map[string]time.Time), passkeyPath: filepath.Join(dataDir, "passkeys.json")}
+	s := &CoreService{users: map[string]User{"admin": {ID: "admin", Name: "admin", Role: "ADMIN", Password: hashPassword("admin"), Groups: []string{"administrators"}}}, sessions: make(map[string]Session), groups: make(map[string]map[string]any), settings: map[string]string{"language": "zh", "theme": "system", "securityEntrance": ""}, passkeys: make(map[string]Passkey), passkeySessions: make(map[string]time.Time), passkeyPath: filepath.Join(dataDir, "passkeys.json"), usersPath: filepath.Join(dataDir, "users.json")}
+	s.loadUsers()
 	s.loadPasskeys()
 	return s
+}
+
+// loadUsers 读取本地用户哈希；文件损坏或不存在时保留首次启动管理员。
+func (s *CoreService) loadUsers() {
+	raw, err := os.ReadFile(s.usersPath)
+	if err != nil {
+		return
+	}
+	var users map[string]persistedUser
+	if json.Unmarshal(raw, &users) != nil || len(users) == 0 {
+		return
+	}
+	s.users = make(map[string]User, len(users))
+	for key, item := range users {
+		s.users[key] = User{ID: item.ID, Name: item.Name, Role: item.Role, Password: item.Password, Groups: item.Groups, MFA: item.MFA, API: item.API}
+	}
+}
+
+type persistedUser struct {
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Role     string    `json:"role"`
+	Password string    `json:"password"`
+	Groups   []string  `json:"groups,omitempty"`
+	MFA      bool      `json:"mfa"`
+	API      APIConfig `json:"api,omitempty"`
+}
+
+func (s *CoreService) saveUsersLocked() error {
+	if err := os.MkdirAll(filepath.Dir(s.usersPath), 0o700); err != nil {
+		return err
+	}
+	items := make(map[string]persistedUser, len(s.users))
+	for key, user := range s.users {
+		items[key] = persistedUser{ID: user.ID, Name: user.Name, Role: user.Role, Password: user.Password, Groups: user.Groups, MFA: user.MFA, API: user.API}
+	}
+	raw, err := json.MarshalIndent(items, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.usersPath + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.usersPath)
 }
 
 // ListUsers 返回脱敏后的本地用户列表，不包含密码和 API 密钥。
@@ -286,6 +333,9 @@ func (s *CoreService) UpdateCurrentUser(sessionID, name, oldPassword, newPasswor
 		user.Password = hashPassword(newPassword)
 	}
 	s.users[user.Name] = user
+	if err := s.saveUsersLocked(); err != nil {
+		return User{}, errors.New("保存用户凭据失败: " + err.Error())
+	}
 	return publicUser(user), nil
 }
 
