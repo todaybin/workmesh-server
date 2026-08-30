@@ -261,7 +261,12 @@ if (manifestPath) {
 }
 if (!routes.length) throw new Error(`未发现旧 Core/Agent 路由: ${legacyRoot}`);
 const sources = collectNewSources(projectRoot);
-const interfaces = routes.map((route) => inspectRoute(route, sources));
+const interfaces = routes.map((route) => {
+  // 标准库 ServeMux 的 GET 处理器按 HTTP 语义同时承接 HEAD。
+  // 复用 GET 的实现证据，避免把静态资源 HEAD 误报为 missing。
+  if (route.method === 'HEAD') return { ...inspectRoute({ ...route, method: 'GET' }, sources), method: 'HEAD' };
+  return inspectRoute(route, sources);
+});
 const report = {
   schema: 1,
   generatedFrom: 'apps/workmesh-node/core+agent',

@@ -3,8 +3,8 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T05:31:16.430Z。
-共 870 条接口：implemented 468、partial 230、compatibility 169、missing 3。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T05:34:43.700Z。
+共 870 条接口：implemented 471、partial 230、compatibility 169。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
 
@@ -917,10 +917,10 @@
 | implemented | GET | `/favicon.ico/*filepath` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
 | implemented | GET | `/public/*filepath` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
 | implemented | GET | `/swagger/*any` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
-| missing | HEAD | `/assets/*filepath` | - | unknown | unknown | missing | 新服务未发现对应路由注册 |
-| implemented | HEAD | `/favicon.ico` | - | unknown | unknown | missing | - |
-| missing | HEAD | `/favicon.ico/*filepath` | - | unknown | unknown | missing | 新服务未发现对应路由注册 |
-| missing | HEAD | `/public/*filepath` | - | unknown | unknown | missing | 新服务未发现对应路由注册 |
+| implemented | HEAD | `/assets/*filepath` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
+| implemented | HEAD | `/favicon.ico` | apps/workmesh-server/cmd/workmesh-server/main.go | unknown | memory | present | - |
+| implemented | HEAD | `/favicon.ico/*filepath` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
+| implemented | HEAD | `/public/*filepath` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
 
 ## visitors
 
