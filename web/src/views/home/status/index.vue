@@ -338,10 +338,10 @@
                         />
                     </template>
                 </el-popover>
-                <el-tooltip :content="item.productName" v-if="item.productName.length > 25">
-                    <span class="input-help">{{ item.productName.substring(0, 22) }}...</span>
+                <el-tooltip :content="item.productName || ''" v-if="(item.productName || '').length > 25">
+                    <span class="input-help">{{ (item.productName || '').substring(0, 22) }}...</span>
                 </el-tooltip>
-                <span class="input-help" v-else>{{ item.productName }}</span>
+                <span class="input-help" v-else>{{ item.productName || '-' }}</span>
             </el-col>
         </template>
         <template v-for="(item, index) of currentInfo.npuData" :key="index">
@@ -387,10 +387,10 @@
                         />
                     </template>
                 </el-popover>
-                <el-tooltip :content="item.productName" v-if="item.productName.length > 25">
-                    <span class="input-help">{{ item.productName.substring(0, 22) }}...</span>
+                <el-tooltip :content="item.productName || ''" v-if="(item.productName || '').length > 25">
+                    <span class="input-help">{{ (item.productName || '').substring(0, 22) }}...</span>
                 </el-tooltip>
-                <span class="input-help" v-else>{{ item.productName }}</span>
+                <span class="input-help" v-else>{{ item.productName || '-' }}</span>
             </el-col>
         </template>
         <template v-for="(item, index) of currentInfo.xpuData" :key="index">
@@ -424,10 +424,10 @@
                         />
                     </template>
                 </el-popover>
-                <el-tooltip :content="item.deviceName" v-if="item.deviceName.length > 25">
-                    <span class="input-help">{{ item.deviceName.substring(0, 22) }}...</span>
+                <el-tooltip :content="item.deviceName || ''" v-if="(item.deviceName || '').length > 25">
+                    <span class="input-help">{{ (item.deviceName || '').substring(0, 22) }}...</span>
                 </el-tooltip>
-                <span class="input-help" v-else>{{ item.deviceName }}</span>
+                <span class="input-help" v-else>{{ item.deviceName || '-' }}</span>
             </el-col>
         </template>
         <el-col :xs="6" :sm="6" :md="3" :lg="3" :xl="3" align="center" v-if="totalCount > 5">
@@ -681,9 +681,9 @@ const formatMetricPair = (used?: string, total?: string) => {
     return `${used || 'N/A'} / ${total || 'N/A'}`;
 };
 
-const formatDashboardTemperature = (value?: string) => {
-    if (!value) return 'N/A';
-    return value.replace(/\s*°?C\b/, ' °C');
+const formatDashboardTemperature = (value?: string | number) => {
+    if (value === undefined || value === null || value === '') return 'N/A';
+    return String(value).replace(/\s*°?C\b/, ' °C');
 };
 
 const normalizeDashboardBase = (base?: Partial<Dashboard.BaseInfo>): Dashboard.BaseInfo => ({
