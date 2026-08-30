@@ -56,3 +56,24 @@ func TestFilesSaveAndDelete(t *testing.T) {
 		t.Fatal("file still exists")
 	}
 }
+
+func TestFilesSaveReplacesAtomically(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "nested", "saved.txt")
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+	body, _ := json.Marshal(map[string]any{"path": path, "content": "atomic-content"})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/files/save", bytes.NewReader(body)))
+	if res.Code != http.StatusOK {
+		t.Fatalf("save nested status=%d body=%s", res.Code, res.Body.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "atomic-content" {
+		t.Fatalf("saved content mismatch: %q err=%v", string(data), err)
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(root, "nested", ".workmesh-save-*"))
+	if len(leftovers) != 0 {
+		t.Fatalf("temporary save file should not remain: %v", leftovers)
+	}
+}

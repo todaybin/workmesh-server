@@ -109,7 +109,29 @@ func handleFilesSave(w http.ResponseWriter, r *http.Request) {
 		fileError(w, 400, err)
 		return
 	}
-	if err = os.WriteFile(path, []byte(req.Content), 0600); err != nil {
+	// 临时文件与目标位于同一目录，确保 rename 在同一文件系统内原子替换，
+	// 避免服务中断或并发读取时看到半写入内容。
+	if err = os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		fileError(w, http.StatusInternalServerError, err)
+		return
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".workmesh-save-*")
+	if err != nil {
+		fileError(w, http.StatusInternalServerError, err)
+		return
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err = tmp.Chmod(0600); err == nil {
+		_, err = tmp.WriteString(req.Content)
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmpName, path)
+	}
+	if err != nil {
 		fileError(w, 500, err)
 		return
 	}
