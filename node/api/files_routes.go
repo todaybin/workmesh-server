@@ -327,6 +327,10 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(share.Path)+"\"")
 			http.ServeFile(w, r, share.Path)
 		case "wget/process", "wget/process/keys":
+			if path == "wget/process" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+				handleWgetProgressStream(w, r)
+				return
+			}
 			initFileWgetState()
 			fileWgetState.RLock()
 			items := make([]fileWgetProcess, 0, len(fileWgetState.items))

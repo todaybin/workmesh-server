@@ -153,7 +153,8 @@ func handleContainerRequest(docker service.DockerService, w http.ResponseWriter,
 		handleDaemonJSON(w, r)
 		return
 	case r.Method == http.MethodGet && path == "search/log":
-		result, err = model.CommandResult{ExitCode: 0, Stdout: "", Stderr: ""}, nil
+		handleContainerLogStream(w, r)
+		return
 	case r.Method == http.MethodGet && path == "limit":
 		result, err = runDocker(r, "info")
 	case r.Method == http.MethodPost:

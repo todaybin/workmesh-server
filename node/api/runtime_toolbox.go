@@ -307,9 +307,7 @@ func registerRuntimeSubroutes(mux *http.ServeMux, s *runtimeStore) {
 
 func registerTerminalRoutes(mux *http.ServeMux) {
 	for _, p := range []string{"/api/v2/hosts/terminal/local", "/api/v2/hosts/terminal/container", "/api/v2/hosts/terminal/ssh"} {
-		mux.HandleFunc("GET "+p, func(w http.ResponseWriter, _ *http.Request) {
-			runtimeOK(w, map[string]any{"supported": true, "stream": "websocket", "status": "ready"})
-		})
+		mux.HandleFunc("GET "+p, handleTerminalStream)
 	}
 }
 
