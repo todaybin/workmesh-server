@@ -10,6 +10,8 @@
 - 主节点：`/opt/workmesh-server/bin/workmesh-server`
 - 次节点：`/opt/workmesh-server-secondary/bin/workmesh-server`
 - 两台节点二进制摘要一致，替换前均已生成带 UTC 时间戳的备份文件。
+- 前端生产构建：Vite 7656 个模块，405 个静态文件；压缩包 SHA256：`fa46b85af1e63b4505aafc22d550eea2f5093d78cd2753a7fdb761489a97149a`。
+- 两台节点的 `web/dist` 均已备份后替换，服务保持 `active`。
 
 ## 功能验收
 
@@ -20,6 +22,7 @@
 | 计划任务执行记录 | `handle` 后查询 `search/records` | 记录 stdout、stderr、退出码和耗时 |
 | 数据库登记更新 | 主节点 POST `/api/v2/databases/db/update`、`search` | JSON 持久化、分页和更新校验成功 |
 | 文件分享 | 主节点 POST `/api/v2/files/share/create`、GET `share/check`、POST `share/del` | token 生命周期和有效文件校验成功 |
+| 前端资源服务 | `/`、`/assets/js/*.js`、`/assets/css/*.css` | 入口 HTTP 200；JS 为 `text/javascript`，CSS 为 `text/css` |
 | 次节点服务 | SSH 本机访问 `127.0.0.1:9999/health` 与命令搜索 | HTTP 200 |
 
 ## 自动化验证
