@@ -19,8 +19,10 @@
 | 隐藏能力扫描 | init 38、middleware 14、i18n 26、log 12、cron 5，章节全部存在 |
 | Go 测试 | `go test ./...` 通过 |
 | Linux amd64 制品 | SHA256 `A6EE1B1E684852FE6F741CC594B76C8845202A6BFB0D5E75BD658A61579F2048` |
+| 双节点制品 | 主/次 `systemd` 均为 `active`，远端二进制 SHA256 与上值一致 |
+| 前端与节点闭环 | 主节点 HTML `text/html`、JS `text/javascript`；登录后 `nodes/add`、`nodes/list`、`nodes/del` 真实往返通过；两台 `/health`、`/ready` HTTP 200 |
+| 隐藏路由冒烟 | xpack monitor/WAF、无品牌 Swagger 均非 404；公开 favicon 缺少文件时按 404 处理 |
 
 ## 生产部署状态
 
-本批制品已在本地构建并完成静态/单元验证，尚未替换 `61.184.12.165` 与 `162.14.96.198` 上正在运行的制品。生产替换属于高风险操作，需人工确认维护窗口后执行；替换时必须保留当前二进制、配置和数据备份，并复验 `/health`、`/ready`、静态 MIME、870 条路由和双节点链路。
-
+本批制品已替换到 `61.184.12.165:/opt/workmesh-server` 与 `162.14.96.198:/opt/workmesh-server-secondary`，两端均保留替换前二进制备份并已复验服务状态。Gateway 注册仍为 `registration=pending`，两台节点的 `server.env` 缺少有效 Gateway 登录/节点凭据，不能伪造注册成功状态；补齐凭据后需单独复验注册、heartbeat 和跨节点透传。
