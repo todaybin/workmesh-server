@@ -59,3 +59,28 @@ func TestContainerPathValidation(t *testing.T) {
 		t.Fatal("valid path rejected")
 	}
 }
+
+// TestDockerStatusContract 确保状态接口始终返回前端需要的 isExist/isActive 字段，
+// 即使测试机未安装 Docker 也不能退化为通用命令结果。
+func TestDockerStatusContract(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v2/containers/docker/status", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("docker status code=%d body=%s", res.Code, res.Body.String())
+	}
+	var envelope struct {
+		Code int `json:"code"`
+		Data struct {
+			IsExist  *bool `json:"isExist"`
+			IsActive *bool `json:"isActive"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode docker status: %v", err)
+	}
+	if envelope.Code != http.StatusOK || envelope.Data.IsExist == nil || envelope.Data.IsActive == nil {
+		t.Fatalf("invalid docker status envelope: %s", res.Body.String())
+	}
+}

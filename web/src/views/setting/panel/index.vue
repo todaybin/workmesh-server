@@ -222,7 +222,12 @@ import { getSettingInfo, updateSetting, getSystemAvailable, getAgentSettingInfo 
 import { useGlobalStore } from '@/composables/useGlobalStore';
 import { useTheme } from '@/global/use-theme';
 import { MsgSuccess, MsgError } from '@/utils/message';
-import { getWorkMeshGatewayStatus, unbindWorkMeshGateway, type WorkMeshGatewayStatus } from '@/api/modules/workmesh';
+import {
+    clearWorkMeshGatewayStatusCache,
+    getWorkMeshGatewayStatus,
+    unbindWorkMeshGateway,
+    type WorkMeshGatewayStatus,
+} from '@/api/modules/workmesh';
 import { gatewayLoginApi } from '@/api/modules/auth';
 import ThemeColor from '@/views/setting/panel/theme-color/index.vue';
 import Watermark from '@/views/setting/panel/watermark/index.vue';
@@ -413,6 +418,7 @@ const unbindGateway = async () => {
         );
         loading.value = true;
         await unbindWorkMeshGateway();
+        clearWorkMeshGatewayStatusCache();
         gatewayStatus.configured = false;
         MsgSuccess('Gateway 账号已解绑');
         window.location.reload();
@@ -431,6 +437,7 @@ const bindGateway = async () => {
     gatewayBinding.value = true;
     try {
         await gatewayLoginApi(gatewayLoginForm);
+        clearWorkMeshGatewayStatusCache();
         gatewayLoginForm.password = '';
         MsgSuccess('Gateway 账号绑定成功');
         window.location.reload();

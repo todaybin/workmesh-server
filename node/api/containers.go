@@ -787,7 +787,13 @@ func handleContainerRequest(docker service.DockerService, w http.ResponseWriter,
 
 	switch {
 	case r.Method == http.MethodGet && (path == "docker/status" || path == "status"):
-		result, err = docker.Status(r.Context())
+		status, statusErr := docker.StatusInfo(r.Context())
+		if statusErr != nil {
+			wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": statusErr.Error()})
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": status})
+		return
 	case r.Method == http.MethodGet && (path == "list" || path == "list/stats"):
 		result, err = docker.List(r.Context())
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "stats/"):

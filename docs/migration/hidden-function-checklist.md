@@ -289,3 +289,5 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | [x] | Agent 角色嵌套 CRUD 与频道聚合 | `apps/workmesh-node/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleAgentRoute`；roles 持久化、重复冲突、父 Agent 校验 | 同上 |
 | [x] | Hermes 会话生命周期 | `apps/workmesh-node/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleSessionMutation`；重命名/删除位于通用删除分支之前，不存在返回 404 | 同上 |
 | [x] | Ollama/MCP 资源状态操作不伪造记录 | `apps/workmesh-node/agent/app/api/v2/ai.go`、`mcp_server.go` | `node/api/ai_execution.go:handleAIResourceOperation`；资源 ID/名称必填，不存在返回 404，状态原子写入 | `node/api/ai_execution_test.go:TestAIResourceOperationsRequireExistingResource` |
+
+| [x] | Docker CLI/daemon 状态 DTO 探测 | node/service/docker.go、node/api/host_container_cron.go | GET /api/v2/containers/docker/status 返回 isExist/isActive/version/error，10 秒超时并区分未安装与 daemon 不可用 | node/api/hosts_containers_test.go:TestDockerStatusContract |

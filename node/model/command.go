@@ -23,6 +23,15 @@ type CommandResult struct {
 	Duration int64  `json:"durationMs"`
 }
 
+// DockerStatus 描述 Docker 客户端和守护进程的可用状态。
+// IsExist 表示本机是否存在 docker CLI，IsActive 表示 CLI 能否连接守护进程。
+type DockerStatus struct {
+	IsActive bool   `json:"isActive"`
+	IsExist  bool   `json:"isExist"`
+	Version  string `json:"version,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 // DockerOperationRequest 描述 Docker 容器操作。
 type DockerOperationRequest struct {
 	Container string `json:"container"`

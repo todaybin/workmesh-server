@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T22:21:27.736Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T22:35:06.693Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -272,7 +272,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/api/v2/containers/daemonjson` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/daemonjson/file` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
-| implemented | GET | `/api/v2/containers/docker/status` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
+| implemented | GET | `/api/v2/containers/docker/status` | apps/workmesh-server/node/api/host_container_cron.go、node/service/docker.go | 节点会话/HMAC | exec.LookPath + docker version（10 秒超时） | node/api/hosts_containers_test.go:TestDockerStatusContract、node/service/docker_status_test.go | isExist/isActive/version/error DTO |
 | implemented | GET | `/api/v2/containers/image` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/image/all` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/limit` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |

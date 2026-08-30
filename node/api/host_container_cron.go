@@ -66,8 +66,12 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	})
 
 	mux.HandleFunc("GET /api/v2/containers/docker/status", func(w http.ResponseWriter, r *http.Request) {
-		result, err := docker.Status(r.Context())
-		writeCommandResult(w, result, err)
+		status, err := docker.StatusInfo(r.Context())
+		if err != nil {
+			wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": status})
 	})
 	mux.HandleFunc("GET /api/v2/containers/list", func(w http.ResponseWriter, r *http.Request) {
 		result, err := docker.List(r.Context())

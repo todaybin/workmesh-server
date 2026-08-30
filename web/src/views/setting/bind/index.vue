@@ -33,7 +33,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { getWorkMeshGatewayStatus } from '@/api/modules/workmesh';
+import { clearWorkMeshGatewayStatusCache, getWorkMeshGatewayStatus } from '@/api/modules/workmesh';
 import { gatewayLoginApi } from '@/api/modules/auth';
 
 const router = useRouter();
@@ -50,6 +50,7 @@ const bindGateway = async () => {
     loading.value = true;
     try {
         await gatewayLoginApi({ username: form.username.trim(), password: form.password });
+        clearWorkMeshGatewayStatusCache();
         ElMessage.success('Gateway 账号绑定成功');
         await router.replace({ name: 'home' });
     } catch (error: any) {
