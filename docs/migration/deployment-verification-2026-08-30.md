@@ -11,7 +11,7 @@
 | --- | --- | --- | --- |
 | 单进程服务 | `/health`、`/ready` | 主节点、次节点 HTTP 200 | systemd `active`；本机与主节点请求通过 |
 | 前端静态资源 | `/assets/*.js`、`/assets/*.css` | MIME 正确，返回真实文件 | JS `text/javascript`，CSS `text/css` |
-| 节点列表 | `POST /api/v2/core/nodes/list`、`GET /api/v2/core/nodes/simple/all` | 返回当前节点 ID、角色和在线状态 | 主节点 `primary-main`；次节点 `secondary-gateway-162` |
+| 节点列表 | `POST /api/v2/core/nodes/list`、`GET /api/v2/core/nodes/simple/all` | 返回当前节点 ID、角色、旧前端字段和在线状态 | 主节点 `primary-main`；次节点 `secondary-gateway-162`；兼容 `id/addr/version/isBound` |
 | 节点角色 | `GET /api/v2/core/nodes/role` | 返回当前角色和 epoch | 主/次节点真实状态 |
 | 基础设置 | `POST /api/v2/core/settings/search/base` | 返回语言、主题等设置 | HTTP 200，JSON data |
 | 执行中任务计数 | `GET /api/v2/logs/tasks/executing/count` | 返回数字计数 | HTTP 200，`data: 0` |

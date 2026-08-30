@@ -5,7 +5,9 @@ package api
 
 import (
 	"errors"
+	"hash/fnv"
 	"net/http"
+	"os"
 	"sync"
 
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
@@ -21,9 +23,13 @@ type RoleController struct {
 
 // nodeListItem 是前端节点选择器使用的兼容字段集合。
 type nodeListItem struct {
-	ID          string `json:"id"`
+	ID          int    `json:"id"`
 	NodeID      string `json:"nodeId"`
 	Name        string `json:"name"`
+	Addr        string `json:"addr"`
+	Version     string `json:"version"`
+	IsXpack     bool   `json:"isXpack"`
+	IsBound     bool   `json:"isBound"`
 	DisplayName string `json:"displayName"`
 	Role        string `json:"role"`
 	Status      string `json:"status"`
@@ -64,11 +70,30 @@ func RegisterRoleRoutesWithManager(mux *http.ServeMux, manager *role.Manager) {
 
 func (c *RoleController) list(w http.ResponseWriter, r *http.Request) {
 	state := c.manager.State(r.Context())
+	name := state.NodeID
+	if name == "" {
+		name = "local"
+	}
+	addr := os.Getenv("WORKMESH_NODE_ENDPOINT_URL")
+	if addr == "" {
+		addr = "127.0.0.1"
+	}
 	item := nodeListItem{
-		ID: state.NodeID, NodeID: state.NodeID, Name: state.NodeID,
-		DisplayName: state.NodeID, Role: state.Role, Status: "online", IsCurrent: true,
+		ID: nodeNumericID(state.NodeID), NodeID: state.NodeID, Name: name, Addr: addr,
+		Version: "workmesh-server", IsBound: true, DisplayName: name,
+		Role: state.Role, Status: "online", IsCurrent: true,
 	}
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": []nodeListItem{item}})
+}
+
+func nodeNumericID(nodeID string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(nodeID))
+	id := int(h.Sum32() & 0x7fffffff)
+	if id == 0 {
+		return 1
+	}
+	return id
 }
 
 func (c *RoleController) current(w http.ResponseWriter, r *http.Request) {
