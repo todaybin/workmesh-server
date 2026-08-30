@@ -653,14 +653,56 @@ func readLogFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
-	get := func(w http.ResponseWriter, _ *http.Request) {
+	// 默认字段与前端 SettingInfo/SettingBaseInfo 契约保持一致；状态文件中已有值会覆盖默认值。
+	defaults := map[string]any{
+		"systemVersion": "workmesh-server", "upgradeBackupCopies": "3", "developerMode": "false",
+		"sessionTimeout": 86400, "expirationDays": 0, "panelName": "WorkMesh", "edition": "community",
+		"theme": "system", "menuTabs": "false", "menuAccordion": "false", "language": "zh", "docSource": "official",
+		"serverPort": 9999, "port": "9999", "ipv6": "disable", "bindAddress": "0.0.0.0", "ssl": "disable", "sslType": "self",
+		"allowIPs": "", "allowIPTrustedProxies": "", "bindDomain": "", "passkeyTrustedProxies": "", "securityEntrance": "",
+		"dashboardMemoVisible": "true", "dashboardSimpleNodeVisible": "true", "complexityVerification": "false", "messageType": "system",
+		"emailVars": "", "weChatVars": "", "dingVars": "", "snapshotIgnore": "", "hideMenu": "", "noAuthSetting": "",
+		"proxyUrl": "", "proxyType": "", "proxyPort": "", "proxyUser": "", "proxyPasswd": "", "proxyPasswdKeep": "",
+		"scriptSync": "false", "lineHeight": "1.5", "letterSpacing": "0", "fontSize": "14", "fontFamily": "monospace",
+		"backgroundColor": "#1e1e1e", "foregroundColor": "#d4d4d4", "cursorBlink": "true", "cursorStyle": "block", "scrollback": "1000", "scrollSensitivity": "1",
+		"aiStatus": "disable", "aiAccountId": "", "aiPrefix": "", "aiRiskCommands": "",
+		"appStoreVersion": "", "appStoreLastModified": "", "appStoreSyncStatus": "ready", "memo": "",
+	}
+	s.mu.Lock()
+	if s.state.Settings == nil {
+		s.state.Settings = map[string]any{}
+	}
+	for key, value := range defaults {
+		if _, exists := s.state.Settings[key]; !exists {
+			s.state.Settings[key] = value
+		}
+	}
+	s.mu.Unlock()
+	get := func(w http.ResponseWriter, r *http.Request) {
 		s.mu.RLock()
 		copy := map[string]any{}
 		for k, v := range s.state.Settings {
 			copy[k] = v
 		}
 		s.mu.RUnlock()
-		success(w, copy)
+		switch r.URL.Path {
+		case "/api/v2/core/settings/search/available":
+			success(w, map[string]any{"available": true})
+		case "/api/v2/core/settings/interface":
+			success(w, []string{"127.0.0.1", "0.0.0.0"})
+		case "/api/v2/core/settings/apps/store/config":
+			success(w, map[string]any{"version": copy["appStoreVersion"], "lastModified": copy["appStoreLastModified"], "syncStatus": copy["appStoreSyncStatus"]})
+		case "/api/v2/core/settings/ssl/info":
+			success(w, map[string]any{"domain": copy["bindDomain"], "timeout": "", "rootPath": "", "cert": "", "key": "", "sslID": 0})
+		case "/api/v2/core/settings/upgrade":
+			success(w, map[string]any{"testVersion": "", "newVersion": "", "latestVersion": "", "releaseNote": ""})
+		case "/api/v2/core/settings/upgrade/releases":
+			success(w, []any{})
+		case "/api/v2/core/settings/memo":
+			success(w, copy["memo"])
+		default:
+			success(w, copy)
+		}
 	}
 	for _, path := range []string{"/api/v2/config/global", "/api/v2/core/settings/interface", "/api/v2/core/settings/apps/store/config", "/api/v2/core/settings/search/available", "/api/v2/core/settings/ssl/info", "/api/v2/core/settings/upgrade", "/api/v2/core/settings/upgrade/releases", "/api/v2/core/settings/memo"} {
 		mux.HandleFunc("GET "+path, get)
@@ -675,9 +717,18 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 		if s.state.Settings == nil {
 			s.state.Settings = map[string]any{}
 		}
-		for k, val := range v {
-			if strings.TrimSpace(k) != "" {
-				s.state.Settings[k] = val
+		// SettingUpdate 使用 key/value 包装；其余批量更新则直接合并字段。
+		if key := valueString(v, "key"); key != "" {
+			if val, exists := v["value"]; exists {
+				s.state.Settings[settingJSONKey(key)] = val
+			}
+		} else if content, exists := v["content"]; exists && r.URL.Path == "/api/v2/core/settings/memo" {
+			s.state.Settings["memo"] = content
+		} else {
+			for k, val := range v {
+				if strings.TrimSpace(k) != "" {
+					s.state.Settings[settingJSONKey(k)] = val
+				}
 			}
 		}
 		err = s.saveLocked()
@@ -690,6 +741,10 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 			domainError(w, 500, "STATE_SAVE", err.Error())
 			return
 		}
+		if r.URL.Path == "/api/v2/core/settings/memo" {
+			success(w, nil)
+			return
+		}
 		success(w, copy)
 	}
 	for _, path := range []string{"/api/v2/config/global", "/api/v2/core/settings/apps/store/update", "/api/v2/core/settings/bind/update", "/api/v2/core/settings/menu/update", "/api/v2/core/settings/port/update", "/api/v2/core/settings/proxy/update", "/api/v2/core/settings/search", "/api/v2/core/settings/search/base", "/api/v2/core/settings/terminal/update", "/api/v2/core/settings/ssl/update", "/api/v2/core/settings/upgrade", "/api/v2/core/settings/upgrade/notes", "/api/v2/core/settings/memo", "/api/v2/core/settings/update"} {
@@ -698,4 +753,12 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 	for _, path := range []string{"/api/v2/core/settings/menu/default", "/api/v2/core/settings/terminal/search", "/api/v2/core/settings/ssl/download", "/api/v2/core/settings/ssl/reload"} {
 		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, _ *http.Request) { success(w, map[string]any{}) })
 	}
+}
+
+// settingJSONKey 将旧接口的 PascalCase 配置键转换为前端使用的 lowerCamelCase。
+func settingJSONKey(key string) string {
+	if key == "" {
+		return key
+	}
+	return strings.ToLower(key[:1]) + key[1:]
 }

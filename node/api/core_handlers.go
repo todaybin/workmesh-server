@@ -6,6 +6,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -28,9 +29,9 @@ func coreToken() string {
 // 当前默认关闭外部认证因子，但接口保持幂等并返回稳定 envelope，便于后续接入硬件/云端提供商。
 func registerCoreAuthExtras(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/core/auth/passkey/list", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, []any{}) })
-	mux.HandleFunc("POST /api/v2/core/auth/api/generate", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, coreToken()) })
-	mux.HandleFunc("POST /api/v2/core/auth/api/update", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, nil) })
-	mux.HandleFunc("POST /api/v2/core/auth/current/update", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, nil) })
+	mux.HandleFunc("POST /api/v2/core/auth/api/generate", handleCoreAPIGenerate)
+	mux.HandleFunc("POST /api/v2/core/auth/api/update", handleCoreAPIUpdate)
+	mux.HandleFunc("POST /api/v2/core/auth/current/update", handleCoreCurrentUpdate)
 	mux.HandleFunc("POST /api/v2/core/auth/expired/reset", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, nil) })
 	mux.HandleFunc("POST /api/v2/core/auth/mfa", func(w http.ResponseWriter, _ *http.Request) {
 		coreJSON(w, map[string]string{"secret": "", "qrImage": ""})
@@ -65,7 +66,8 @@ func handleCoreLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: "workmesh_session", Value: session.ID, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	coreJSON(w, map[string]any{"user": user, "session": session})
+	// 同时返回旧前端使用的扁平字段和会话对象，确保新旧客户端均可登录。
+	coreJSON(w, map[string]any{"name": user.Name, "role": user.Role, "token": session.ID, "mfaStatus": "disabled", "mfaSession": "", "user": user, "session": session})
 }
 
 func handleCoreLogout(w http.ResponseWriter, r *http.Request) {
@@ -75,17 +77,111 @@ func handleCoreLogout(w http.ResponseWriter, r *http.Request) {
 	coreJSON(w, nil)
 }
 func handleCoreCurrent(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("workmesh_session")
+	sessionID := coreSessionID(r)
+	if sessionID == "" {
+		writeError(w, http.StatusUnauthorized, service.ErrUnauthenticated)
+		return
+	}
+	user, err := localCore.Current(sessionID)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
-	user, err := localCore.Current(cookie.Value)
+	apiConfig, _ := localCore.APIConfig(sessionID)
+	coreJSON(w, map[string]any{"id": user.ID, "name": user.Name, "mfaStatus": "disabled", "mfaInterval": 30, "complexitySetting": "medium", "authSource": "local", "authSourceStatus": "enabled", "apiInterfaceStatus": boolString(apiConfig.Enabled), "apiKey": apiConfig.Key, "ipWhiteList": apiConfig.IPWhiteList, "apiTrustedProxies": apiConfig.TrustedProxy, "apiKeyValidityTime": apiConfig.ValidityHours, "role": user.Role, "permissions": []string{"*"}, "masterOnlyPermissions": []string{}, "nodeRoles": []any{}})
+}
+
+// coreSessionID 从 Cookie 或 Bearer/API Key 头中读取会话标识。
+func coreSessionID(r *http.Request) string {
+	if cookie, err := r.Cookie("workmesh_session"); err == nil && strings.TrimSpace(cookie.Value) != "" {
+		return strings.TrimSpace(cookie.Value)
+	}
+	for _, header := range []string{"Authorization", "X-WorkMesh-Token", "X-API-Key"} {
+		value := strings.TrimSpace(r.Header.Get(header))
+		if strings.HasPrefix(strings.ToLower(value), "bearer ") {
+			value = strings.TrimSpace(value[len("bearer "):])
+		}
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func boolString(value bool) string {
+	if value {
+		return "enable"
+	}
+	return "disable"
+}
+
+func handleCoreCurrentUpdate(w http.ResponseWriter, r *http.Request) {
+	sessionID := coreSessionID(r)
+	if sessionID == "" {
+		writeError(w, http.StatusUnauthorized, service.ErrUnauthenticated)
+		return
+	}
+	var request struct {
+		Name        string `json:"name"`
+		Password    string `json:"password"`
+		OldPassword string `json:"oldPassword"`
+	}
+	if err := decodeJSON(r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	user, err := localCore.UpdateCurrentUser(sessionID, request.Name, request.OldPassword, request.Password)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, err)
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	coreJSON(w, user)
+}
+
+func handleCoreAPIGenerate(w http.ResponseWriter, r *http.Request) {
+	sessionID := coreSessionID(r)
+	if sessionID == "" {
+		writeError(w, http.StatusUnauthorized, service.ErrUnauthenticated)
+		return
+	}
+	key, err := localCore.GenerateAPIKey(sessionID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	coreJSON(w, key)
+}
+
+func handleCoreAPIUpdate(w http.ResponseWriter, r *http.Request) {
+	sessionID := coreSessionID(r)
+	if sessionID == "" {
+		writeError(w, http.StatusUnauthorized, service.ErrUnauthenticated)
+		return
+	}
+	var request struct {
+		Enabled            any    `json:"apiInterfaceStatus"`
+		APIKey             string `json:"apiKey"`
+		IPWhiteList        string `json:"ipWhiteList"`
+		APITrustedProxies  string `json:"apiTrustedProxies"`
+		APIKeyValidityTime int    `json:"apiKeyValidityTime"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	enabled := false
+	switch value := request.Enabled.(type) {
+	case bool:
+		enabled = value
+	case string:
+		enabled = strings.EqualFold(value, "enable") || strings.EqualFold(value, "enabled") || value == "1" || strings.EqualFold(value, "true")
+	}
+	err := localCore.UpdateAPIConfig(sessionID, service.APIConfig{Enabled: enabled, Key: request.APIKey, IPWhiteList: request.IPWhiteList, TrustedProxy: request.APITrustedProxies, ValidityHours: request.APIKeyValidityTime})
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err)
+		return
+	}
+	coreJSON(w, nil)
 }
 func handleCoreCaptcha(w http.ResponseWriter, _ *http.Request) {
 	coreJSON(w, map[string]any{"captchaID": "disabled", "required": false})

@@ -47,6 +47,7 @@ type LoginRequest struct {
 // RegisterRequest 是节点首次注册请求。
 type RegisterRequest struct {
 	NodeID          string            `json:"nodeId"`
+	PublicKey       string            `json:"publicKey,omitempty"`
 	DisplayName     string            `json:"displayName"`
 	Role            string            `json:"role"`
 	ProtocolVersion string            `json:"protocolVersion"`

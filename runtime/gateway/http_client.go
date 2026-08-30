@@ -6,9 +6,11 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,11 +29,15 @@ type HTTPClient struct {
 	HTTP        *http.Client
 	Timeout     time.Duration
 	AccessToken string
+	privateKey  ed25519.PrivateKey
+	publicKey   ed25519.PublicKey
 }
 
 // NewHTTPClient 创建 Gateway 客户端；BaseURL 必须为 https 地址（本地测试可使用 http）。
 func NewHTTPClient(baseURL, gatewayID, secret string) *HTTPClient {
-	return &HTTPClient{BaseURL: strings.TrimRight(baseURL, "/"), GatewayID: gatewayID, Secret: []byte(secret), HTTP: &http.Client{}, Timeout: 15 * time.Second}
+	seed := sha256.Sum256([]byte("workmesh-node:" + gatewayID + ":" + secret))
+	privateKey := ed25519.NewKeyFromSeed(seed[:])
+	return &HTTPClient{BaseURL: strings.TrimRight(baseURL, "/"), GatewayID: gatewayID, Secret: []byte(secret), HTTP: &http.Client{}, Timeout: 15 * time.Second, privateKey: privateKey, publicKey: privateKey.Public().(ed25519.PublicKey)}
 }
 
 // Login 使用 Gateway 账号换取节点授权摘要。
@@ -57,6 +63,7 @@ func (c *HTTPClient) Register(ctx context.Context, request RegisterRequest) (Aut
 	var response struct {
 		BindingID string `json:"bindingId"`
 	}
+	request.PublicKey = base64.RawStdEncoding.EncodeToString(c.publicKey)
 	err := c.do(ctx, http.MethodPost, "/workmesh/node/register", request, &response)
 	if err != nil {
 		return Authorization{}, err
@@ -145,6 +152,13 @@ func (c *HTTPClient) do(ctx context.Context, method, endpoint string, input, out
 		_, _ = mac.Write([]byte(method + "\n" + endpoint + "\n" + timestamp + "\n" + nonce + "\n" + string(body)))
 		request.Header.Set("X-WorkMesh-Signature", hex.EncodeToString(mac.Sum(nil)))
 		request.Header.Set("X-Signature", hex.EncodeToString(mac.Sum(nil)))
+	}
+	if len(c.privateKey) == ed25519.PrivateKeySize {
+		bodyHash := sha256.Sum256(body)
+		message := strings.Join([]string{strings.ToUpper(method), endpoint, hex.EncodeToString(bodyHash[:]), timestamp, nonce}, "\n")
+		signature := base64.RawStdEncoding.EncodeToString(ed25519.Sign(c.privateKey, []byte(message)))
+		request.Header.Set("X-Signature", signature)
+		request.Header.Set("X-WorkMesh-Signature", signature)
 	}
 	if c.AccessToken != "" {
 		request.Header.Set("Authorization", "Bearer "+c.AccessToken)

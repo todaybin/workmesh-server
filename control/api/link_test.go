@@ -70,3 +70,56 @@ func TestNodeListReturnsCurrentNode(t *testing.T) {
 		t.Fatalf("unexpected node list: %+v", body)
 	}
 }
+
+func TestNodeAddAndFavoriteRoundTrip(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	RegisterRoleRoutesWithManager(mux, NewRoleManager("primary", "primary"))
+	add := httptest.NewRecorder()
+	mux.ServeHTTP(add, httptest.NewRequest(http.MethodPost, "/api/v2/core/nodes/add", strings.NewReader(`{"nodeId":"secondary","addr":"http://127.0.0.1:9999","role":"secondary"}`)))
+	if add.Code != http.StatusOK {
+		t.Fatalf("add status=%d body=%s", add.Code, add.Body.String())
+	}
+	favorite := httptest.NewRecorder()
+	mux.ServeHTTP(favorite, httptest.NewRequest(http.MethodPost, "/api/v2/core/xpack/nodes/favorite", strings.NewReader(`{"nodeId":"secondary","isFavorite":true}`)))
+	if favorite.Code != http.StatusOK {
+		t.Fatalf("favorite status=%d body=%s", favorite.Code, favorite.Body.String())
+	}
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodPost, "/api/v2/core/nodes/list", strings.NewReader(`{"type":"all"}`)))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"isFavorite":true`) {
+		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
+	}
+}
+
+func TestNodeAddUpdateFavoriteDelete(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	RegisterRoleRoutesWithManager(mux, NewRoleManager("local", "primary"))
+	add := httptest.NewRecorder()
+	mux.ServeHTTP(add, httptest.NewRequest(http.MethodPost, "/api/v2/core/nodes/add", strings.NewReader(`{"nodeId":"secondary-1","name":"测试节点","addr":"http://127.0.0.1:9999","role":"secondary"}`)))
+	if add.Code != http.StatusOK {
+		t.Fatalf("add status = %d body=%s", add.Code, add.Body.String())
+	}
+	favorite := httptest.NewRecorder()
+	mux.ServeHTTP(favorite, httptest.NewRequest(http.MethodPost, "/api/v2/core/xpack/nodes/favorite", strings.NewReader(`{"nodeId":"secondary-1","isFavorite":true}`)))
+	if favorite.Code != http.StatusOK {
+		t.Fatalf("favorite status = %d", favorite.Code)
+	}
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodPost, "/api/v2/core/nodes/list", strings.NewReader(`{"search":"测试"}`)))
+	var response struct {
+		Data []nodeListItem `json:"data"`
+	}
+	if err := json.NewDecoder(list.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if list.Code != http.StatusOK || len(response.Data) != 1 || !response.Data[0].IsFavorite {
+		t.Fatalf("节点列表异常: %#v", response.Data)
+	}
+	del := httptest.NewRecorder()
+	mux.ServeHTTP(del, httptest.NewRequest(http.MethodPost, "/api/v2/core/nodes/del", strings.NewReader(`{"nodeId":"secondary-1"}`)))
+	if del.Code != http.StatusOK {
+		t.Fatalf("delete status = %d", del.Code)
+	}
+}
