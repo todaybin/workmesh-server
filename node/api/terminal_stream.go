@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -97,11 +98,20 @@ func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 		}
 		switch opcode {
 		case 0x8:
+			// 客户端关闭时回送相同状态码，确保浏览器和反向代理完成正常关闭握手。
+			code := uint16(1000)
+			if len(payload) >= 2 {
+				code = binary.BigEndian.Uint16(payload[:2])
+			}
+			_ = ws.closeWithCode(code, "")
 			return
 		case 0x9:
 			ws.writeMu.Lock()
 			_ = writeStreamFrame(ws.conn, 0xA, payload)
 			ws.writeMu.Unlock()
+		case 0xA:
+			// Pong 会刷新 readFrame 的空闲截止时间，无需额外响应。
+			continue
 		case 0x1:
 			if err := handleTerminalInput(ws, stdin, payload); err != nil {
 				return

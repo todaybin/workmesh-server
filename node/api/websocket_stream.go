@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
@@ -88,12 +89,33 @@ func validStreamOrigin(r *http.Request) bool {
 }
 
 func (s *streamWebSocket) close() error {
+	return s.closeWithCode(1000, "")
+}
+
+// closeWithCode 发送 RFC6455 Close 控制帧并关闭连接；关闭原因长度严格限制在控制帧上限内。
+func (s *streamWebSocket) closeWithCode(code uint16, reason string) error {
 	if s == nil || s.conn == nil {
 		return nil
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	_ = writeStreamFrame(s.conn, 0x8, nil)
+	payload := make([]byte, 2)
+	binary.BigEndian.PutUint16(payload, code)
+	if reason != "" {
+		// Close 原因必须是有效 UTF-8，且与状态码合计不超过 125 字节。
+		reasonBytes := []byte(strings.ToValidUTF8(reason, ""))
+		if len(reasonBytes) > 123 {
+			reasonBytes = reasonBytes[:123]
+			for len(reasonBytes) > 0 && (reasonBytes[len(reasonBytes)-1]&0xc0) == 0x80 {
+				reasonBytes = reasonBytes[:len(reasonBytes)-1]
+			}
+		}
+		if !utf8.Valid(reasonBytes) {
+			reasonBytes = nil
+		}
+		payload = append(payload, reasonBytes...)
+	}
+	_ = writeStreamFrame(s.conn, 0x8, payload)
 	return s.conn.Close()
 }
 
@@ -157,6 +179,14 @@ func (s *streamWebSocket) readFrame() (byte, []byte, error) {
 			return 0, nil, err
 		}
 		length = binary.BigEndian.Uint64(size[:])
+	}
+	// 控制帧不得分片，且负载最多 125 字节；否则客户端可借此制造未界定的内存或状态。
+	opcode := first & 0x0f
+	if opcode >= 0x8 && (first&0x80 == 0 || length > 125) {
+		return 0, nil, errors.New("websocket 控制帧格式无效")
+	}
+	if opcode < 0x8 && opcode != 0x0 && opcode != 0x1 && opcode != 0x2 {
+		return 0, nil, errors.New("websocket 数据帧类型不受支持")
 	}
 	if length > maxWebSocketMessage {
 		return 0, nil, errors.New("websocket 消息超过 1MiB 限制")

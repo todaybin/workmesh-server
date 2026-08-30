@@ -88,6 +88,25 @@ func TestAIAccountModelsAndValidation(t *testing.T) {
 	}
 }
 
+func TestAIErrorUsesRequestLocale(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/ai/accounts", strings.NewReader(`{}`))
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("参数错误状态码=%d body=%s", res.Code, res.Body.String())
+	}
+	if strings.Contains(res.Body.String(), "provider 和 name 不能为空") {
+		t.Fatalf("英文请求不应返回固定中文错误: %s", res.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(res.Body.String()), "agent") {
+		t.Fatalf("英文本地化消息缺少上下文: %s", res.Body.String())
+	}
+}
+
 func TestAIAccountModelDiscoveryAndSandboxPersistence(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {

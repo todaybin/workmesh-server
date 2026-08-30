@@ -5,6 +5,7 @@ package api
 
 import (
 	"bufio"
+	"encoding/binary"
 	"net"
 	"net/http/httptest"
 	"reflect"
@@ -77,5 +78,59 @@ func TestWebSocketMaskedFrameAndWriteLimit(t *testing.T) {
 
 	if err := writeStreamFrame(server, 1, make([]byte, maxWebSocketMessage+1)); err == nil {
 		t.Fatal("超过 1MiB 的 WebSocket 帧应被拒绝")
+	}
+}
+
+func TestWebSocketRejectsInvalidControlFrames(t *testing.T) {
+	cases := []struct {
+		name   string
+		first  byte
+		length byte
+	}{
+		{name: "fragmented ping", first: 0x09, length: 0},
+		{name: "oversized close", first: 0x88, length: 126},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server, client := net.Pipe()
+			defer server.Close()
+			defer client.Close()
+			ws := &streamWebSocket{conn: server, read: bufio.NewReader(server), idleTimeout: time.Second}
+			go func() {
+				// 客户端帧必须掩码；构造指定长度的最小帧并填充掩码键。
+				frame := []byte{tc.first, 0x80 | tc.length}
+				if tc.length == 126 {
+					frame = []byte{tc.first, 0x80 | 126, 0, 126}
+				}
+				frame = append(frame, 1, 2, 3, 4)
+				frame = append(frame, make([]byte, int(tc.length))...)
+				_, _ = client.Write(frame)
+			}()
+			if _, _, err := ws.readFrame(); err == nil {
+				t.Fatal("非法控制帧应被拒绝")
+			}
+		})
+	}
+}
+
+func TestWebSocketCloseFrameIncludesCode(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	ws := &streamWebSocket{conn: server, read: bufio.NewReader(server), idleTimeout: time.Second}
+	go func() {
+		var header [2]byte
+		if _, err := client.Read(header[:]); err != nil {
+			return
+		}
+		length := int(header[1] & 0x7f)
+		payload := make([]byte, length)
+		_, _ = client.Read(payload)
+		if length >= 2 {
+			_ = binary.BigEndian.Uint16(payload[:2])
+		}
+	}()
+	if err := ws.closeWithCode(1001, "going away"); err != nil {
+		t.Fatalf("关闭帧写入失败: %v", err)
 	}
 }

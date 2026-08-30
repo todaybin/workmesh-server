@@ -60,7 +60,8 @@ func handleContainerLogStream(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SSE_UNAVAILABLE"}})
 		return
 	}
-	stream := &containerSSEWriter{writer: w, flusher: flusher, onError: cancel}
+	resumeID := parseLastEventID(r.Header.Get("Last-Event-ID"))
+	stream := &containerSSEWriter{writer: w, flusher: flusher, onError: cancel, nextID: resumeID}
 	command := containerLogCommand(ctx, args...)
 	command.Stdout = stream
 	command.Stderr = stream
@@ -68,7 +69,7 @@ func handleContainerLogStream(w http.ResponseWriter, r *http.Request) {
 		stream.event("error", map[string]any{"message": fmt.Sprintf("启动 Docker 日志流失败: %v", err)})
 		return
 	}
-	if err := stream.event("ready", map[string]any{"follow": follow}); err != nil {
+	if err := stream.event("ready", map[string]any{"follow": follow, "resumeFrom": resumeID}); err != nil {
 		return
 	}
 	// 长时间没有日志时仍发送心跳，确保反向代理不会回收 SSE；请求取消会同时终止该协程。
@@ -188,6 +189,20 @@ type containerSSEWriter struct {
 	flusher http.Flusher
 	onError func()
 	pending []byte
+	// nextID 按连接单调递增；断线重连通过 Last-Event-ID 继续编号，便于客户端去重。
+	nextID int64
+}
+
+func parseLastEventID(value string) int64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	id, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || id < 0 {
+		return 0
+	}
+	return id
 }
 
 func (s *containerSSEWriter) Write(payload []byte) (int, error) {
@@ -220,7 +235,8 @@ func (s *containerSSEWriter) Write(payload []byte) (int, error) {
 }
 
 func (s *containerSSEWriter) writeDataLineLocked(line []byte) error {
-	if _, err := fmt.Fprintf(s.writer, "data: %s\n\n", strings.ReplaceAll(string(line), "\r", "")); err != nil {
+	s.nextID++
+	if _, err := fmt.Fprintf(s.writer, "id: %d\ndata: %s\n\n", s.nextID, strings.ReplaceAll(string(line), "\r", "")); err != nil {
 		if s.onError != nil {
 			s.onError()
 		}
@@ -252,7 +268,8 @@ func (s *containerSSEWriter) event(name string, value any) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(s.writer, "event: %s\ndata: %s\n\n", name, payload); err != nil {
+	s.nextID++
+	if _, err := fmt.Fprintf(s.writer, "id: %d\nevent: %s\ndata: %s\n\n", s.nextID, name, payload); err != nil {
 		if s.onError != nil {
 			s.onError()
 		}

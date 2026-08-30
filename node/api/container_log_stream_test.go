@@ -94,7 +94,7 @@ func TestContainerLogSSEUsesDefaultMessageAndCancelsProcess(t *testing.T) {
 		t.Fatal("请求取消后日志进程未退出")
 	}
 	body := writer.String()
-	if !strings.Contains(body, "data: line-one\n\n") {
+	if !strings.Contains(body, "id: 2\ndata: line-one\n\n") {
 		t.Fatalf("SSE 日志必须使用默认 message 事件，响应=%q", body)
 	}
 	if strings.Contains(body, "event: log") {
@@ -108,6 +108,25 @@ func TestContainerLogSSEUsesDefaultMessageAndCancelsProcess(t *testing.T) {
 		if captured[i] != expected[i] {
 			t.Fatalf("日志参数不符合旧接口语义: args=%v", captured)
 		}
+	}
+}
+
+func TestContainerSSELastEventIDContinuesSequence(t *testing.T) {
+	if got := parseLastEventID("42"); got != 42 {
+		t.Fatalf("Last-Event-ID 解析错误: %d", got)
+	}
+	for _, value := range []string{"", "-1", "abc", "1.5"} {
+		if got := parseLastEventID(value); got != 0 {
+			t.Fatalf("非法 Last-Event-ID 应回退 0: %q => %d", value, got)
+		}
+	}
+	writer := &captureSSEWriter{head: make(http.Header), seen: make(chan struct{})}
+	s := &containerSSEWriter{writer: writer, flusher: writer, nextID: 42}
+	if err := s.event("ready", map[string]any{"ok": true}); err != nil {
+		t.Fatalf("写入 SSE 事件失败: %v", err)
+	}
+	if !strings.Contains(writer.String(), "id: 43\nevent: ready\n") {
+		t.Fatalf("SSE 重连后事件编号未延续: %q", writer.String())
 	}
 }
 

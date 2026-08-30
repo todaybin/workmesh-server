@@ -218,6 +218,9 @@ func aiOK(w http.ResponseWriter, data any) {
 }
 
 func aiError(w http.ResponseWriter, status int, code, message string) {
+	if localized, ok := w.(*localizedResponseWriter); ok {
+		message = localizeErrorMessage(localized.locale, code, message)
+	}
 	wmhttp.JSON(w, status, map[string]any{"code": "ERR", "details": map[string]string{"errCode": code}, "message": message})
 }
 
@@ -238,6 +241,8 @@ func isAIExecutionRoute(pattern string) bool {
 }
 
 func aiHandler(w http.ResponseWriter, r *http.Request) {
+	// 普通 JSON 错误根据 Accept-Language 返回本地化文案；升级流由专用处理器直接接管。
+	w = &localizedResponseWriter{ResponseWriter: w, locale: r.Header.Get("Accept-Language")}
 	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v2/ai/"), "/")
 	s := getAIState()
 	if r.Method == http.MethodGet {
