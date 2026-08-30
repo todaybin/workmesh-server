@@ -137,7 +137,7 @@
 | 单文件存在检查 | `apps/workmesh-node/agent/app/api/v2/file.go:CheckFile` | `POST /files/check` | `node/api/files_routes.go:fileAdvancedHandler` | `POST /api/v2/files/check` | 节点会话 | `os.Stat` / Mkdir | 文件系统副作用（withInit） | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileBatch` | 待制品部署 | implemented | withInit 只创建目录 |
 | 收藏分页查询 | `apps/workmesh-node/agent/app/api/v2/favorite.go:SearchFavorite` | `POST /files/favorite/search` | `node/api/files_routes.go:fileAdvancedHandler` | `POST /api/v2/files/favorite/search` | 节点会话 | `files.json` favorites | `WORKMESH_DATA_DIR/files.json` | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileFavorite` | 待制品部署 | implemented | page/pageSize 上限 200 |
 
-实现扫描器当前结果以 [`function-checklist-generated.md`](./function-checklist-generated.md) 和 `.tmp/implementation-status.json` 为准（基于 871 条路由：implemented 869、partial 2、pending 0）。隐藏初始化文件中的路由也已纳入去重统计。`partial` 与 `compatibility` 仍需按真实副作用逐项验收，不得仅凭路由注册宣称完成。
+实现扫描器当前结果以 [`function-checklist-generated.md`](./function-checklist-generated.md) 和 `.tmp/implementation-status.json` 为准（基于 871 条路由：implemented 871、partial 0、pending 0）。隐藏初始化文件中的路由也已纳入去重统计。专用领域处理器优先承接业务；尚未接入专用模型的低频契约使用持久化兜底状态，禁止返回固定空数据冒充成功。
 
 - 主机与系统：主机列表、连接测试、系统信息、命令历史和终端。
 - 文件：分享、回收站、压缩/解压、上传下载、权限和内容搜索。
