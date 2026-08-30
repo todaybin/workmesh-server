@@ -19,11 +19,13 @@ import (
 // registerWebsiteFunctionalRoutes 注册网站、WAF 和 OpenResty 的兼容接口。
 func registerWebsiteFunctionalRoutes(mux *http.ServeMux) {
 	svc := service.NewWebsiteService("")
+	registerWebsiteCertificateRoutes(mux, service.NewWebsiteSecurityService(""))
 	registerWebsiteCRUD(mux, svc)
 	registerWebsiteAdvancedRoutes(mux, svc)
 	registerWAFRoutes(mux, svc)
 	registerOpenRestyRoutes(mux, svc)
 	registerXPackWebsiteAliases(mux, svc)
+	registerWebsiteExtensionRoutes(mux)
 }
 
 // registerWebsiteAdvancedRoutes 注册站点运行、域名、HTTPS 和配置管理接口。
@@ -322,7 +324,8 @@ func registerWebsiteConfigRoutes(mux *http.ServeMux, svc *service.WebsiteService
 		if in.WebsiteID == 0 {
 			in.WebsiteID = in.WebsiteId
 		}
-		_, err := svc.UpdateConfig(in.WebsiteID, "dns", map[string]any{"records": []any{}, "deleted": true, "updatedAt": time.Now().UTC()})
+		// 删除操作只记录删除标记，不构造固定空列表，保留后续审计和恢复所需的状态来源。
+		_, err := svc.UpdateConfig(in.WebsiteID, "dns", map[string]any{"deleted": true, "updatedAt": time.Now().UTC()})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
