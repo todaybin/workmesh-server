@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T09:42:57.887Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T09:47:27.468Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -940,8 +940,8 @@
 | implemented | GET | `/api/v2/websites/:id/lbs` | apps/workmesh-server/node/api/website.go | required | database | present | - |
 | implemented | GET | `/api/v2/websites/ca/:id` | apps/workmesh-server/node/api/website.go | required | database | present | - |
 | implemented | GET | `/api/v2/websites/cors/:id` | apps/workmesh-server/node/api/website.go | required | database | present | - |
-| implemented | GET | `/api/v2/websites/databases` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | GET | `/api/v2/websites/default/html/:type` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
+| implemented | GET | `/api/v2/websites/databases` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | GET | `/api/v2/websites/default/html/:type` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
 | implemented | GET | `/api/v2/websites/domains/:websiteId` | apps/workmesh-server/node/api/website.go | required | database | present | - |
 | implemented | GET | `/api/v2/websites/list` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | GET | `/api/v2/websites/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
@@ -961,13 +961,13 @@
 | implemented | POST | `/api/v2/websites/acme/del` | apps/workmesh-server/node/api/website_cert_routes.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/acme/search` | apps/workmesh-server/node/api/website_cert_routes.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/acme/update` | apps/workmesh-server/node/api/website_cert_routes.go | required | memory | present | - |
-| implemented | POST | `/api/v2/websites/auths` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/auths/path` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/auths/path/update` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/auths/update` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/batch/group` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/batch/operate` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/batch/ssl` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
+| implemented | POST | `/api/v2/websites/auths` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/auths/path` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/auths/path/update` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/auths/update` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/batch/group` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/batch/operate` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/batch/ssl` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/ca/del` | apps/workmesh-server/node/api/website_cert_routes.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/ca/download` | apps/workmesh-server/node/api/website_cert_routes.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/ca/obtain` | apps/workmesh-server/node/api/website_cert_routes.go | unknown | memory | present | - |
@@ -977,8 +977,8 @@
 | implemented | POST | `/api/v2/websites/config` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/config/update` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/cors/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/websites/crosssite` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/databases` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
+| implemented | POST | `/api/v2/websites/crosssite` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/databases` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/default/html/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/default/server` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/del` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
@@ -991,23 +991,23 @@
 | implemented | POST | `/api/v2/websites/domains` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/domains/del` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/domains/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/websites/exec/composer` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/websites/group/change` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/websites/exec/composer` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/group/change` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/lbs/create` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/websites/lbs/del` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/websites/lbs/del` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/lbs/file` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/lbs/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/leech` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/leech/update` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
-| implemented | POST | `/api/v2/websites/log/operate` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/websites/log/search` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/websites/log/operate` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/log/search` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/monitor/config/global` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/monitor/config/site` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/monitor/config/site/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/websites/monitor/logs/clear` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/websites/monitor/logs/detail` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/websites/monitor/logs/search` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/websites/monitor/logs/stat` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/websites/monitor/logs/clear` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/logs/detail` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/logs/search` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/monitor/logs/stat` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/monitor/qps` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/monitor/rank` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/monitor/stat` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
@@ -1018,12 +1018,12 @@
 | implemented | POST | `/api/v2/websites/nginx/update` | apps/workmesh-server/node/api/website.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/operate` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/options` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/websites/php/version` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/websites/proxies` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/websites/proxies/delete` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/websites/proxies/file` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/websites/proxies/status` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/proxies/update` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
+| implemented | POST | `/api/v2/websites/php/version` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/proxies` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/proxies/delete` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/proxies/file` | apps/workmesh-server/node/api/website_extensions.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/websites/proxies/status` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/proxies/update` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/proxy/clear` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/proxy/config` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/websites/realip/config` | apps/workmesh-server/node/api/legacy_routes.go | unknown | memory | missing | - |
@@ -1046,23 +1046,23 @@
 | implemented | POST | `/api/v2/websites/ssl/upload` | apps/workmesh-server/node/api/ssl.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/websites/ssl/upload/file` | apps/workmesh-server/node/api/ssl.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/websites/stream/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/websites/templates/del` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/templates/get` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/templates/outputs` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/templates/outputs/del` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/templates/outputs/get` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/templates/outputs/search` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/templates/preview` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/templates/search` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/templates/update` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/templates/upload` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
+| implemented | POST | `/api/v2/websites/templates/del` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/templates/get` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/templates/outputs` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/templates/outputs/del` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/templates/outputs/get` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/templates/outputs/search` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/templates/preview` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/templates/search` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/templates/update` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/templates/upload` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/update` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/waf/access-lists` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/websites/waf/attack/stat` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/waf/block/search` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
+| implemented | POST | `/api/v2/websites/waf/attack/stat` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/waf/block/search` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/waf/global` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/websites/waf/log/search` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/websites/waf/relation/stat` | apps/workmesh-server/node/api/website_extensions.go | required | memory | missing | - |
+| implemented | POST | `/api/v2/websites/waf/log/search` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
+| implemented | POST | `/api/v2/websites/waf/relation/stat` | apps/workmesh-server/node/api/website_extensions.go | required | memory | present | - |
 | implemented | POST | `/api/v2/websites/waf/rules` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/waf/rules/delete` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/websites/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | memory | present | - |
