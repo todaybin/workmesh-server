@@ -21,6 +21,7 @@
 - 主节点 `/assets/css/style-BqLbKwD-.css`：HTTP 200，`text/css`。
 - 主次节点 `/health`、`/ready`：HTTP 200，JSON `code=200`。
 - Vite 生产构建：7656 个模块，构建成功。
+- 次节点公网 `:9999` 可在 SSH 本机访问，但主节点到 `162.14.96.198:9999` 连接超时；该端口仍需在云安全组放行后才能验收跨机心跳/同步。
 
 ## 节点管理验收
 
@@ -40,4 +41,3 @@ implementation-scan pending=0, missing=0
 ```
 
 `partial` 和 `compatibility` 接口仍按逐路由清单标注，不能仅凭 HTTP 200 视为完成真实副作用迁移。
-
