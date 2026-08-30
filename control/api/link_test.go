@@ -123,3 +123,17 @@ func TestNodeAddUpdateFavoriteDelete(t *testing.T) {
 		t.Fatalf("delete status = %d", del.Code)
 	}
 }
+
+func TestNodeAddRejectsUnsafeEndpoint(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	RegisterRoleRoutesWithManager(mux, NewRoleManager("local", "primary"))
+	for _, addr := range []string{"/etc/passwd", "file:///tmp/node", "http://user:pass@example.com:9999"} {
+		response := httptest.NewRecorder()
+		body := strings.NewReader(`{"nodeId":"unsafe","addr":"` + addr + `","role":"secondary"}`)
+		mux.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v2/core/nodes/add", body))
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("addr %q status=%d, want %d", addr, response.Code, http.StatusBadRequest)
+		}
+	}
+}

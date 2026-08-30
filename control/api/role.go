@@ -8,6 +8,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -219,6 +220,11 @@ func (c *RoleController) addNode(w http.ResponseWriter, r *http.Request) {
 	addr := strings.TrimSpace(request.Addr)
 	if addr == "" {
 		addr = strings.TrimSpace(request.Endpoint)
+	}
+	parsed, parseErr := url.Parse(addr)
+	if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || strings.ContainsAny(addr, "\r\n") {
+		writeError(w, http.StatusBadRequest, errors.New("节点地址必须是无用户信息的 HTTP(S) URL"))
+		return
 	}
 	name := strings.TrimSpace(request.Name)
 	if name == "" {

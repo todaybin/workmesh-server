@@ -64,6 +64,12 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 仪表盘主机资源采集 | `apps/workmesh-node/agent/api/v2/dashboard.go` | `/api/v2/dashboard/base/*`、`/api/v2/dashboard/current/*` | `apps/workmesh-server/node/api/dashboard.go` | `GET /api/v2/dashboard/base/{ioOption}/{netOption}`、`GET /api/v2/dashboard/current/{ioOption}/{netOption}` | 节点会话鉴权（由上层中间件执行） | `/proc/loadavg`、`/proc/meminfo`、`/proc/net/dev`、`/proc/mounts`、运行时信息 | 无状态实时采集 | `node/api/dashboard_test.go` | `go test ./node/api -run Dashboard` | 待下一批制品部署 | implemented | Windows 无 `/proc` 时返回 supported=false，GPU/NPU/XPU 需驱动适配 |
 
+## 2026-08-30 节点部署入口
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 前端添加部署节点 | `apps/workmesh-node/agent/views/setting/node` | 节点管理页面 | `web/src/views/advanced/multi-node/index.vue`、`web/src/api/modules/setting.ts` | `POST /api/v2/core/nodes/add`、`POST /api/v2/core/nodes/list` | 登录会话、CSRF（前端请求拦截器注入） | 表单节点 ID、名称、HTTP(S) 地址、角色 | `WORKMESH_DATA_DIR/nodes.json` 原子写入 | `control/api/link_test.go`、生产构建 | `npm.cmd run type-check`、`npm.cmd run build:pro`、`go test ./control/api` | 公网主节点添加/列表/删除验收通过；新前端待授权部署 | implemented | 云端 Gateway 注册仍需真实凭据；添加动作不代替云端授权 |
+
 ## 2026-08-30 AI 账户与沙盒批次
 
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
