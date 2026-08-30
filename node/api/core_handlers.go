@@ -136,10 +136,17 @@ func coreJSON(w http.ResponseWriter, value any) {
 }
 
 func handleCoreLogin(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Name, Password string }
+	var req struct {
+		Name     string `json:"name"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		req.Name = req.Username
 	}
 	user, session, err := localCore.Login(req.Name, req.Password)
 	if err != nil {

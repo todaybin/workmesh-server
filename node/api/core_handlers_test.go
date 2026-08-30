@@ -128,3 +128,14 @@ func TestCoreAuthPreflightClearsLegacyPasswordCookie(t *testing.T) {
 		t.Fatalf("旧密码 Cookie 未清理: %q", cookie)
 	}
 }
+
+func TestCoreLoginAcceptsUsernameAlias(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v2/core/auth/login", handleCoreLogin)
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/core/auth/login", bytes.NewBufferString(`{"username":"admin","password":"admin"}`))
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"token"`) {
+		t.Fatalf("username alias login failed: %d %s", res.Code, res.Body.String())
+	}
+}
