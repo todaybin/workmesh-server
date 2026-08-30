@@ -50,6 +50,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer stateStore.Close()
+	if err := nodeapi.RecoverDeploymentState(cfg.DataDir); err != nil {
+		logger.Error("恢复部署制品状态失败", "error", err)
+		os.Exit(1)
+	}
 	_ = cache.New()
 	if _, err := role.New(cfg.NodeID, cfg.Role); err != nil {
 		logger.Error("节点角色配置无效", "error", err)

@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T21:44:51.083Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T22:13:33.653Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -912,7 +912,7 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | GET | `/` | apps/workmesh-server/cmd/workmesh-server/main.go | required | memory | present | - |
+| implemented | GET | `/` | apps/workmesh-server/cmd/workmesh-server/main.go | required | external | present | - |
 | implemented | GET | `/assets/*filepath` | apps/workmesh-server/cmd/workmesh-server/main.go | unknown | unknown | present | - |
 | implemented | GET | `/favicon.ico` | apps/workmesh-server/cmd/workmesh-server/main.go | unknown | memory | present | - |
 | implemented | GET | `/favicon.ico/*filepath` | apps/workmesh-server/cmd/workmesh-server/main.go | unknown | unknown | present | - |
@@ -1130,4 +1130,4 @@
 | 状态 | 方法/入口 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 |---|---|---|---|---|---|---|
 | implemented | 进程启动 | `apps/workmesh-server/cmd/workmesh-server/main.go:initializeDataDir` | 本地进程权限 | `WORKMESH_DATA_DIR` 下运行子目录 | `cmd/workmesh-server/cli_test.go:TestInitializeDataDirCreatesRuntimeLayout` | 生产挂载点和配额待部署验收 |
-| implemented | `restore <artifact>`、`update <artifact>` | `apps/workmesh-server/cmd/workmesh-server/cli.go:installSignedArtifact` | Ed25519 公钥与签名必填 | `deployment-artifact.json` 原子写入，目标制品保留 previous 备份 | `TestCLIUpdateVerifiesSignatureAndAtomicallyInstalls`、`TestCLIRestoreRejectsTamperedArtifactAndUnsafeTarget` | 云端发布服务和跨节点同步需真实网关凭据 |
+| implemented | `restore <artifact>`、`update <artifact>` | `apps/workmesh-server/cmd/workmesh-server/cli.go:installSignedArtifact` | Ed25519 公钥与签名必填 | `deployment-artifact.json` 原子写入，目标制品保留 previous 备份；重启由 `RecoverDeploymentState` 校验恢复 | `cmd/workmesh-server/cli_test.go`、`node/api/deployment_runtime_test.go` | 云端发布服务和跨节点同步需真实网关凭据 |

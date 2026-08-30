@@ -235,7 +235,7 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 |---|---|---|---|---|
 | [x] | 单进程启动时初始化数据目录与运行子目录 | `apps/workmesh-node/core/init`、`agent/init` | `cmd/workmesh-server/main.go` 调用 `initializeDataDir`；`apps/backups/logs/releases/runtime/uploads` 目录使用 0750 创建 | `cmd/workmesh-server/cli_test.go:TestInitializeDataDirCreatesRuntimeLayout`；生产目录权限需部署验收 |
 | [x] | CLI restore/update 签名制品校验 | `apps/workmesh-node/core/cmd/server/cmd/restore.go`、`update.go` | `cmd/workmesh-server/cli.go:installSignedArtifact`；Ed25519 公钥、SHA-256 摘要、签名文件和大小上限校验，无签名材料明确报错 | `TestCLIUpdateVerifiesSignatureAndAtomicallyInstalls`、`TestCLIRestoreRejectsTamperedArtifactAndUnsafeTarget`；云端发布服务仍需真实凭据 |
-| [x] | CLI 制品原子替换与回滚备份 | `apps/workmesh-node/core/cmd/server/cmd/restore.go` | `cmd/workmesh-server/cli.go:atomicInstall/saveArtifactResult`；同目录临时文件、Sync、rename，旧版本保存为 `.previous.<timestamp>` | 同上；跨文件系统目标被拒绝并返回上下文错误 |
+| [x] | CLI 制品原子替换与回滚备份 | `apps/workmesh-node/core/cmd/server/cmd/restore.go` | `cmd/workmesh-server/cli.go:atomicInstall/saveArtifactResult`；同目录临时文件、Sync、rename，旧版本保存为 `.previous.<timestamp>`；`node/api/deployment_runtime.go:RecoverDeploymentState` 启动时校验并恢复活动制品 | `cmd/workmesh-server/node/api/deployment_runtime_test.go`；跨文件系统目标被拒绝并返回上下文错误 |
 ## 数据库后台能力（2026-08-31）
 
 | 能力 | 入口 | 新实现 | 状态 | 说明 |

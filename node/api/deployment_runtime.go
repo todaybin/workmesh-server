@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,6 +40,72 @@ type deploymentSnapshot struct {
 }
 
 var localDeployment = deploymentState{Status: "idle"}
+
+// RecoverDeploymentState 从持久化制品元数据恢复进程内部署状态。
+// 启动时只接受数据目录内仍存在且摘要匹配的制品，损坏或越界记录会被忽略并返回错误，避免误激活未知文件。
+func RecoverDeploymentState(dataDir string) error {
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+	statePath := filepath.Join(dataDir, "deployment-artifact.json")
+	raw, err := os.ReadFile(statePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("读取部署状态失败: %w", err)
+	}
+	var persisted struct {
+		Mode     string    `json:"mode"`
+		Artifact string    `json:"artifact"`
+		Target   string    `json:"target"`
+		Previous string    `json:"previous"`
+		SHA256   string    `json:"sha256"`
+		Version  string    `json:"version"`
+		At       time.Time `json:"at"`
+	}
+	if err := json.Unmarshal(raw, &persisted); err != nil {
+		return fmt.Errorf("解析部署状态失败: %w", err)
+	}
+	if persisted.Target == "" || persisted.SHA256 == "" {
+		return errors.New("部署状态缺少目标或摘要")
+	}
+	base, err := filepath.Abs(filepath.Clean(dataDir))
+	if err != nil {
+		return err
+	}
+	target, err := filepath.Abs(filepath.Clean(persisted.Target))
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(base, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("部署状态目标路径不在数据目录内")
+	}
+	info, err := os.Stat(target)
+	if err != nil || !info.Mode().IsRegular() {
+		return errors.New("部署状态目标制品不存在")
+	}
+	digest, err := fileSHA256(target)
+	if err != nil {
+		return fmt.Errorf("校验部署状态制品失败: %w", err)
+	}
+	if !strings.EqualFold(digest, persisted.SHA256) {
+		return errors.New("部署状态制品摘要不匹配")
+	}
+	localDeployment.mu.Lock()
+	localDeployment.Active = target
+	localDeployment.Previous = persisted.Previous
+	localDeployment.Status = "active"
+	localDeployment.LastVerify = digest
+	localDeployment.UpdatedAt = persisted.At
+	if localDeployment.UpdatedAt.IsZero() {
+		localDeployment.UpdatedAt = time.Now().UTC()
+	}
+	localDeployment.mu.Unlock()
+	return nil
+}
 
 func registerDeploymentAndProcessRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/deployment/status", deploymentStatus)

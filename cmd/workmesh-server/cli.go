@@ -209,6 +209,10 @@ func installSignedArtifact(mode string, args []string, dataDir string) (artifact
 	if err := ensureTargetWithinDataDir(dataDir, target); err != nil {
 		return artifactInstallResult{}, err
 	}
+	// 元数据必须保存绝对路径，服务重启后工作目录变化时仍能恢复状态。
+	if target, err = filepath.Abs(filepath.Clean(target)); err != nil {
+		return artifactInstallResult{}, fmt.Errorf("解析制品目标失败: %w", err)
+	}
 	previous, err := atomicInstall(options.Artifact, target, size)
 	if err != nil {
 		return artifactInstallResult{}, err
