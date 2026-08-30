@@ -75,7 +75,16 @@ func NewCoreService() *CoreService {
 	if dataDir == "" {
 		dataDir = ".workmesh-data"
 	}
-	s := &CoreService{users: map[string]User{"admin": {ID: "admin", Name: "admin", Role: "ADMIN", Password: hashPassword("admin"), Groups: []string{"administrators"}}}, sessions: make(map[string]Session), groups: make(map[string]map[string]any), settings: map[string]string{"language": "zh", "theme": "system", "securityEntrance": ""}, passkeys: make(map[string]Passkey), passkeySessions: make(map[string]time.Time), passkeyPath: filepath.Join(dataDir, "passkeys.json"), usersPath: filepath.Join(dataDir, "users.json")}
+	// 首次启动可通过环境变量注入管理员凭据；未配置时使用本地开发默认值，生产环境应显式覆盖。
+	adminName := strings.TrimSpace(os.Getenv("WORKMESH_ADMIN_USERNAME"))
+	if adminName == "" {
+		adminName = "admin"
+	}
+	adminPassword := os.Getenv("WORKMESH_ADMIN_PASSWORD")
+	if adminPassword == "" {
+		adminPassword = "admin"
+	}
+	s := &CoreService{users: map[string]User{adminName: {ID: adminName, Name: adminName, Role: "ADMIN", Password: hashPassword(adminPassword), Groups: []string{"administrators"}}}, sessions: make(map[string]Session), groups: make(map[string]map[string]any), settings: map[string]string{"language": "zh", "theme": "system", "securityEntrance": ""}, passkeys: make(map[string]Passkey), passkeySessions: make(map[string]time.Time), passkeyPath: filepath.Join(dataDir, "passkeys.json"), usersPath: filepath.Join(dataDir, "users.json")}
 	s.loadUsers()
 	s.loadPasskeys()
 	return s
