@@ -139,8 +139,8 @@
 | [x] | 备份任务记录创建、分页搜索、Cronjob 过滤、批量删除和描述更新 | `handleBackupCreateRecord`、`handleBackupRecordSearch`、`handleBackupRecordDelete` | `TestBackupAccountAndRecordLifecycle` |
 | [x] | 记录大小、下载路径和受控文件清单 | `handleBackupRecordSize`、`handleBackupRecordDownload`、`handleBackupFiles` | 记录源文件复制后大小与路径断言 |
 | [x] | 本地文件上传、恢复和上传后恢复 | `handleBackupUpload`、`handleBackupRecover` | `TestBackupUploadAndConnectionChecks`、`TestBackupAccountAndRecordLifecycle` |
-| [x] | 备份连接检查、Bucket 查询和 token 刷新状态 | `handleBackupConnCheck`、`handleBackupBuckets`、`handleBackupRefreshToken` | 连接检查单测；刷新状态写入 `domains.json` |
-| [~] | OneDrive/阿里云等云端真实 token 刷新和远端 Bucket 操作 | 轻量实现返回本地状态，未引入云 SDK | 生产凭据和云端集成测试完成后才能标记 `[x]` |
+| [x] | 备份连接检查和本地 Bucket 查询 | `handleBackupConnCheck`、`handleBackupBuckets` | 本地目录真实读取；未配置云端时返回 `BACKUP_PROVIDER_UNAVAILABLE`，不伪造空列表 |
+| [~] | 云端 OAuth token 刷新和远端 Bucket 操作 | `handleBackupRefreshToken`、备份提供商服务 | 配置 `vars.refresh_url` 时执行标准 OAuth refresh_token 请求并持久化新令牌；各云厂商 Bucket SDK 仍需按凭据接入 |
 
 ### 2026-08-30 隐藏路由批次
 

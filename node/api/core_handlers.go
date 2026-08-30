@@ -196,6 +196,30 @@ func coreSessionID(r *http.Request) string {
 	return ""
 }
 
+// AuthorizeControlRequest 校验控制面写请求，并对 Cookie 会话执行同源 CSRF 检查。
+func AuthorizeControlRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if _, err := localCore.Current(coreSessionID(r)); err != nil {
+		return false
+	}
+	// Bearer、API Key 和节点 Token 不依赖浏览器 Cookie，不需要 CSRF 校验。
+	for _, header := range []string{"Authorization", "X-WorkMesh-Token", "X-API-Key"} {
+		if strings.TrimSpace(r.Header.Get(header)) != "" {
+			return true
+		}
+	}
+	if site := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site"))); site == "cross-site" {
+		return false
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	return strings.EqualFold(origin, "http://"+r.Host) || strings.EqualFold(origin, "https://"+r.Host)
+}
+
 func boolString(value bool) string {
 	if value {
 		return "enable"

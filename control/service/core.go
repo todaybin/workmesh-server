@@ -360,9 +360,16 @@ func (s *CoreService) GenerateAPIKey(sessionID string) (string, error) {
 	if !ok {
 		return "", errors.New("用户不存在")
 	}
+	previousAPI := user.API
 	user.API.Key = randomToken()
 	user.API.Enabled = true
 	s.users[user.Name] = user
+	if err := s.saveUsersLocked(); err != nil {
+		// 持久化失败时不保留仅存在于内存中的凭据，避免客户端拿到重启即失效的 Key。
+		user.API = previousAPI
+		s.users[user.Name] = user
+		return "", errors.New("保存 API Key 失败: " + err.Error())
+	}
 	return user.API.Key, nil
 }
 
@@ -378,6 +385,7 @@ func (s *CoreService) UpdateAPIConfig(sessionID string, config APIConfig) error 
 	if !ok {
 		return errors.New("用户不存在")
 	}
+	previousAPI := user.API
 	if config.Key != "" {
 		user.API.Key = config.Key
 	}
@@ -388,6 +396,11 @@ func (s *CoreService) UpdateAPIConfig(sessionID string, config APIConfig) error 
 		user.API.ValidityHours = config.ValidityHours
 	}
 	s.users[user.Name] = user
+	if err := s.saveUsersLocked(); err != nil {
+		user.API = previousAPI
+		s.users[user.Name] = user
+		return errors.New("保存 API 配置失败: " + err.Error())
+	}
 	return nil
 }
 

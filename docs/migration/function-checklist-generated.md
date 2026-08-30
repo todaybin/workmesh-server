@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T20:37:50.998Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T20:49:06.516Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -1118,13 +1118,6 @@
 | implemented | POST | `/api/v2/xpack/waf/rules/delete` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
 | implemented | POST | `/api/v2/xpack/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
 | implemented | POST | `/api/v2/xpack/waf/test` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | - |
-
-## 2026-08-31 Gateway 与角色状态补齐
-
-| 功能 | 新实现 | 测试 | 状态 |
-| --- | --- | --- | --- |
-| 前端绑定注册字段透传、Gateway 地址恢复 | `control/api/gateway.go` | `control/api/gateway_test.go:TestGatewayRegisterAcceptsFrontendBindingPayloadAndRestoresURL` | implemented |
-| 角色 epoch 持久化与重启恢复 | `runtime/role/manager.go`、`control/api/role.go` | `runtime/role/manager_test.go`、`control/api/link_test.go:TestRoleControllerRestoresPersistentEpoch` | implemented |
 
 ## 国际化完整性批次
 

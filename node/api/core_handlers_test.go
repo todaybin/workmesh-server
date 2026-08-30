@@ -75,6 +75,37 @@ func TestCoreAuthCurrentAndAPIKey(t *testing.T) {
 	}
 }
 
+func TestAuthorizeControlRequestRejectsCrossSiteCookie(t *testing.T) {
+	t.Setenv("WORKMESH_ADMIN_USERNAME", "csrf-admin")
+	t.Setenv("WORKMESH_ADMIN_PASSWORD", "csrf-password")
+	user, session, err := localCore.Login("csrf-admin", "csrf-password")
+	if err != nil || user.ID == "" {
+		// localCore 在包加载时读取环境变量；使用当前默认管理员建立测试会话。
+		user, session, err = localCore.Login("admin", "admin")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "http://workmesh.local/api/v2/gateway/unbind", nil)
+	req.AddCookie(&http.Cookie{Name: "workmesh_session", Value: session.ID})
+	req.Header.Set("Origin", "https://attacker.example")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	if AuthorizeControlRequest(req) {
+		t.Fatal("跨站 Cookie 写请求不应通过控制面授权")
+	}
+	req.Header.Set("Origin", "http://workmesh.local")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	if !AuthorizeControlRequest(req) {
+		t.Fatal("同源 Cookie 写请求应通过控制面授权")
+	}
+	bearerReq := httptest.NewRequest(http.MethodPost, "http://workmesh.local/api/v2/gateway/unbind", nil)
+	bearerReq.Header.Set("Authorization", "Bearer "+session.ID)
+	bearerReq.Header.Set("Origin", "https://remote-client.example")
+	if !AuthorizeControlRequest(bearerReq) {
+		t.Fatal("有效 Bearer 会话不应受浏览器 CSRF 校验影响")
+	}
+}
+
 func TestCorePasskeyRegistrationLifecycle(t *testing.T) {
 	mux := http.NewServeMux()
 	registerCoreAuthExtras(mux)

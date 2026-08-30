@@ -178,7 +178,7 @@ func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) 
 	mux.HandleFunc("GET /api/v2/health/check", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
 	})
-	gatewayStore := controlapi.Register(mux, cfg.NodeID, cfg.Role)
+	gatewayStore := controlapi.Register(mux, cfg.NodeID, cfg.Role, nodeapi.AuthorizeControlRequest)
 	nodeapi.Register(mux)
 	return mux, gatewayStore
 }

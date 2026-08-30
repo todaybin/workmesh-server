@@ -187,7 +187,7 @@ func (s *GatewayStateStore) loginIfConfigured(ctx context.Context) error {
 }
 
 // RegisterGatewayRoutes 注册前端使用的 Gateway 状态、注册、心跳和授权接口。
-func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string) *GatewayStateStore {
+func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string, authorizers ...RequestAuthorizer) *GatewayStateStore {
 	dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dataDir == "" {
 		dataDir = "./data"
@@ -208,15 +208,31 @@ func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string) *GatewayStat
 			store.client.(*gateway.HTTPClient).AccessToken = store.auth.AccessToken
 		}
 	}
+	var authorize RequestAuthorizer
+	if len(authorizers) > 0 {
+		authorize = authorizers[0]
+	}
+	write := func(handler http.HandlerFunc) http.HandlerFunc {
+		if authorize == nil {
+			return handler
+		}
+		return func(w http.ResponseWriter, r *http.Request) {
+			if !authorize(r) {
+				wmhttp.JSON(w, http.StatusUnauthorized, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "LOCAL_AUTH_REQUIRED"}, "message": "需要有效的本地登录会话"})
+				return
+			}
+			handler(w, r)
+		}
+	}
 	mux.HandleFunc("GET /api/v2/gateway/status", store.statusHandler)
 	mux.HandleFunc("GET /api/v2/workmesh/gateway/status", store.statusHandler)
-	mux.HandleFunc("POST /api/v2/gateway/register", store.registerHandler)
-	mux.HandleFunc("POST /api/v2/workmesh/gateway/register", store.registerHandler)
-	mux.HandleFunc("POST /api/v2/workmesh/gateway/login", store.loginHandler)
-	mux.HandleFunc("POST /api/v2/gateway/heartbeat", store.heartbeatHandler)
-	mux.HandleFunc("POST /api/v2/gateway/authorization/refresh", store.refreshHandler)
-	mux.HandleFunc("POST /api/v2/gateway/unbind", store.unbindHandler)
-	mux.HandleFunc("POST /api/v2/workmesh/gateway/unbind", store.unbindHandler)
+	mux.HandleFunc("POST /api/v2/gateway/register", write(store.registerHandler))
+	mux.HandleFunc("POST /api/v2/workmesh/gateway/register", write(store.registerHandler))
+	mux.HandleFunc("POST /api/v2/workmesh/gateway/login", write(store.loginHandler))
+	mux.HandleFunc("POST /api/v2/gateway/heartbeat", write(store.heartbeatHandler))
+	mux.HandleFunc("POST /api/v2/gateway/authorization/refresh", write(store.refreshHandler))
+	mux.HandleFunc("POST /api/v2/gateway/unbind", write(store.unbindHandler))
+	mux.HandleFunc("POST /api/v2/workmesh/gateway/unbind", write(store.unbindHandler))
 	return store
 }
 

@@ -82,32 +82,48 @@ func NewRoleManager(nodeID, initialRole string) *role.Manager {
 }
 
 // RegisterRoleRoutesWithManager 使用指定管理器注册角色接口，确保 fencing 与角色查询共享 epoch。
-func RegisterRoleRoutesWithManager(mux *http.ServeMux, manager *role.Manager) {
+func RegisterRoleRoutesWithManager(mux *http.ServeMux, manager *role.Manager, authorizers ...RequestAuthorizer) {
 	if manager == nil {
 		return
 	}
 	controller := newRoleController(manager)
+	var authorize RequestAuthorizer
+	if len(authorizers) > 0 {
+		authorize = authorizers[0]
+	}
+	write := func(handler http.HandlerFunc) http.HandlerFunc {
+		if authorize == nil {
+			return handler
+		}
+		return func(w http.ResponseWriter, r *http.Request) {
+			if !authorize(r) {
+				wmhttp.JSON(w, http.StatusUnauthorized, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "LOCAL_AUTH_REQUIRED"}, "message": "需要有效的本地登录会话"})
+				return
+			}
+			handler(w, r)
+		}
+	}
 	// 节点列表是前端切换主/次节点的基础接口，必须返回真实的当前节点而非占位响应。
 	mux.HandleFunc("POST /api/v2/core/nodes/list", controller.list)
 	mux.HandleFunc("GET /api/v2/core/nodes/list", controller.list)
 	mux.HandleFunc("GET /api/v2/core/nodes/simple/all", controller.list)
-	mux.HandleFunc("POST /api/v2/core/nodes/add", controller.addNode)
-	mux.HandleFunc("POST /api/v2/core/nodes/update", controller.updateNode)
-	mux.HandleFunc("POST /api/v2/core/nodes/del", controller.deleteNode)
-	mux.HandleFunc("POST /api/v2/core/nodes/delete", controller.deleteNode)
+	mux.HandleFunc("POST /api/v2/core/nodes/add", write(controller.addNode))
+	mux.HandleFunc("POST /api/v2/core/nodes/update", write(controller.updateNode))
+	mux.HandleFunc("POST /api/v2/core/nodes/del", write(controller.deleteNode))
+	mux.HandleFunc("POST /api/v2/core/nodes/delete", write(controller.deleteNode))
 	// 商业版前端曾使用 core/xpack 前缀，保留同一真实节点注册实现。
-	mux.HandleFunc("POST /api/v2/core/xpack/nodes/add", controller.addNode)
-	mux.HandleFunc("POST /api/v2/core/xpack/nodes/update", controller.updateNode)
-	mux.HandleFunc("POST /api/v2/core/xpack/nodes/del", controller.deleteNode)
-	mux.HandleFunc("POST /api/v2/core/xpack/nodes/delete", controller.deleteNode)
+	mux.HandleFunc("POST /api/v2/core/xpack/nodes/add", write(controller.addNode))
+	mux.HandleFunc("POST /api/v2/core/xpack/nodes/update", write(controller.updateNode))
+	mux.HandleFunc("POST /api/v2/core/xpack/nodes/del", write(controller.deleteNode))
+	mux.HandleFunc("POST /api/v2/core/xpack/nodes/delete", write(controller.deleteNode))
 	mux.HandleFunc("POST /api/v2/core/xpack/nodes/search", controller.list)
 	mux.HandleFunc("GET /api/v2/core/xpack/nodes/list", controller.list)
-	mux.HandleFunc("POST /api/v2/core/xpack/nodes/favorite", controller.favorite)
+	mux.HandleFunc("POST /api/v2/core/xpack/nodes/favorite", write(controller.favorite))
 	mux.HandleFunc("GET /api/v2/core/nodes/role", controller.current)
 	mux.HandleFunc("POST /api/v2/core/nodes/role/check", controller.check)
-	mux.HandleFunc("POST /api/v2/core/nodes/role/prepare", controller.prepare)
-	mux.HandleFunc("POST /api/v2/core/nodes/role/commit", controller.commit)
-	mux.HandleFunc("POST /api/v2/core/nodes/role/abort", controller.abort)
+	mux.HandleFunc("POST /api/v2/core/nodes/role/prepare", write(controller.prepare))
+	mux.HandleFunc("POST /api/v2/core/nodes/role/commit", write(controller.commit))
+	mux.HandleFunc("POST /api/v2/core/nodes/role/abort", write(controller.abort))
 }
 
 func newRoleController(manager *role.Manager) *RoleController {
