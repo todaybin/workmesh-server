@@ -179,6 +179,53 @@ func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) 
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
 	})
 	gatewayStore := controlapi.Register(mux, cfg.NodeID, cfg.Role, nodeapi.AuthorizeControlRequest)
-	nodeapi.Register(mux)
+	nodeMux := http.NewServeMux()
+	nodeapi.Register(nodeMux)
+	// 节点执行面统一经过本机会话鉴权；流接口保留各自的短期 Token 校验。
+	mux.Handle("/api/v2/", authenticateNodeAPI(nodeMux))
 	return mux, gatewayStore
+}
+
+func authenticateNodeAPI(next *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, pattern := next.Handler(r)
+		if pattern == "" || publicNodeAPIPath(r) || selfAuthenticatedStreamPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !nodeapi.AuthorizeControlRequest(r) {
+			wmhttp.JSON(w, http.StatusUnauthorized, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "LOCAL_AUTH_REQUIRED"}, "message": "需要有效的本地登录会话"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func publicNodeAPIPath(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	path := r.URL.Path
+	if r.Method == http.MethodGet {
+		switch path {
+		case "/api/v2/health", "/api/v2/health/check", "/api/v2/core/health", "/api/v2/core/auth/captcha", "/api/v2/core/auth/setting", "/api/v2/core/auth/welcome", "/api/v2/core/auth/ldap/status", "/api/v2/core/auth/oidc/status", "/api/v2/core/auth/saml2/status":
+			return true
+		}
+	}
+	if r.Method == http.MethodPost {
+		switch path {
+		case "/api/v2/core/auth/login", "/api/v2/core/auth/mfalogin", "/api/v2/core/auth/passkey/finish", "/api/v2/core/auth/oidc/begin", "/api/v2/core/auth/oidc/finish", "/api/v2/core/auth/saml2/begin", "/api/v2/core/auth/saml2/finish":
+			return true
+		}
+	}
+	return false
+}
+
+func selfAuthenticatedStreamPath(path string) bool {
+	switch path {
+	case "/api/v2/process/ws", "/api/v2/containers/search/log", "/api/v2/files/wget/process", "/api/v2/hosts/terminal/local", "/api/v2/hosts/terminal/container", "/api/v2/hosts/terminal/ssh":
+		return true
+	default:
+		return false
+	}
 }

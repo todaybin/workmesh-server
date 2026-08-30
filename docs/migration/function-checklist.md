@@ -38,6 +38,7 @@
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 控制面写接口会话、Bearer/API Key 与 CSRF 校验 | `apps/workmesh-node/core/middleware`、`core/app/api/v2/auth.go` | Gateway、节点角色和节点注册写入口 | `node/api/core_handlers.go`、`control/api/router.go`、`control/api/gateway.go`、`control/api/role.go` | `POST /api/v2/gateway/{register,login,heartbeat,authorization/refresh,unbind}`、`POST /api/v2/core/nodes/{add,update,del,delete,role/prepare,role/commit,role/abort}` | 本地 Session/Cookie 同源校验；Bearer、`X-API-Key`、`X-WorkMesh-Token` | 本地 CoreService 会话和用户凭据 | 用户 API 配置写入 `users.json`，原子 rename；会话保持内存态 | `control/api/auth_middleware_test.go`、`node/api/core_handlers_test.go` | `go test -count=1 ./control/api ./node/api ./control/service` | 待双节点 HTTPS 联调 | implemented | 生产环境仍需配置真实管理员凭据和 Gateway 凭据 |
+| 节点执行面统一 API 鉴权 | `apps/workmesh-node/core/middleware`、`agent/middleware` | 除健康检查和登录初始化外的 `/api/v2/*` | `cmd/workmesh-server/main.go:authenticateNodeAPI` | 节点执行面全部已注册路由 | 本地 Session/Cookie 同源校验、Bearer/API Key；WebSocket/SSE 使用各自短期 Token 和 Origin 校验 | CoreService 会话与流接口环境凭据 | 会话内存态、API Key 原子持久化 | `cmd/workmesh-server/main_test.go:TestHTTPMuxProtectsNodeAPIsAndAllowsLogin` | `go test -count=1 ./cmd/workmesh-server ./node/api` | 本地 HTTP 已验证 | implemented | 生产需通过 HTTPS 下发 Secure Cookie，并配置独立流 Token |
 <!-- Copyright (c) 2026 WorkMesh contributors -->
 
 ## 2026-08-30 日志读取批次

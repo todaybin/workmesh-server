@@ -4,6 +4,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -104,6 +106,36 @@ func TestHTTPMuxDoesNotFallbackUnknownAPIToHTML(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), "id=app") {
 		t.Fatal("未知 API 不应返回 SPA HTML")
+	}
+}
+
+func TestHTTPMuxProtectsNodeAPIsAndAllowsLogin(t *testing.T) {
+	mux, _ := httpMux(configForTest())
+	unauthorized := httptest.NewRecorder()
+	mux.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/api/v2/ai/accounts", bytes.NewBufferString(`{"name":"blocked"}`)))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("未登录节点写接口状态码 = %d, body = %s", unauthorized.Code, unauthorized.Body.String())
+	}
+
+	login := httptest.NewRecorder()
+	mux.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/v2/core/auth/login", bytes.NewBufferString(`{"name":"admin","password":"admin"}`)))
+	if login.Code != http.StatusOK {
+		t.Fatalf("登录入口不应被统一鉴权拦截: %d %s", login.Code, login.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(login.Body).Decode(&envelope); err != nil || envelope.Data.Token == "" {
+		t.Fatalf("登录响应缺少会话: %v", err)
+	}
+	authorized := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/ai/accounts/providers", nil)
+	request.Header.Set("Authorization", "Bearer "+envelope.Data.Token)
+	mux.ServeHTTP(authorized, request)
+	if authorized.Code != http.StatusOK {
+		t.Fatalf("有效 Bearer 会话被拒绝: %d %s", authorized.Code, authorized.Body.String())
 	}
 }
 
