@@ -194,7 +194,7 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | 状态 | 功能 | 旧源码证据 | 新项目证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
 | [ ] | Agent/Core 启动初始化钩子 | `apps/workmesh-node/agent/init/hook/hook.go`、`agent/init/business/business.go` | `cmd/workmesh-server/main.go` 当前仅初始化 Store、Cache、Role、Scheduler、Gateway | 逐项接入全局数据、计划任务状态、运行时/SSL/Task 恢复、ACME 默认账户、Docker Compose 探测，并有重启测试 |
-| [~] | Cobra/等价 CLI 管理入口 | `apps/workmesh-node/core/cmd/server/cmd/*.go` | `cmd/workmesh-server/cli.go`、`cli_test.go` | 已实现 `version`、`user-list`、`user-info`、`reset`、`listen-ip`、`app init`；`restore/update` 仍需接入签名制品校验和原子替换 |
+| [x] | Cobra/等价 CLI 管理入口 | `apps/workmesh-node/core/cmd/server/cmd/*.go` | `cmd/workmesh-server/cli.go`、`cli_test.go` | 已实现 `version`、`user-list`、`user-info`、`reset`、`listen-ip`、`app init`、签名制品 `restore/update`；Ed25519、SHA-256、目标路径限制和原子替换均有测试 |
 | [~] | 全局 Session/CSRF/域名绑定/密码过期中间件 | `apps/workmesh-node/core/middleware/*.go`、`agent/middleware/certificate.go` | 新服务主要由 handler 自行校验 Token | 统一挂载 HTTP middleware，覆盖 Cookie/Bearer、CSRF、节点证书、Allow IP、Demo 只读和操作日志 |
 | [x] | 日志文件输出、滚动和保留 | `apps/workmesh-node/core/log/*.go`、`agent/log/*` | `runtime/log/logger.go`、`cmd/workmesh-server/main.go` | 默认写入 `WORKMESH_DATA_DIR/logs/server.log`，按大小轮转并保留历史文件，支持显式路径 |
 | [~] | 本地/SSH/容器终端双向 WebSocket | `apps/workmesh-node/agent/app/api/v2/hosts.go`、`core/app/api/v2/process.go` | `node/api/terminal_stream.go`、`websocket_stream.go` 已有流式实现草案 | 完成 PTY/SSH/容器会话、输入输出帧、鉴权、关闭码、超时和断线资源回收验收 |
