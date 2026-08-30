@@ -21,44 +21,60 @@ func registerWebsiteFunctionalRoutes(mux *http.ServeMux) {
 	registerWebsiteCRUD(mux, svc)
 	registerWAFRoutes(mux, svc)
 	registerOpenRestyRoutes(mux, svc)
-	registerXPackWebsiteAliases(mux)
+	registerXPackWebsiteAliases(mux, svc)
 }
 
 // registerXPackWebsiteAliases 保留旧 Agent 的 xpack 监控/WAF 路径。
 // 专用统计采集器接入前，先使用统一兼容存储承接请求，避免隐藏路由返回 404。
-func registerXPackWebsiteAliases(mux *http.ServeMux) {
+func registerXPackWebsiteAliases(mux *http.ServeMux, svc *service.WebsiteService) {
 	// 使用显式模式便于契约扫描器发现每一条隐藏路由，并保留方法级约束。
-	mux.HandleFunc("GET /api/v2/xpack/monitor/status", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/stat", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/visitors", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/visitors/loc", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/qps", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/rank", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/trend", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/logs/search", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/logs/stat", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/logs/detail", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/logs/clear", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/websites", compatibilityHandler)
-	mux.HandleFunc("GET /api/v2/xpack/monitor/config/global", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/config/global", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/config/site", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/monitor/config/site/update", compatibilityHandler)
-	mux.HandleFunc("GET /api/v2/xpack/waf/status", compatibilityHandler)
-	mux.HandleFunc("GET /api/v2/xpack/waf/standard-rules", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/waf/test", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/waf/global", compatibilityHandler)
-	mux.HandleFunc("GET /api/v2/xpack/waf/sites", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/waf/sites", compatibilityHandler)
-	mux.HandleFunc("GET /api/v2/xpack/waf/sites/{id}/rules", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/waf/rules", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/waf/rules/delete", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/waf/attack/stat", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/waf/log/search", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/waf/block/search", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/waf/relation/stat", compatibilityHandler)
-	mux.HandleFunc("GET /api/v2/xpack/waf/access-lists", compatibilityHandler)
-	mux.HandleFunc("POST /api/v2/xpack/waf/access-lists", compatibilityHandler)
+	monitor := map[string]string{
+		"/api/v2/xpack/monitor/status":             "/api/v2/status",
+		"/api/v2/xpack/monitor/stat":               "/api/v2/stat",
+		"/api/v2/xpack/monitor/visitors":           "/api/v2/visitors",
+		"/api/v2/xpack/monitor/visitors/loc":       "/api/v2/visitors/loc",
+		"/api/v2/xpack/monitor/qps":                "/api/v2/qps",
+		"/api/v2/xpack/monitor/rank":               "/api/v2/rank",
+		"/api/v2/xpack/monitor/trend":              "/api/v2/trend",
+		"/api/v2/xpack/monitor/logs/search":        "/api/v2/stat",
+		"/api/v2/xpack/monitor/logs/stat":          "/api/v2/stat",
+		"/api/v2/xpack/monitor/logs/detail":        "/api/v2/stat",
+		"/api/v2/xpack/monitor/logs/clear":         "/api/v2/stat",
+		"/api/v2/xpack/monitor/websites":           "/api/v2/rank",
+		"/api/v2/xpack/monitor/config/global":      "/api/v2/global",
+		"/api/v2/xpack/monitor/config/site":        "/api/v2/config/site",
+		"/api/v2/xpack/monitor/config/site/update": "/api/v2/config/site/update",
+	}
+	for source, target := range monitor {
+		method := "POST "
+		if source == "/api/v2/xpack/monitor/status" || source == "/api/v2/xpack/monitor/config/global" {
+			method = "GET "
+		}
+		mux.HandleFunc(method+source, proxyFunctionalPath(target, http.HandlerFunc(analyticsHandler)))
+	}
+	wafMux := http.NewServeMux()
+	registerWAFRoutes(wafMux, svc)
+	for _, entry := range []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/api/v2/xpack/waf/status"}, {"GET", "/api/v2/xpack/waf/standard-rules"}, {"POST", "/api/v2/xpack/waf/test"}, {"POST", "/api/v2/xpack/waf/global"}, {"GET", "/api/v2/xpack/waf/sites"}, {"POST", "/api/v2/xpack/waf/sites"}, {"GET", "/api/v2/xpack/waf/sites/{id}/rules"}, {"POST", "/api/v2/xpack/waf/rules"}, {"POST", "/api/v2/xpack/waf/rules/delete"}, {"GET", "/api/v2/xpack/waf/access-lists"}, {"POST", "/api/v2/xpack/waf/access-lists"},
+	} {
+		target := strings.Replace(entry.path, "/api/v2/xpack/waf", "/api/v2/websites/waf", 1)
+		mux.HandleFunc(entry.method+entry.path, proxyFunctionalPath(target, wafMux))
+	}
+	for _, path := range []string{"/api/v2/xpack/waf/attack/stat", "/api/v2/xpack/waf/block/search", "/api/v2/xpack/waf/relation/stat", "/api/v2/xpack/waf/log/search"} {
+		mux.HandleFunc("POST "+path, proxyFunctionalPath(strings.Replace(path, "/api/v2/xpack/waf", "/api/v2", 1), http.HandlerFunc(analyticsHandler)))
+	}
+}
+
+// proxyFunctionalPath 将旧别名请求映射到同一进程中的真实处理器。
+func proxyFunctionalPath(target string, next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		clone := r.Clone(r.Context())
+		clone.URL.Path = strings.ReplaceAll(target, "{id}", r.PathValue("id"))
+		next.ServeHTTP(w, clone)
+	}
 }
 
 // isFunctionalDomainRoute 让 legacy 路由过滤器跳过已经实现的占位契约。
