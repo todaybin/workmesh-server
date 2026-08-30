@@ -9,12 +9,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestHTTPClientRegisterUsesSignedEnvelope(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-WorkMesh-Signature") == "" || r.Header.Get("X-WorkMesh-Nonce") == "" {
 			t.Fatal("Gateway 请求缺少签名头")
+		}
+		if _, err := time.Parse(time.RFC3339, r.Header.Get("X-Timestamp")); err != nil {
+			t.Fatalf("Runner 时间戳不是 RFC3339: %q", r.Header.Get("X-Timestamp"))
+		}
+		if r.Header.Get("X-Signature") == "" {
+			t.Fatal("Runner 请求缺少 Ed25519 签名")
 		}
 		if r.URL.Path != "/workmesh/node/register" {
 			t.Fatalf("注册路径错误: %s", r.URL.Path)

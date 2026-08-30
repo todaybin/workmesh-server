@@ -140,25 +140,26 @@ func (c *HTTPClient) do(ctx context.Context, method, endpoint string, input, out
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-WorkMesh-Protocol-Version", "v1")
 	request.Header.Set("X-WorkMesh-Request-Id", randomID())
-	timestamp := fmt.Sprintf("%d", time.Now().Unix())
-	request.Header.Set("X-WorkMesh-Timestamp", timestamp)
+	now := time.Now().UTC()
+	protocolTimestamp := fmt.Sprintf("%d", now.Unix())
+	// Gateway 通用 HMAC 协议使用 Unix 秒；Runner Ed25519 验签使用 RFC3339，二者不能复用同一时间字符串。
+	runnerTimestamp := now.Format(time.RFC3339)
+	request.Header.Set("X-WorkMesh-Timestamp", protocolTimestamp)
 	nonce := randomID()
 	request.Header.Set("X-WorkMesh-Nonce", nonce)
 	request.Header.Set("X-WorkMesh-Gateway-Id", c.GatewayID)
-	request.Header.Set("X-Timestamp", timestamp)
+	request.Header.Set("X-Timestamp", runnerTimestamp)
 	request.Header.Set("X-Nonce", nonce)
 	if len(c.Secret) > 0 {
 		mac := hmac.New(sha256.New, c.Secret)
-		_, _ = mac.Write([]byte(method + "\n" + endpoint + "\n" + timestamp + "\n" + nonce + "\n" + string(body)))
+		_, _ = mac.Write([]byte(method + "\n" + endpoint + "\n" + protocolTimestamp + "\n" + nonce + "\n" + string(body)))
 		request.Header.Set("X-WorkMesh-Signature", hex.EncodeToString(mac.Sum(nil)))
-		request.Header.Set("X-Signature", hex.EncodeToString(mac.Sum(nil)))
 	}
 	if len(c.privateKey) == ed25519.PrivateKeySize {
 		bodyHash := sha256.Sum256(body)
-		message := strings.Join([]string{strings.ToUpper(method), endpoint, hex.EncodeToString(bodyHash[:]), timestamp, nonce}, "\n")
+		message := strings.Join([]string{strings.ToUpper(method), endpoint, hex.EncodeToString(bodyHash[:]), runnerTimestamp, nonce}, "\n")
 		signature := base64.RawStdEncoding.EncodeToString(ed25519.Sign(c.privateKey, []byte(message)))
 		request.Header.Set("X-Signature", signature)
-		request.Header.Set("X-WorkMesh-Signature", signature)
 	}
 	if c.AccessToken != "" {
 		request.Header.Set("Authorization", "Bearer "+c.AccessToken)

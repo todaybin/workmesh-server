@@ -26,10 +26,11 @@ var (
 
 // GatewayStateStore 保存本机 Gateway 授权摘要；访问令牌不会序列化到响应。
 type GatewayStateStore struct {
-	mu     sync.RWMutex
-	status gateway.Status
-	auth   gateway.Authorization
-	client gateway.ProtocolClient
+	mu      sync.RWMutex
+	status  gateway.Status
+	auth    gateway.Authorization
+	client  gateway.ProtocolClient
+	account string
 	// statePath 位于数据目录内，仅保存本机绑定快照和受限访问令牌。
 	statePath string
 }
@@ -44,8 +45,11 @@ type persistedGatewayState struct {
 	AccessToken string         `json:"accessToken,omitempty"`
 	GatewayURL  string         `json:"gatewayUrl,omitempty"`
 	GatewayID   string         `json:"gatewayId,omitempty"`
+	Account     string         `json:"account,omitempty"`
 	UpdatedAt   string         `json:"updatedAt"`
 }
+
+var gatewayCapabilities = []string{"system", "containers", "files", "databases", "websites", "tasks"}
 
 // Start 启动节点自动注册和周期心跳；未配置云端客户端时不创建后台任务。
 func (s *GatewayStateStore) Start(ctx context.Context, capabilities []string) {
@@ -196,41 +200,108 @@ func (s *GatewayStateStore) loginHandler(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusServiceUnavailable, errors.New("Gateway 未配置"))
 		return
 	}
-	s.mu.RLock()
-	// 仅在绑定且已有访问令牌时复用快照；部分 Gateway 注册响应只返回 bindingId，
-	// 此时显式登录仍需向云端补齐令牌，避免后续心跳因缺少授权而失败。
-	if s.status.Registration == gateway.RegistrationRegistered && s.auth.BindingID != "" && s.auth.AccessToken != "" {
-		auth := s.auth
-		s.mu.RUnlock()
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": auth})
+	request.Username = strings.TrimSpace(request.Username)
+	if request.Username == "" || request.Password == "" {
+		writeError(w, http.StatusBadRequest, errors.New("Gateway 用户名和密码不能为空"))
 		return
 	}
-	s.mu.RUnlock()
+	// 显式绑定必须重新验证用户凭据；本地存在旧快照不能代替本次账号认证。
 	auth, err := s.client.Login(r.Context(), request)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	s.mu.RLock()
+	nodeID := s.status.NodeID
+	role := s.status.Role
+	existingBindingID := s.auth.BindingID
+	s.mu.RUnlock()
+	if strings.TrimSpace(nodeID) == "" {
+		writeError(w, http.StatusInternalServerError, errNodeIDRequired)
+		return
+	}
+
+	// 已有绑定先用新登录令牌验证心跳。验证成功时复用 bindingId，保证重复绑定幂等。
+	bound := false
+	if existingBindingID != "" {
+		registration := gateway.Registration{NodeID: nodeID, BindingID: existingBindingID, Registered: true}
+		if heartbeatErr := s.client.Heartbeat(r.Context(), registration); heartbeatErr == nil {
+			auth.BindingID = existingBindingID
+			bound = true
+		}
+	}
+	if !bound {
+		registered, registerErr := s.client.Register(r.Context(), gateway.RegisterRequest{
+			NodeID: nodeID, DisplayName: nodeID, Role: role, ProtocolVersion: "v1", Capabilities: append([]string(nil), gatewayCapabilities...),
+		})
+		if registerErr != nil {
+			writeError(w, http.StatusBadGateway, fmt.Errorf("Gateway 节点注册失败: %w", registerErr))
+			return
+		}
+		if registered.BindingID == "" {
+			writeError(w, http.StatusBadGateway, errors.New("Gateway 节点注册响应缺少绑定标识"))
+			return
+		}
+		auth.BindingID = registered.BindingID
+		if len(registered.Scopes) > 0 {
+			auth.Scopes = registered.Scopes
+		}
+		if registered.ExpiresAt != "" {
+			auth.ExpiresAt = registered.ExpiresAt
+		}
+		auth.Refreshable = auth.Refreshable || registered.Refreshable
+		if auth.AccessToken == "" {
+			auth.AccessToken = registered.AccessToken
+		}
+		registration := gateway.Registration{NodeID: nodeID, BindingID: auth.BindingID, Registered: true}
+		if heartbeatErr := s.client.Heartbeat(r.Context(), registration); heartbeatErr != nil {
+			writeError(w, http.StatusBadGateway, fmt.Errorf("Gateway 节点注册后心跳验证失败: %w", heartbeatErr))
+			return
+		}
+	}
+	if auth.BindingID == "" {
+		writeError(w, http.StatusBadGateway, errors.New("Gateway 账号登录成功，但节点尚未完成绑定"))
 		return
 	}
 	s.mu.Lock()
 	s.status.Registration = gateway.RegistrationRegistered
 	s.status.Connected = true
 	s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
+	s.status.AuthorizationExpireAt = auth.ExpiresAt
 	s.status.Reason = ""
 	s.auth = auth
+	s.account = request.Username
 	if err := s.persistLocked(); err != nil {
 		s.mu.Unlock()
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("保存 Gateway 授权失败: %w", err))
 		return
 	}
 	s.mu.Unlock()
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": auth})
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"bound": true, "account": request.Username, "nodeId": nodeID, "status": "running"}})
 }
 
 func (s *GatewayStateStore) statusHandler(w http.ResponseWriter, _ *http.Request) {
 	s.mu.RLock()
 	status := s.status
+	auth := s.auth
+	account := s.account
 	s.mu.RUnlock()
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": status})
+	// configured 表示本机已有持久化绑定；网络暂时断开只影响运行状态，不应要求用户重新输入账号密码。
+	configured := auth.BindingID != ""
+	runtimeStatus := "not_configured"
+	if configured && status.Connected {
+		runtimeStatus = "running"
+	} else if configured || status.Registration == gateway.RegistrationPending {
+		runtimeStatus = "error"
+	}
+	// 同时保留底层 registration/connected 字段，并提供现有前端使用的 configured/status 契约。
+	data := map[string]any{
+		"configured": configured, "bindingRequired": !configured, "gatewayUrl": os.Getenv("WORKMESH_GATEWAY_URL"),
+		"nodeId": status.NodeID, "gatewayId": status.GatewayID, "role": status.Role, "account": account,
+		"status": runtimeStatus, "registration": status.Registration, "connected": status.Connected,
+		"authorizationExpiresAt": status.AuthorizationExpireAt, "lastSeenAt": status.LastSeenAt, "lastError": status.Reason, "reason": status.Reason,
+	}
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": data})
 }
 
 func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Request) {
@@ -272,6 +343,7 @@ func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Reque
 		s.status.Role = request.Role
 		s.status.Connected = true
 		s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
+		s.status.AuthorizationExpireAt = auth.ExpiresAt
 		s.status.Reason = ""
 		s.auth = auth
 		if err := s.persistLocked(); err != nil {
@@ -322,6 +394,7 @@ func (s *GatewayStateStore) refreshHandler(w http.ResponseWriter, r *http.Reques
 		s.mu.Lock()
 		s.auth = refreshed
 		auth = refreshed
+		s.status.AuthorizationExpireAt = refreshed.ExpiresAt
 		if httpClient, ok := s.client.(*gateway.HTTPClient); ok {
 			httpClient.AccessToken = refreshed.AccessToken
 		}
@@ -347,6 +420,7 @@ func (s *GatewayStateStore) unbindHandler(w http.ResponseWriter, r *http.Request
 	s.status.Connected = false
 	s.status.Reason = "用户解除绑定"
 	s.auth = gateway.Authorization{}
+	s.account = ""
 	if err := s.removePersisted(); err != nil {
 		s.mu.Unlock()
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("清理 Gateway 绑定失败: %w", err))
@@ -375,6 +449,7 @@ func (s *GatewayStateStore) load() {
 	}
 	s.status = saved.Status
 	s.auth = gateway.Authorization{BindingID: saved.BindingID, Scopes: saved.Scopes, ExpiresAt: saved.ExpiresAt, Refreshable: saved.Refreshable, AccessToken: saved.AccessToken}
+	s.account = saved.Account
 	if s.status.Registration == gateway.RegistrationRegistered && s.auth.BindingID == "" {
 		s.status.Registration = gateway.RegistrationPending
 		s.status.Connected = false
@@ -396,7 +471,7 @@ func (s *GatewayStateStore) persistSnapshot(status gateway.Status, auth gateway.
 	if err := os.MkdirAll(filepath.Dir(s.statePath), 0o700); err != nil {
 		return err
 	}
-	saved := persistedGatewayState{Status: status, BindingID: auth.BindingID, Scopes: auth.Scopes, ExpiresAt: auth.ExpiresAt, Refreshable: auth.Refreshable, AccessToken: auth.AccessToken, GatewayURL: os.Getenv("WORKMESH_GATEWAY_URL"), GatewayID: status.GatewayID, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+	saved := persistedGatewayState{Status: status, BindingID: auth.BindingID, Scopes: auth.Scopes, ExpiresAt: auth.ExpiresAt, Refreshable: auth.Refreshable, AccessToken: auth.AccessToken, GatewayURL: os.Getenv("WORKMESH_GATEWAY_URL"), GatewayID: status.GatewayID, Account: s.account, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
 	if saved.ExpiresAt != "" {
 		saved.Status.AuthorizationExpireAt = saved.ExpiresAt
 	}
