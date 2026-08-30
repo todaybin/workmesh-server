@@ -4,8 +4,11 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -22,6 +25,83 @@ func TestAIProviderAndSandboxStatus(t *testing.T) {
 	mux.ServeHTTP(sandbox, httptest.NewRequest(http.MethodGet, "/api/v2/cubesandbox/status", nil))
 	if sandbox.Code != http.StatusOK || !strings.Contains(sandbox.Body.String(), "available") {
 		t.Fatalf("sandbox response: %d %s", sandbox.Code, sandbox.Body.String())
+	}
+}
+
+func TestAIAccountModelsAndValidation(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	create := httptest.NewRecorder()
+	mux.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v2/ai/accounts", strings.NewReader(`{"provider":"custom","name":"local","apiType":"openai-completions","models":[{"id":"base","name":"Base"}]}`)))
+	if create.Code != http.StatusOK {
+		t.Fatalf("create account: %d %s", create.Code, create.Body.String())
+	}
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	id, ok := envelope.Data["id"].(string)
+	if !ok || id == "" {
+		t.Fatalf("missing account id: %v", envelope.Data)
+	}
+	addBody := fmt.Sprintf(`{"accountId":"%s","model":{"id":"extra","name":"Extra"}}`, id)
+	add := httptest.NewRecorder()
+	mux.ServeHTTP(add, httptest.NewRequest(http.MethodPost, "/api/v2/ai/accounts/models/create", strings.NewReader(addBody)))
+	if add.Code != http.StatusOK {
+		t.Fatalf("add model: %d %s", add.Code, add.Body.String())
+	}
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodPost, "/api/v2/ai/accounts/models", strings.NewReader(fmt.Sprintf(`{"accountId":"%s"}`, id))))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "extra") {
+		t.Fatalf("list models: %d %s", list.Code, list.Body.String())
+	}
+	dup := httptest.NewRecorder()
+	mux.ServeHTTP(dup, httptest.NewRequest(http.MethodPost, "/api/v2/ai/accounts/models/create", strings.NewReader(addBody)))
+	if dup.Code != http.StatusConflict {
+		t.Fatalf("duplicate model status = %d", dup.Code)
+	}
+	bad := httptest.NewRecorder()
+	mux.ServeHTTP(bad, httptest.NewRequest(http.MethodPost, "/api/v2/ai/accounts/verify", strings.NewReader(`{"provider":"custom","apiType":"openai-completions"}`)))
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("verify without key status = %d", bad.Code)
+	}
+}
+
+func TestAIAccountModelDiscoveryAndSandboxPersistence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-a"},{"id":"model-b"}]}`))
+	}))
+	defer server.Close()
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	discover := httptest.NewRecorder()
+	mux.ServeHTTP(discover, httptest.NewRequest(http.MethodPost, "/api/v2/ai/accounts/models/discover", strings.NewReader(fmt.Sprintf(`{"baseURL":"%s/v1","apiKey":"secret"}`, server.URL))))
+	if discover.Code != http.StatusOK || !strings.Contains(discover.Body.String(), "model-a") {
+		t.Fatalf("discover: %d %s", discover.Code, discover.Body.String())
+	}
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux = http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	start := httptest.NewRecorder()
+	mux.ServeHTTP(start, httptest.NewRequest(http.MethodPost, "/api/v2/cubesandbox/start", strings.NewReader(`{"id":"sb-1"}`)))
+	if runtime.GOOS == "linux" {
+		if start.Code != http.StatusOK {
+			t.Fatalf("sandbox start: %d %s", start.Code, start.Body.String())
+		}
+	} else if start.Code != http.StatusServiceUnavailable {
+		t.Fatalf("sandbox unavailable status: %d", start.Code)
+	}
+	status := httptest.NewRecorder()
+	mux.ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/api/v2/cubesandbox/status", nil))
+	if status.Code != http.StatusOK {
+		t.Fatalf("sandbox status: %d", status.Code)
 	}
 }
 

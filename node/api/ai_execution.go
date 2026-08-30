@@ -4,11 +4,16 @@
 package api
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -23,16 +28,17 @@ import (
 
 // aiPersistentData 是 AI 执行面的小型持久化模型，避免为控制配置常驻数据库连接。
 type aiPersistentData struct {
-	Accounts []map[string]any            `json:"accounts"`
-	Agents   []map[string]any            `json:"agents"`
-	MCP      []map[string]any            `json:"mcp"`
-	Ollama   []map[string]any            `json:"ollama"`
-	TensorRT []map[string]any            `json:"tensorrt"`
-	Domains  map[string]map[string]any   `json:"domains"`
-	Configs  map[string]map[string]any   `json:"configs"`
-	Sessions map[string][]map[string]any `json:"sessions"`
-	Plugins  []map[string]any            `json:"plugins"`
-	Skills   []map[string]any            `json:"skills"`
+	Accounts  []map[string]any            `json:"accounts"`
+	Agents    []map[string]any            `json:"agents"`
+	MCP       []map[string]any            `json:"mcp"`
+	Ollama    []map[string]any            `json:"ollama"`
+	TensorRT  []map[string]any            `json:"tensorrt"`
+	Domains   map[string]map[string]any   `json:"domains"`
+	Configs   map[string]map[string]any   `json:"configs"`
+	Sessions  map[string][]map[string]any `json:"sessions"`
+	Plugins   []map[string]any            `json:"plugins"`
+	Skills    []map[string]any            `json:"skills"`
+	Sandboxes []map[string]any            `json:"sandboxes"`
 }
 
 type executionState struct {
@@ -56,7 +62,7 @@ func getAIState() *executionState {
 	if aiState.path == path && aiState.tasks != nil {
 		return &aiState
 	}
-	data := aiPersistentData{Domains: map[string]map[string]any{}, Configs: map[string]map[string]any{}, Sessions: map[string][]map[string]any{}}
+	data := aiPersistentData{Domains: make(map[string]map[string]any), Configs: make(map[string]map[string]any), Sessions: make(map[string][]map[string]any), Sandboxes: make([]map[string]any, 0)}
 	if content, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(content, &data)
 	}
@@ -67,7 +73,10 @@ func getAIState() *executionState {
 		data.Configs = map[string]map[string]any{}
 	}
 	if data.Sessions == nil {
-		data.Sessions = map[string][]map[string]any{}
+		data.Sessions = make(map[string][]map[string]any)
+	}
+	if data.Sandboxes == nil {
+		data.Sandboxes = make([]map[string]any, 0)
 	}
 	aiState = executionState{path: path, data: data, tasks: map[string]map[string]any{}}
 	return &aiState
@@ -146,6 +155,7 @@ func aiError(w http.ResponseWriter, status int, code, message string) {
 }
 
 func registerAIExecutionRoutes(mux *http.ServeMux) {
+	registerAIExplicitRoutes(mux)
 	mux.HandleFunc("/api/v2/ai/", aiHandler)
 	mux.HandleFunc("/api/v2/cubesandbox/", sandboxHandler)
 	mux.HandleFunc("/api/v2/workmesh/tasks/", taskHandler)
@@ -180,17 +190,20 @@ func handleAIGet(w http.ResponseWriter, s *executionState, path string) {
 	case "accounts/providers":
 		aiOK(w, aiProviders())
 	case "gpu/load":
-		var mem runtime.MemStats
-		runtime.ReadMemStats(&mem)
-		aiOK(w, map[string]any{"type": "cpu", "cudaVersion": "", "driverVersion": "", "xpuDriverVersion": "", "gpu": []any{}, "npu": []any{}, "xpu": []any{}, "available": false, "reason": "未检测到 GPU 驱动", "heapAlloc": mem.HeapAlloc, "cpus": runtime.NumCPU()})
+		aiOK(w, detectGPU())
 	case "gpu/options":
-		aiOK(w, map[string]any{"gpuType": "cpu", "options": []string{}, "devices": []any{}, "backends": []string{"cpu"}, "chartHide": []any{}})
+		load := detectGPU()
+		options := []string{"cpu"}
+		if load["available"] == true {
+			options = append(options, "cuda")
+		}
+		aiOK(w, map[string]any{"gpuType": load["type"], "options": options, "devices": load["gpu"], "backends": options, "chartHide": make([]string, 0)})
 	case "mcp/domain/get", "domain/get":
 		s.mu.RLock()
 		domain := cloneMap(s.data.Domains[domainKey(path)])
 		s.mu.RUnlock()
 		if domain == nil {
-			domain = map[string]any{"domain": "", "sslID": 0, "allowIPs": []string{}, "connUrl": "", "acmeAccountID": 0}
+			domain = map[string]any{"domain": "", "sslID": 0, "allowIPs": make([]string, 0), "connUrl": "", "acmeAccountID": 0}
 		}
 		aiOK(w, sanitizeAIMap(domain))
 	default:
@@ -203,17 +216,75 @@ func handleAIGet(w http.ResponseWriter, s *executionState, path string) {
 	}
 }
 
+// detectGPU 探测本机 GPU，优先调用 nvidia-smi 并设置 3 秒超时；失败时返回 CPU 能力而非伪造设备。
+func detectGPU() map[string]any {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	result := map[string]any{"type": "cpu", "cudaVersion": "", "driverVersion": "", "xpuDriverVersion": "", "gpu": make([]map[string]any, 0), "npu": make([]map[string]any, 0), "xpu": make([]map[string]any, 0), "available": false, "reason": "未检测到可用 GPU", "heapAlloc": mem.HeapAlloc, "cpus": runtime.NumCPU()}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "nvidia-smi", "--query-gpu=index,name,memory.total,driver_version", "--format=csv,noheader,nounits")
+	output, err := command.Output()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			result["reason"] = "GPU 探测超时"
+		}
+		return result
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	devices := make([]map[string]any, 0)
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), ",")
+		if len(fields) < 4 {
+			continue
+		}
+		devices = append(devices, map[string]any{"index": strings.TrimSpace(fields[0]), "name": strings.TrimSpace(fields[1]), "memoryTotalMB": strings.TrimSpace(fields[2]), "driverVersion": strings.TrimSpace(fields[3])})
+	}
+	if len(devices) > 0 {
+		result["type"], result["available"], result["reason"], result["gpu"] = "cuda", true, "", devices
+		if first, ok := devices[0]["driverVersion"].(string); ok {
+			result["driverVersion"] = first
+		}
+	}
+	return result
+}
+
 func aiProviders() []map[string]any {
-	providers := []map[string]any{}
+	// 目录来自内置协议元数据，环境变量仅用于追加自定义提供商，不返回伪造密钥。
+	type providerMeta struct {
+		name, display, base, api string
+		models                   []string
+	}
+	catalog := []providerMeta{
+		{name: "openai", display: "OpenAI", base: "https://api.openai.com/v1", api: "openai-responses", models: []string{"gpt-5.4", "gpt-5.4-mini"}},
+		{name: "anthropic", display: "Anthropic", base: "https://api.anthropic.com", api: "anthropic-messages", models: []string{"claude-sonnet-4-6", "claude-haiku-4-5"}},
+		{name: "deepseek", display: "DeepSeek", base: "https://api.deepseek.com", api: "openai-completions", models: []string{"deepseek-v4-flash", "deepseek-v4-pro"}},
+		{name: "ollama", display: "Ollama", base: "http://127.0.0.1:11434", api: "openai-completions", models: nil},
+		{name: "custom", display: "Custom", base: "", api: "openai-completions", models: nil},
+	}
+	providers := make([]map[string]any, 0, len(catalog))
+	for _, item := range catalog {
+		models := make([]map[string]any, 0, len(item.models))
+		for _, modelID := range item.models {
+			models = append(models, map[string]any{"id": modelID, "name": modelID})
+		}
+		providers = append(providers, map[string]any{"provider": item.name, "displayName": item.display, "baseUrl": item.base, "defaultApiType": item.api, "apiTypes": []string{item.api}, "models": models})
+	}
 	for _, name := range strings.Split(os.Getenv("WORKMESH_AI_PROVIDERS"), ",") {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
-		providers = append(providers, map[string]any{"provider": name, "displayName": name, "baseUrl": "", "defaultApiType": "openai", "apiTypes": []any{}, "models": []any{}})
-	}
-	if len(providers) == 0 {
-		providers = append(providers, map[string]any{"provider": "openai", "displayName": "OpenAI compatible", "baseUrl": "", "defaultApiType": "openai", "apiTypes": []any{}, "models": []any{}})
+		known := false
+		for _, p := range providers {
+			if p["provider"] == name {
+				known = true
+				break
+			}
+		}
+		if !known {
+			providers = append(providers, map[string]any{"provider": name, "displayName": name, "baseUrl": "", "defaultApiType": "openai-completions", "apiTypes": []string{"openai-completions"}, "models": make([]map[string]any, 0)})
+		}
 	}
 	return providers
 }
@@ -328,7 +399,7 @@ func uniqueStrings(values []string) []string {
 func aiDeleteReferences(s *executionState, body map[string]any) []map[string]any {
 	wanted := aiID(body, "id", "agentId", "accountId")
 	if wanted == "" {
-		return []map[string]any{}
+		return make([]map[string]any, 0)
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -360,14 +431,329 @@ func collectionFor(s *aiPersistentData, path string) *[]map[string]any {
 	}
 }
 
+// accountByIDLocked 返回账户并由调用方持有写锁或读锁，避免并发读写竞态。
+func accountByIDLocked(accounts []map[string]any, id string) (int, map[string]any) {
+	for i, account := range accounts {
+		if aiID(account, "id") == id {
+			return i, account
+		}
+	}
+	return -1, nil
+}
+
+func accountModels(account map[string]any) []map[string]any {
+	models := make([]map[string]any, 0)
+	if raw, ok := account["models"].([]any); ok {
+		for _, value := range raw {
+			if item, ok := value.(map[string]any); ok {
+				models = append(models, cloneMap(item))
+			}
+		}
+	}
+	return models
+}
+
+func setAccountModels(account map[string]any, models []map[string]any) {
+	raw := make([]any, 0, len(models))
+	for _, model := range models {
+		raw = append(raw, model)
+	}
+	account["models"] = raw
+}
+
+func accountModelFromBody(body map[string]any) map[string]any {
+	if modelValue, ok := body["model"].(map[string]any); ok {
+		return cloneMap(modelValue)
+	}
+	return map[string]any{"id": aiString(body, "model", "modelId"), "name": aiString(body, "model", "modelId")}
+}
+
+// handleAccountRoute 实现 AI 账户及模型的增删改查，数据写入 ai.json 并在响应中脱敏。
+func handleAccountRoute(w http.ResponseWriter, s *executionState, path string, body map[string]any) bool {
+	if path == "accounts/providers" {
+		return false
+	}
+	if !strings.HasPrefix(path, "accounts") {
+		return false
+	}
+	if path == "accounts/counts" {
+		s.mu.RLock()
+		counts := make(map[string]int)
+		for _, account := range s.data.Accounts {
+			counts[aiString(account, "provider")]++
+		}
+		s.mu.RUnlock()
+		aiOK(w, counts)
+		return true
+	}
+	if path == "accounts/search" {
+		items := aiItems(s, "accounts")
+		provider, name := aiString(body, "provider"), aiString(body, "name")
+		filtered := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			if provider != "" && !strings.EqualFold(provider, aiString(item, "provider")) {
+				continue
+			}
+			if name != "" && !strings.Contains(strings.ToLower(aiString(item, "name")), strings.ToLower(name)) {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		page, size := 1, 50
+		if value, ok := body["page"].(float64); ok && int(value) > 0 {
+			page = int(value)
+		}
+		if value, ok := body["pageSize"].(float64); ok && int(value) > 0 && int(value) <= 200 {
+			size = int(value)
+		}
+		start := (page - 1) * size
+		if start > len(filtered) {
+			start = len(filtered)
+		}
+		end := start + size
+		if end > len(filtered) {
+			end = len(filtered)
+		}
+		aiOK(w, map[string]any{"items": filtered[start:end], "total": len(filtered), "page": page, "pageSize": size})
+		return true
+	}
+	if path == "accounts/models" {
+		id := aiID(body, "accountId")
+		s.mu.RLock()
+		_, account := accountByIDLocked(s.data.Accounts, id)
+		models := make([]map[string]any, 0)
+		if account != nil {
+			models = accountModels(account)
+		}
+		s.mu.RUnlock()
+		aiOK(w, models)
+		return true
+	}
+	if path == "accounts/models/discover" {
+		models, err := discoverAIModels(body)
+		if err != nil {
+			aiError(w, http.StatusBadGateway, "MODEL_DISCOVERY_FAILED", err.Error())
+			return true
+		}
+		aiOK(w, models)
+		return true
+	}
+	if path == "accounts/verify" {
+		result, err := verifyAIAccount(body)
+		if err != nil {
+			aiError(w, http.StatusBadRequest, "ACCOUNT_VERIFY_FAILED", err.Error())
+			return true
+		}
+		aiOK(w, result)
+		return true
+	}
+	if path == "accounts" || path == "accounts/update" {
+		provider, name := aiString(body, "provider"), aiString(body, "name")
+		if provider == "" || name == "" {
+			aiError(w, http.StatusBadRequest, "ACCOUNT_REQUIRED", "provider 和 name 不能为空")
+			return true
+		}
+		if path == "accounts/update" {
+			id := aiID(body, "id")
+			s.mu.Lock()
+			index, account := accountByIDLocked(s.data.Accounts, id)
+			if account == nil {
+				s.mu.Unlock()
+				aiError(w, http.StatusNotFound, "ACCOUNT_NOT_FOUND", "账户不存在")
+				return true
+			}
+			for key, value := range body {
+				if key != "apiKey" || strings.TrimSpace(aiString(body, "apiKey")) != "" {
+					account[key] = value
+				}
+			}
+			account["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+			s.data.Accounts[index] = account
+			err := s.saveLocked()
+			out := sanitizeAIMap(account)
+			s.mu.Unlock()
+			if err != nil {
+				aiError(w, http.StatusInternalServerError, "ACCOUNT_SAVE_FAILED", err.Error())
+				return true
+			}
+			aiOK(w, out)
+			return true
+		}
+		body["provider"], body["name"] = provider, name
+		if aiString(body, "apiType") == "" {
+			body["apiType"] = "openai-completions"
+		}
+		if aiString(body, "apiKey") == "" {
+			body["apiKey"] = ""
+		}
+		if _, ok := body["models"]; !ok {
+			setAccountModels(body, make([]map[string]any, 0))
+		}
+		item := aiUpsert(s, path, body)
+		aiOK(w, sanitizeAIMap(item))
+		return true
+	}
+	if path == "accounts/delete" {
+		aiDelete(w, s, path, body)
+		return true
+	}
+	if strings.HasPrefix(path, "accounts/models/") {
+		accountID := aiID(body, "accountId")
+		s.mu.Lock()
+		index, account := accountByIDLocked(s.data.Accounts, accountID)
+		if account == nil {
+			s.mu.Unlock()
+			aiError(w, http.StatusNotFound, "ACCOUNT_NOT_FOUND", "账户不存在")
+			return true
+		}
+		models := accountModels(account)
+		modelValue := accountModelFromBody(body)
+		modelID := aiString(modelValue, "id", "name")
+		if modelID == "" {
+			s.mu.Unlock()
+			aiError(w, http.StatusBadRequest, "MODEL_REQUIRED", "模型 ID 不能为空")
+			return true
+		}
+		switch path {
+		case "accounts/models/create":
+			for _, existing := range models {
+				if aiString(existing, "id", "name") == modelID {
+					s.mu.Unlock()
+					aiError(w, http.StatusConflict, "MODEL_EXISTS", "模型已存在")
+					return true
+				}
+			}
+			if aiString(modelValue, "name") == "" {
+				modelValue["name"] = modelID
+			}
+			modelValue["recordId"] = aiNewID("model")
+			models = append(models, modelValue)
+		case "accounts/models/update":
+			found := false
+			for i, existing := range models {
+				if aiString(existing, "id", "name") == modelID || aiID(existing, "recordId") == aiID(body, "recordId") {
+					models[i] = modelValue
+					found = true
+					break
+				}
+			}
+			if !found {
+				s.mu.Unlock()
+				aiError(w, http.StatusNotFound, "MODEL_NOT_FOUND", "模型不存在")
+				return true
+			}
+		case "accounts/models/delete":
+			kept := make([]map[string]any, 0, len(models))
+			removed := false
+			target := aiID(body, "recordId")
+			for _, existing := range models {
+				if (target != "" && aiID(existing, "recordId") == target) || (target == "" && aiString(existing, "id", "name") == modelID) {
+					removed = true
+					continue
+				}
+				kept = append(kept, existing)
+			}
+			if !removed {
+				s.mu.Unlock()
+				aiError(w, http.StatusNotFound, "MODEL_NOT_FOUND", "模型不存在")
+				return true
+			}
+			models = kept
+		}
+		setAccountModels(account, models)
+		account["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
+		s.data.Accounts[index] = account
+		err := s.saveLocked()
+		s.mu.Unlock()
+		if err != nil {
+			aiError(w, http.StatusInternalServerError, "ACCOUNT_SAVE_FAILED", err.Error())
+			return true
+		}
+		aiOK(w, models)
+		return true
+	}
+	return false
+}
+
+func verifyAIAccount(body map[string]any) (map[string]any, error) {
+	base := aiString(body, "baseURL", "baseUrl")
+	key := aiString(body, "apiKey")
+	if key == "" {
+		return nil, errors.New("apiKey 不能为空")
+	}
+	if base == "" {
+		return map[string]any{"verified": false, "network": false, "reason": "未提供 baseURL，仅完成本地参数校验"}, nil
+	}
+	models, err := discoverAIModels(body)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"verified": true, "network": true, "models": models}, nil
+}
+
+func discoverAIModels(body map[string]any) ([]map[string]any, error) {
+	base := strings.TrimRight(aiString(body, "baseURL", "baseUrl"), "/")
+	if base == "" {
+		return nil, errors.New("baseURL 不能为空")
+	}
+	parsed, err := url.Parse(base)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return nil, errors.New("baseURL 必须是有效的 HTTP(S) 地址")
+	}
+	endpoint := base
+	if !strings.HasSuffix(endpoint, "/models") {
+		endpoint += "/models"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	if key := aiString(body, "apiKey"); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求模型目录失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("模型目录返回 HTTP %d", resp.StatusCode)
+	}
+	var payload struct {
+		Data []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("解析模型目录失败: %w", err)
+	}
+	result := make([]map[string]any, 0, len(payload.Data))
+	for _, item := range payload.Data {
+		id := item.ID
+		if id == "" {
+			id = item.Name
+		}
+		if id != "" {
+			result = append(result, map[string]any{"id": id, "name": id})
+		}
+	}
+	return result, nil
+}
+
 func handleAIPost(w http.ResponseWriter, s *executionState, path string, body map[string]any) {
+	if handleAccountRoute(w, s, path, body) {
+		return
+	}
 	if path == "agents/hermes/chat/sessions" {
 		agent := aiID(body, "agentId")
 		s.mu.RLock()
 		items := append([]map[string]any(nil), s.data.Sessions[agent]...)
 		s.mu.RUnlock()
 		if items == nil {
-			items = []map[string]any{}
+			items = make([]map[string]any, 0)
 		}
 		aiOK(w, items)
 		return
@@ -390,14 +776,14 @@ func handleAIPost(w http.ResponseWriter, s *executionState, path string, body ma
 		if value == nil {
 			for _, item := range s.data.Agents {
 				if aiID(item, "id") == id {
-					value = map[string]any{"accountId": item["accountId"], "model": item["model"], "fallbacks": []any{}}
+					value = map[string]any{"accountId": item["accountId"], "model": item["model"], "fallbacks": make([]any, 0)}
 					break
 				}
 			}
 		}
 		s.mu.RUnlock()
 		if value == nil {
-			value = map[string]any{"accountId": 0, "model": "", "fallbacks": []any{}}
+			value = map[string]any{"accountId": 0, "model": "", "fallbacks": make([]any, 0)}
 		}
 		aiOK(w, sanitizeAIMap(value))
 		return
@@ -407,7 +793,7 @@ func handleAIPost(w http.ResponseWriter, s *executionState, path string, body ma
 		s.mu.RLock()
 		value := cloneMap(s.data.Configs[path+":"+id])
 		s.mu.RUnlock()
-		files := []map[string]any{}
+		files := make([]map[string]any, 0)
 		if raw, ok := value["files"].([]any); ok {
 			for _, item := range raw {
 				if file, ok := item.(map[string]any); ok {
@@ -540,7 +926,7 @@ func handleAICollectionQuery(w http.ResponseWriter, s *executionState, path stri
 				}
 			}
 		}
-		aiOK(w, []any{})
+		aiOK(w, make([]map[string]any, 0))
 		return
 	}
 	if strings.HasSuffix(path, "/overview") {
@@ -674,14 +1060,70 @@ func sandboxHandler(w http.ResponseWriter, r *http.Request) {
 		if available {
 			status = "ready"
 		}
-		aiOK(w, map[string]any{"status": status, "available": available, "path": path})
+		s := getAIState()
+		s.mu.RLock()
+		instances := make([]map[string]any, 0, len(s.data.Sandboxes))
+		for _, item := range s.data.Sandboxes {
+			instances = append(instances, sanitizeAIMap(item))
+		}
+		s.mu.RUnlock()
+		aiOK(w, map[string]any{"status": status, "available": available, "path": path, "instances": instances})
 		return
 	}
-	if !available {
+	body, err := aiBody(r)
+	if err != nil {
+		aiError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+		return
+	}
+	id := aiID(body, "id", "sandboxId", "taskId")
+	if id == "" {
+		aiError(w, http.StatusBadRequest, "SANDBOX_ID_REQUIRED", "沙盒 ID 不能为空")
+		return
+	}
+	if path == "start" && !available {
 		aiError(w, http.StatusServiceUnavailable, "CUBESANDBOX_UNAVAILABLE", "当前主机缺少 KVM，无法启动 MicroVM")
 		return
 	}
-	aiOK(w, map[string]any{"accepted": true, "operation": path})
+	s := getAIState()
+	s.mu.Lock()
+	index := -1
+	for i, item := range s.data.Sandboxes {
+		if aiID(item, "id") == id {
+			index = i
+			break
+		}
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if path == "reconcile" && index < 0 {
+		s.mu.Unlock()
+		aiError(w, http.StatusNotFound, "SANDBOX_NOT_FOUND", "待对账的沙盒不存在")
+		return
+	}
+	if index < 0 {
+		s.data.Sandboxes = append(s.data.Sandboxes, map[string]any{"id": id, "status": "running", "createdAt": now, "updatedAt": now})
+		index = len(s.data.Sandboxes) - 1
+	}
+	instance := s.data.Sandboxes[index]
+	switch path {
+	case "start":
+		instance["status"] = "running"
+	case "stop":
+		instance["status"] = "stopped"
+	case "reconcile":
+		if strings.TrimSpace(aiString(body, "status")) != "" {
+			instance["status"] = aiString(body, "status")
+		}
+	}
+	instance["updatedAt"] = now
+	s.data.Sandboxes[index] = instance
+	err = s.saveLocked()
+	out := sanitizeAIMap(instance)
+	s.mu.Unlock()
+	if err != nil {
+		aiError(w, http.StatusInternalServerError, "SANDBOX_SAVE_FAILED", err.Error())
+		return
+	}
+	aiOK(w, out)
 }
 
 func taskHandler(w http.ResponseWriter, r *http.Request) {

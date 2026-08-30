@@ -98,6 +98,13 @@
 - [~] 网站统计与 WAF 统计接口：统一由 `analyticsHandler` 返回契约化数据并持久化监控配置；真实访问日志采集器尚未接入，统计数值不能宣称等价旧系统。
 - [x] 分组 CRUD 别名：`/api/v2/groups/*` 与 `/api/v2/core/groups/*` 共用 `coreResourceStore`，具备新增、查询和删除的可重复测试路径。
 
+### 2026-08-30 AI 执行面批次
+
+- [x] 提供商目录和 AI 账户 CRUD：内置提供商元数据、分页/计数、账户更新删除写入 `ai.json`，API Key 等敏感字段脱敏；测试 `TestAIAccountModelsAndValidation`。
+- [x] 账户模型增删改查与远程发现：模型记录绑定账户，重复和不存在返回明确错误；`/models` 请求使用 8 秒超时和 2 MiB 响应上限；测试 `TestAIAccountModelsAndValidation`、`TestAIAccountModelDiscoveryAndSandboxPersistence`。
+- [x] GPU 能力探测：`nvidia-smi` 通过 3 秒 `CommandContext` 执行，无法使用时返回 CPU 降级和真实原因，不伪造设备。
+- [x] CubeSandbox 健康、状态和生命周期：检查 Linux KVM，实例 start/stop/reconcile 状态持久化；缺少 KVM 或实例不存在时返回明确错误。
+
 每完成一批接口，必须同时更新 `function-checklist-generated.md`、本节状态、测试文件和部署验证记录；扫描器报告中的 `partial`、`compatibility` 不得直接改写为完成。
 
 1. 每勾选一项，必须在本表“新实现/证据”列写入代码路径、测试命令或部署记录。
