@@ -174,7 +174,7 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 
 ## 2026-08-30 实现扫描器可信度审计
 
-扫描器已修正为：忽略未被主路由调用的 `registerUnmigratedRoutes`，过滤函数中的路径常量不再作为实现证据；只有直接 `HandleFunc`、明确注册辅助函数或实际注册循环才计入。当前报告（基于 `test/contract/routes.json` 共 871 条）为 `implemented 869`、`partial 2`、`pending 0`。该报告不把兼容占位当作完成，重新生成命令为：
+扫描器已修正为：忽略未被主路由调用的 `registerUnmigratedRoutes`，过滤函数中的路径常量不再作为实现证据；只有直接 `HandleFunc`、明确注册辅助函数或实际注册循环才计入。当前报告（基于 `test/contract/routes.json` 共 871 条）为 `implemented 871`、`partial 0`、`pending 0`。该报告不把兼容占位当作完成，重新生成命令为：
 
 ```powershell
 node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/implementation-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json --out .tmp/implementation-status.json --markdown apps/workmesh-server/docs/migration/function-checklist-generated.md
@@ -185,14 +185,9 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | implemented | `GET /api/v2/apps/checkupdate` | `node/api/apps.go:refreshCatalogLocked`、`latestCatalogVersion` | 从 `WORKMESH_APP_CATALOG` 有界读取应用元数据，按 key/id/name 取最高版本与已安装版本比较；目录版本、lastModified、同步时间原子持久化，配置错误返回明确 502 |
 | implemented | `GET /api/v2/containers/search/log` | `node/api/container_log_stream.go` 使用 Docker 日志流；默认 SSE message 事件与前端 EventSource 兼容 | `since=all`、`tail=0`、Compose 多文件、心跳、断开取消、输出背压和参数安全均有测试 |
 
-### 仍为 pending 的路由
+### 路由实现状态
 
-当前实现扫描没有发现 pending 或 missing 路由；`partial` 项仍按下表保留，不能在部署说明中写成完全等价：
-
-| 功能域 | 路由 |
-| --- | --- |
-| apps | `GET /api/v2/apps/checkupdate` |
-| containers | `GET /api/v2/containers/search/log` |
+当前实现扫描没有发现 pending、missing 或 partial 路由。应用目录升级检查和容器日志 SSE 已有真实处理逻辑及自动化测试；生产环境仍需使用实际应用目录和 Docker/Compose 实例做部署联调。
 
 ## 2026-08-30 非路由隐藏功能补充核对
 
