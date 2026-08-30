@@ -4,9 +4,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -23,8 +27,9 @@ type coreResourceStore struct {
 var coreResources = coreResourceStore{items: map[string][]map[string]any{}}
 
 func registerCoreResourceRoutes(mux *http.ServeMux) {
+	// 脚本运行必须先经过受保护的专用处理器，不能落入普通资源 CRUD。
+	mux.HandleFunc("GET /api/v2/core/script/run", handleScriptRun)
 	for _, pattern := range []string{
-		"GET /api/v2/core/script/run",
 		"POST /api/v2/groups/del",
 		"POST /api/v2/groups/search",
 		"POST /api/v2/groups/update",
@@ -42,6 +47,53 @@ func registerCoreResourceRoutes(mux *http.ServeMux) {
 	for _, prefix := range []string{"/api/v2/core/commands/", "/api/v2/core/script/", "/api/v2/core/logs/", "/api/v2/core/groups/", "/api/v2/groups/"} {
 		mux.HandleFunc(prefix, coreResourceHandler)
 	}
+}
+
+// handleScriptRun 在显式配置命令令牌时执行短时脚本；未配置令牌时拒绝执行，避免
+// 迁移期间把脚本接口意外暴露成任意命令执行入口。
+func handleScriptRun(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimSpace(os.Getenv("WORKMESH_COMMAND_TOKEN"))
+	if token == "" || r.Header.Get("X-WorkMesh-Token") != token {
+		wmhttp.JSON(w, http.StatusUnauthorized, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "COMMAND_AUTH_REQUIRED"}})
+		return
+	}
+	command := strings.TrimSpace(r.URL.Query().Get("command"))
+	if command == "" {
+		command = strings.TrimSpace(r.URL.Query().Get("script"))
+	}
+	if command == "" {
+		var body struct {
+			Command string `json:"command"`
+			Script  string `json:"script"`
+		}
+		if r.Body != nil {
+			_ = json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body)
+		}
+		command, _ = strings.CutPrefix(strings.TrimSpace(body.Command), "")
+		if command == "" {
+			command = strings.TrimSpace(body.Script)
+		}
+	}
+	if command == "" || len(command) > 64<<10 {
+		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "COMMAND_REQUIRED"}})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	output, err := cmd.CombinedOutput()
+	data := map[string]any{"command": command, "output": string(output), "exitCode": 0, "timedOut": errors.Is(ctx.Err(), context.DeadlineExceeded)}
+	if err != nil {
+		data["exitCode"] = 1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			data["exitCode"] = exitErr.ExitCode()
+		}
+	}
+	status := http.StatusOK
+	if err != nil {
+		status = http.StatusUnprocessableEntity
+	}
+	wmhttp.JSON(w, status, map[string]any{"code": 200, "data": data})
 }
 
 func isCoreResourceRoute(pattern string) bool {

@@ -3,8 +3,8 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T05:49:38.487Z。
-共 870 条接口：implemented 475、partial 226、compatibility 169。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T06:22:41.810Z。
+共 870 条接口：implemented 476、partial 225、compatibility 169。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
 
@@ -181,7 +181,7 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/attack/stat` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/attack/stat` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## auth
 
@@ -241,7 +241,7 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/block/search` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/block/search` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## commands
 
@@ -262,8 +262,8 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/api/v2/config/global` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/config/global` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/config/site` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/config/site/update` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/config/site` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/config/site/update` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## containers
 
@@ -543,18 +543,18 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/global` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/global` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## groups
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/core/groups/del` | apps/workmesh-server/node/api/core_resources.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/core/groups/search` | apps/workmesh-server/node/api/core_resources.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/core/groups/update` | apps/workmesh-server/node/api/core_resources.go | required | memory | missing | - |
-| partial | POST | `/api/v2/groups/del` | apps/workmesh-server/node/api/core_resources.go | unknown | memory | missing | 检测到固定空列表响应 |
-| implemented | POST | `/api/v2/groups/search` | apps/workmesh-server/node/api/core_resources.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/groups/update` | apps/workmesh-server/node/api/core_resources.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/core/groups/del` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/groups/search` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/groups/update` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
+| implemented | POST | `/api/v2/groups/del` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
+| implemented | POST | `/api/v2/groups/search` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
+| implemented | POST | `/api/v2/groups/update` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
 
 ## health
 
@@ -698,19 +698,19 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/qps` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/qps` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## rank
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/rank` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/rank` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## relation
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/relation/stat` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/relation/stat` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## rules
 
@@ -758,11 +758,11 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| partial | GET | `/api/v2/core/script/run` | apps/workmesh-server/node/api/core_resources.go | unknown | memory | missing | 检测到固定空列表响应 |
-| implemented | POST | `/api/v2/core/script/del` | apps/workmesh-server/node/api/core_resources.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/core/script/search` | apps/workmesh-server/node/api/core_resources.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/core/script/sync` | apps/workmesh-server/node/api/core_resources.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/core/script/update` | apps/workmesh-server/node/api/core_resources.go | required | memory | missing | - |
+| partial | GET | `/api/v2/core/script/run` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | 检测到固定空列表响应 |
+| implemented | POST | `/api/v2/core/script/del` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/script/search` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/script/sync` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/script/update` | apps/workmesh-server/node/api/core_resources.go | required | memory | present | - |
 
 ## settings
 
@@ -837,7 +837,7 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/stat` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/stat` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## static
 
@@ -849,13 +849,13 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | GET | `/api/v2/status` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | GET | `/api/v2/status` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## test
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/test` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/test` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## toolbox
 
@@ -905,7 +905,7 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/trend` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/trend` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## unknown
 
@@ -926,8 +926,8 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | POST | `/api/v2/visitors` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/visitors/loc` | apps/workmesh-server/node/api/analytics.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/visitors` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/visitors/loc` | apps/workmesh-server/node/api/analytics.go | unknown | memory | present | - |
 
 ## websites
 

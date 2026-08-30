@@ -70,10 +70,20 @@ func handleProcessWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeWebSocketTextFrame(conn net.Conn, payload []byte) error {
-	if len(payload) >= 126 {
-		return errors.New("进程流帧过大")
+	// 服务端发送帧不需要掩码；按 RFC6455 编码 7 位、16 位和 64 位长度。
+	var header []byte
+	switch {
+	case len(payload) < 126:
+		header = []byte{0x81, byte(len(payload))}
+	case len(payload) <= 65535:
+		header = []byte{0x81, 126, byte(len(payload) >> 8), byte(len(payload))}
+	default:
+		if uint64(len(payload)) > ^uint64(0)>>1 {
+			return errors.New("进程流帧过大")
+		}
+		header = []byte{0x81, 127, 0, 0, 0, 0, byte(len(payload) >> 24), byte(len(payload) >> 16), byte(len(payload) >> 8), byte(len(payload))}
 	}
-	frame := append([]byte{0x81, byte(len(payload))}, payload...)
+	frame := append(header, payload...)
 	_, err := conn.Write(frame)
 	return err
 }
