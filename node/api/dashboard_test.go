@@ -42,6 +42,20 @@ func TestDashboardCurrentPathParameters(t *testing.T) {
 	}
 }
 
+func TestDashboardCurrentContractInitializesFrontendFields(t *testing.T) {
+	current := dashboardCurrent(nil)
+	for _, key := range []string{"cpuPercent", "cpuDetailedPercent", "topCPUItems", "topMemItems", "diskData", "gpuData", "npuData", "xpuData"} {
+		if current[key] == nil {
+			t.Fatalf("dashboard current missing initialized field %q: %#v", key, current)
+		}
+	}
+	for _, key := range []string{"ioReadBytes", "ioWriteBytes", "ioCount", "ioReadTime", "ioWriteTime", "memoryUsedPercent", "loadUsagePercent"} {
+		if _, ok := current[key]; !ok {
+			t.Fatalf("dashboard current missing numeric field %q: %#v", key, current)
+		}
+	}
+}
+
 func TestDashboardNetworkAndDisks(t *testing.T) {
 	network := dashboardNetwork()
 	if _, ok := network["bytesSent"]; !ok {

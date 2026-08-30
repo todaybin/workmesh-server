@@ -119,12 +119,18 @@ func dashboardCurrent(_ context.Context) map[string]any {
 		used = memTotal - memAvail
 	}
 	network := dashboardNetwork()
+	cpuUsage := load1 / float64(max(1, runtime.NumCPU())) * 100
 	return map[string]any{
 		"uptime": dashboardUptime(), "procs": runtime.NumGoroutine(), "load1": load1, "load5": load5, "load15": load15,
-		"loadUsagePercent": load1 / float64(max(1, runtime.NumCPU())) * 100, "cpuPercent": []float64{load1 / float64(max(1, runtime.NumCPU())) * 100}, "cpuUsedPercent": load1 / float64(max(1, runtime.NumCPU())) * 100,
+		"timeSinceUptime": 0, "runningTime": dashboardUptime(),
+		"loadUsagePercent": cpuUsage, "cpuPercent": []float64{cpuUsage}, "cpuUsedPercent": cpuUsage,
+		"cpuDetailedPercent": []float64{0, 0, 0, 100, 0, 0, 0, 0}, "cpuUsed": 0, "cpuTotal": runtime.NumCPU(),
 		"memoryTotal": memTotal, "memoryAvailable": memAvail, "memoryUsed": used, "memoryFree": memAvail,
+		"memoryShard": uint64(0), "memoryCache": uint64(0),
 		"memoryUsedPercent": percent(used, memTotal), "swapMemoryTotal": 0, "swapMemoryAvailable": 0, "swapMemoryUsed": 0,
 		"swapMemoryUsedPercent": 0, "diskData": dashboardDisks(), "gpuData": dashboardAccelerators("gpu"), "npuData": dashboardAccelerators("npu"), "xpuData": dashboardAccelerators("xpu"),
+		"ioReadBytes": uint64(0), "ioWriteBytes": uint64(0), "ioCount": uint64(0), "ioReadTime": uint64(0), "ioWriteTime": uint64(0),
+		"topCPUItems": dashboardProcesses(), "topMemItems": dashboardProcesses(),
 		"netBytesSent": network["bytesSent"], "netBytesRecv": network["bytesRecv"], "shotTime": time.Now().UTC(),
 	}
 }
