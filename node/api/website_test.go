@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -165,5 +167,51 @@ func TestWebsiteConfigAliasesPersist(t *testing.T) {
 	monitor := call(http.MethodPost, "/api/v2/websites/monitor/config/site/update", `{"websiteID":1,"enabled":false}`)
 	if monitor.Code != http.StatusOK {
 		t.Fatalf("监控配置更新失败: %d %s", monitor.Code, monitor.Body.String())
+	}
+}
+
+func TestOpenRestyFileAndScopeArePersistent(t *testing.T) {
+	root := filepath.Join(".tmp", "openresty-api-test")
+	_ = os.RemoveAll(root)
+	defer os.RemoveAll(root)
+	t.Setenv("WORKMESH_DATA_DIR", root)
+	t.Setenv("WORKMESH_OPENRESTY_BIN", filepath.Join(root, "missing-openresty"))
+	mux := http.NewServeMux()
+	registerWebsiteFunctionalRoutes(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := call(http.MethodPost, "/api/v2/openresty/file", `{"content":"events {}\nhttp {\n  gzip on;\n}"}`); rec.Code != http.StatusOK {
+		t.Fatalf("OpenResty 配置写入失败: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(http.MethodPost, "/api/v2/openresty/scope", `{"scope":"http-per","params":{"gzip":"off","keepalive_timeout":"30"}}`); rec.Code != http.StatusOK {
+		t.Fatalf("OpenResty 作用域更新失败: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(http.MethodPost, "/api/v2/openresty/scope", `{"scope":"http-per"}`); rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"gzip":"off"`)) {
+		t.Fatalf("OpenResty 作用域读取失败: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(http.MethodGet, "/api/v2/openresty", ""); rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte("events {}")) {
+		t.Fatalf("OpenResty 完整配置读取失败: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(http.MethodPost, "/api/v2/openresty/file", `{"content":"events {"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("括号不匹配应返回 400，实际 %d", rec.Code)
+	}
+}
+
+func TestOpenRestyBuildRequiresRealBinary(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", filepath.Join(".tmp", "openresty-build-test"))
+	t.Setenv("WORKMESH_OPENRESTY_BIN", filepath.Join(os.Getenv("WORKMESH_DATA_DIR"), "missing-openresty"))
+	mux := http.NewServeMux()
+	registerWebsiteFunctionalRoutes(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/openresty/build", bytes.NewBufferString(`{"modules":["headers-more"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable || !bytes.Contains(rec.Body.Bytes(), []byte("OpenResty 构建前检查失败")) {
+		t.Fatalf("缺少 OpenResty 二进制时应明确返回不可用: %d %s", rec.Code, rec.Body.String())
 	}
 }

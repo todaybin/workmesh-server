@@ -5,12 +5,24 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/todaybin/workmesh-server/node/model"
 )
 
 func TestSSLServiceCreateAndList(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", filepath.Join(".tmp", "ssl-create-test"))
+	_ = os.RemoveAll(os.Getenv("WORKMESH_DATA_DIR"))
+	defer os.RemoveAll(os.Getenv("WORKMESH_DATA_DIR"))
 	service := NewSSLService()
 	item, err := service.Create(context.Background(), model.WebsiteSSLCreateRequest{PrimaryDomain: "example.com", Provider: "letsencrypt", AutoRenew: true})
 	if err != nil || item.ID == 0 || item.Status != "pending" {
@@ -22,7 +34,68 @@ func TestSSLServiceCreateAndList(t *testing.T) {
 	}
 }
 
+func TestSSLServicePersistsPrivateKeyAcrossRestart(t *testing.T) {
+	root := filepath.Join(".tmp", "ssl-persistence-test")
+	_ = os.RemoveAll(root)
+	defer os.RemoveAll(root)
+	t.Setenv("WORKMESH_DATA_DIR", root)
+	service := NewSSLService()
+	item, err := service.Upload(context.Background(), model.WebsiteSSLUploadRequest{Certificate: testCertificatePEM(t), PrivateKey: "PRIVATE-KEY", Description: "persist"})
+	if err != nil {
+		t.Fatalf("上传证书失败: %v", err)
+	}
+	if item.PrivateKey != "" {
+		t.Fatal("上传响应不得返回私钥")
+	}
+	reloaded := NewSSLService()
+	loaded, err := reloaded.Get(context.Background(), item.ID)
+	if err != nil || loaded.Status != "active" || loaded.Description != "persist" {
+		t.Fatalf("重启后证书状态未恢复: %+v, %v", loaded, err)
+	}
+	if loaded.PrivateKey != "" {
+		t.Fatal("重启查询不得泄漏私钥")
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "ssl.json"))
+	if err != nil || !containsBytes(raw, []byte("PRIVATE-KEY")) {
+		t.Fatalf("私钥未安全保存到本地状态文件: %v", err)
+	}
+}
+
+func containsBytes(value, needle []byte) bool {
+	for i := 0; i+len(needle) <= len(value); i++ {
+		match := true
+		for j := range needle {
+			if value[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+func testCertificatePEM(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "persist.example"}, DNSNames: []string{"persist.example"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(24 * time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
 func TestSSLServiceRejectsInvalidCertificate(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", filepath.Join(".tmp", "ssl-invalid-test"))
+	_ = os.RemoveAll(os.Getenv("WORKMESH_DATA_DIR"))
+	defer os.RemoveAll(os.Getenv("WORKMESH_DATA_DIR"))
 	service := NewSSLService()
 	if _, err := service.Upload(context.Background(), model.WebsiteSSLUploadRequest{Certificate: "not-pem"}); err == nil {
 		t.Fatal("无效证书应被拒绝")

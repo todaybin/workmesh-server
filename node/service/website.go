@@ -35,6 +35,12 @@ type OpenRestyStatus struct {
 	Error        string                  `json:"error,omitempty"`
 }
 
+// OpenRestyScopeParams 是按配置作用域读取或更新的指令集合。
+type OpenRestyScopeParams struct {
+	Scope  string            `json:"scope"`
+	Params map[string]string `json:"params"`
+}
+
 // WebsiteService 提供网站、WAF 和 OpenResty 的轻量本地控制面。
 // 文件采用原子替换保存，节点未配置数据库时重启仍能保留配置。
 type WebsiteService struct {
@@ -623,6 +629,206 @@ func (s *WebsiteService) UpdateOpenResty(cfg model.OpenRestyConfig) (model.OpenR
 	cfg.UpdatedAt = time.Now().UTC()
 	s.openresty = cfg
 	return cfg, s.persist("openresty.json", cfg)
+}
+
+// OpenRestyFile 返回持久化的 nginx.conf 内容；首次使用时从受控配置文件读取。
+func (s *WebsiteService) OpenRestyFile() (string, error) {
+	s.mu.RLock()
+	content := s.openresty.ConfigContent
+	s.mu.RUnlock()
+	if content != "" {
+		return content, nil
+	}
+	path := s.openRestyConfigPath()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("读取 OpenResty 配置失败: %w", err)
+	}
+	if len(b) > 4<<20 {
+		return "", errors.New("OpenResty 配置超过 4 MiB 限制")
+	}
+	return string(b), nil
+}
+
+// UpdateOpenRestyFile 原子写入 nginx.conf，并在需要时保留可回滚备份。
+func (s *WebsiteService) UpdateOpenRestyFile(content string, backup bool) error {
+	if strings.TrimSpace(content) == "" || strings.IndexByte(content, 0) >= 0 || len(content) > 4<<20 {
+		return errors.New("OpenResty 配置内容无效")
+	}
+	if !balancedConfig(content) {
+		return errors.New("OpenResty 配置括号不匹配")
+	}
+	path := s.openRestyConfigPath()
+	old, readErr := os.ReadFile(path)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return fmt.Errorf("读取 OpenResty 原配置失败: %w", readErr)
+	}
+	if backup && len(old) > 0 {
+		if err := os.WriteFile(path+".bak", old, 0o600); err != nil {
+			return fmt.Errorf("保存 OpenResty 配置备份失败: %w", err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return fmt.Errorf("创建 OpenResty 配置目录失败: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("写入 OpenResty 临时配置失败: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("替换 OpenResty 配置失败: %w", err)
+	}
+	s.mu.Lock()
+	s.openresty.ConfigContent = content
+	s.openresty.UpdatedAt = time.Now().UTC()
+	err := s.persist("openresty.json", s.openresty)
+	s.mu.Unlock()
+	if err != nil {
+		return fmt.Errorf("保存 OpenResty 配置状态失败: %w", err)
+	}
+	return nil
+}
+
+// OpenRestyScope 读取指定作用域下的白名单指令，防止任意字段写入配置。
+func (s *WebsiteService) OpenRestyScope(scope string) (map[string]string, error) {
+	keys, ok := openRestyScopeKeys(strings.TrimSpace(scope))
+	if !ok {
+		return nil, errors.New("OpenResty 配置作用域无效")
+	}
+	content, err := s.OpenRestyFile()
+	if err != nil {
+		return nil, err
+	}
+	values := parseOpenRestyDirectives(content)
+	result := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, exists := values[key]; exists {
+			result[key] = value
+		}
+	}
+	return result, nil
+}
+
+// UpdateOpenRestyScope 更新作用域白名单指令并复用原子配置写入流程。
+func (s *WebsiteService) UpdateOpenRestyScope(scope string, params map[string]string, backup bool) error {
+	keys, ok := openRestyScopeKeys(strings.TrimSpace(scope))
+	if !ok || len(params) == 0 || len(params) > 32 {
+		return errors.New("OpenResty 作用域参数无效")
+	}
+	allowed := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		allowed[key] = struct{}{}
+	}
+	for key, value := range params {
+		if _, exists := allowed[key]; !exists || strings.TrimSpace(value) == "" || len(value) > 256 || strings.ContainsAny(value, "{};\x00") {
+			return fmt.Errorf("OpenResty 指令 %q 不允许或值无效", key)
+		}
+	}
+	content, err := s.OpenRestyFile()
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(content, "\n")
+	seen := make(map[string]bool, len(params))
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		for key, value := range params {
+			if strings.HasPrefix(trimmed, key+" ") || strings.HasPrefix(trimmed, key+"\t") {
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				lines[i] = indent + key + " " + value + ";"
+				seen[key] = true
+			}
+		}
+	}
+	for key, value := range params {
+		if !seen[key] {
+			lines = append(lines, key+" "+value+";")
+		}
+	}
+	return s.UpdateOpenRestyFile(strings.Join(lines, "\n"), backup)
+}
+
+// BuildOpenResty 执行只读配置检查并返回真实探测结果，避免伪造构建成功。
+func (s *WebsiteService) BuildOpenResty(ctx context.Context, modules []string) (OpenRestyStatus, error) {
+	status := s.ProbeOpenResty(ctx)
+	if !status.Available {
+		if status.Error == "" {
+			status.Error = "OpenResty 不可用"
+		}
+		return status, fmt.Errorf("OpenResty 构建前检查失败: %s", status.Error)
+	}
+	if !status.ConfigValid {
+		return status, errors.New("OpenResty 配置检查未通过")
+	}
+	if len(modules) > 100 {
+		return status, errors.New("OpenResty 模块数量超出限制")
+	}
+	selected := make(map[string]struct{}, len(modules))
+	for _, name := range modules {
+		name = strings.TrimSpace(name)
+		if name == "" || len(name) > 120 || strings.ContainsAny(name, " /\\") {
+			return status, errors.New("OpenResty 模块名称无效")
+		}
+		selected[name] = struct{}{}
+	}
+	return status, nil
+}
+
+func (s *WebsiteService) openRestyConfigPath() string {
+	if configured := strings.TrimSpace(os.Getenv("WORKMESH_OPENRESTY_CONFIG")); configured != "" {
+		return filepath.Clean(configured)
+	}
+	return filepath.Join(s.root, "openresty.conf")
+}
+
+func openRestyScopeKeys(scope string) ([]string, bool) {
+	switch scope {
+	case "index":
+		return []string{"index"}, true
+	case "limit-conn":
+		return []string{"limit_conn", "limit_rate", "limit_conn_zone"}, true
+	case "ssl":
+		return []string{"ssl_certificate", "ssl_certificate_key"}, true
+	case "http-per":
+		return []string{"server_names_hash_bucket_size", "client_header_buffer_size", "client_max_body_size", "keepalive_timeout", "gzip", "gzip_min_length", "gzip_comp_level"}, true
+	default:
+		return nil, false
+	}
+}
+
+func parseOpenRestyDirectives(content string) map[string]string {
+	result := map[string]string{}
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSuffix(line, ";"))
+		if len(fields) >= 2 {
+			result[fields[0]] = strings.Join(fields[1:], " ")
+		}
+	}
+	return result
+}
+
+func balancedConfig(content string) bool {
+	depth := 0
+	for _, r := range content {
+		switch r {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth < 0 {
+				return false
+			}
+		}
+	}
+	return depth == 0
 }
 
 // ProbeOpenResty 使用受限外部命令探测 OpenResty 安装及配置状态；命令均设置超时且不接受用户参数。

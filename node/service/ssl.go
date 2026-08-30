@@ -6,9 +6,13 @@ package service
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,12 +23,78 @@ import (
 // SSLService 管理网站证书元数据和证书内容校验。
 type SSLService struct {
 	mu     sync.RWMutex
+	root   string
+	path   string
 	serial uint
 	items  map[uint]model.WebsiteSSL
 }
 
 // NewSSLService 创建证书服务。
-func NewSSLService() *SSLService { return &SSLService{items: make(map[uint]model.WebsiteSSL)} }
+func NewSSLService() *SSLService {
+	root := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
+	if root == "" {
+		root = "./data"
+	}
+	s := &SSLService{root: root, path: filepath.Join(root, "ssl.json"), items: make(map[uint]model.WebsiteSSL)}
+	s.load()
+	return s
+}
+
+// sslPersisted 保存证书元数据及私钥。私钥只存在本地状态文件，不通过 API 返回。
+type sslPersisted struct {
+	Item       model.WebsiteSSL `json:"item"`
+	PrivateKey string           `json:"privateKey,omitempty"`
+}
+
+type sslState struct {
+	Serial uint           `json:"serial"`
+	Items  []sslPersisted `json:"items"`
+}
+
+func (s *SSLService) load() {
+	b, err := os.ReadFile(s.path)
+	if err != nil {
+		return
+	}
+	var state sslState
+	if json.Unmarshal(b, &state) != nil {
+		return
+	}
+	s.serial = state.Serial
+	for _, value := range state.Items {
+		value.Item.PrivateKey = value.PrivateKey
+		s.items[value.Item.ID] = value.Item
+		if value.Item.ID > s.serial {
+			s.serial = value.Item.ID
+		}
+	}
+}
+
+func (s *SSLService) persistLocked() error {
+	state := sslState{Serial: s.serial, Items: make([]sslPersisted, 0, len(s.items))}
+	for _, item := range s.items {
+		privateKey := item.PrivateKey
+		item.PrivateKey = ""
+		state.Items = append(state.Items, sslPersisted{Item: item, PrivateKey: privateKey})
+	}
+	sort.Slice(state.Items, func(i, j int) bool { return state.Items[i].Item.ID < state.Items[j].Item.ID })
+	b, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(s.root, 0o750); err != nil {
+		return err
+	}
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
 
 // Create 保存证书申请配置，证书申请由 ACME 适配器异步完成。
 func (s *SSLService) Create(_ context.Context, req model.WebsiteSSLCreateRequest) (model.WebsiteSSL, error) {
@@ -32,10 +102,14 @@ func (s *SSLService) Create(_ context.Context, req model.WebsiteSSLCreateRequest
 		return model.WebsiteSSL{}, errors.New("主域名和证书提供商不能为空")
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.serial++
 	item := model.WebsiteSSL{ID: s.serial, PrimaryDomain: req.PrimaryDomain, Domains: req.OtherDomains, Provider: req.Provider, AcmeAccountID: req.AcmeAccountID, DnsAccountID: req.DnsAccountID, AutoRenew: req.AutoRenew, KeyType: req.KeyType, Description: req.Description, Status: "pending"}
 	s.items[item.ID] = item
-	s.mu.Unlock()
+	if err := s.persistLocked(); err != nil {
+		delete(s.items, item.ID)
+		return model.WebsiteSSL{}, fmt.Errorf("保存证书配置失败: %w", err)
+	}
 	return publicSSL(item), nil
 }
 
@@ -80,6 +154,7 @@ func (s *SSLService) Upload(_ context.Context, req model.WebsiteSSLUploadRequest
 		return model.WebsiteSSL{}, errors.New("证书已经过期")
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if req.ID == 0 {
 		s.serial++
 		req.ID = s.serial
@@ -97,7 +172,9 @@ func (s *SSLService) Upload(_ context.Context, req model.WebsiteSSLUploadRequest
 		item.Description = req.Description
 	}
 	s.items[item.ID] = item
-	s.mu.Unlock()
+	if err := s.persistLocked(); err != nil {
+		return model.WebsiteSSL{}, fmt.Errorf("保存证书失败: %w", err)
+	}
 	return publicSSL(item), nil
 }
 
@@ -112,6 +189,9 @@ func (s *SSLService) Delete(_ context.Context, ids []uint) error {
 	}
 	for _, id := range ids {
 		delete(s.items, id)
+	}
+	if err := s.persistLocked(); err != nil {
+		return fmt.Errorf("保存证书删除状态失败: %w", err)
 	}
 	return nil
 }
@@ -130,6 +210,9 @@ func (s *SSLService) Update(_ context.Context, req model.WebsiteSSLUpdateRequest
 	item.PrimaryDomain, item.Domains, item.Provider = req.PrimaryDomain, req.OtherDomains, req.Provider
 	item.AutoRenew, item.Description = req.AutoRenew, req.Description
 	s.items[req.ID] = item
+	if err := s.persistLocked(); err != nil {
+		return fmt.Errorf("保存证书设置失败: %w", err)
+	}
 	return nil
 }
 

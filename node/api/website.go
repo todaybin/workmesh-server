@@ -4,6 +4,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -896,6 +897,15 @@ func registerWAFRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 }
 
 func registerOpenRestyRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
+	mux.HandleFunc("GET /api/v2/openresty", func(w http.ResponseWriter, r *http.Request) {
+		content, err := svc.OpenRestyFile()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		cfg := svc.GetOpenResty()
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"content": content, "version": cfg.Version, "enabled": cfg.Enabled, "updatedAt": cfg.UpdatedAt}})
+	})
 	mux.HandleFunc("GET /api/v2/openresty/status", func(w http.ResponseWriter, r *http.Request) {
 		status := svc.ProbeOpenResty(r.Context())
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": status})
@@ -934,8 +944,70 @@ func registerOpenRestyRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 
 func openRestyUpdate(svc *service.WebsiteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		var raw map[string]any
+		if err := decodeJSON(r, &raw); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		// file 接口写入完整配置，使用服务层的括号校验和原子替换。
+		if strings.HasSuffix(r.URL.Path, "/file") {
+			content, _ := raw["content"].(string)
+			backup, _ := raw["backup"].(bool)
+			if err := svc.UpdateOpenRestyFile(content, backup); err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"updated": true, "backup": backup}})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/scope") {
+			scope, _ := raw["scope"].(string)
+			params := map[string]string{}
+			if values, ok := raw["params"].(map[string]any); ok {
+				for key, value := range values {
+					if text, ok := value.(string); ok {
+						params[key] = text
+					}
+				}
+			}
+			backup, _ := raw["backup"].(bool)
+			if r.Method == http.MethodPost && len(params) > 0 {
+				if err := svc.UpdateOpenRestyScope(scope, params, backup); err != nil {
+					writeError(w, http.StatusBadRequest, err)
+					return
+				}
+				result, _ := svc.OpenRestyScope(scope)
+				wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": result})
+				return
+			}
+			result, err := svc.OpenRestyScope(scope)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": result})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/build") {
+			var modules []string
+			if values, ok := raw["modules"].([]any); ok {
+				for _, value := range values {
+					if name, ok := value.(string); ok {
+						modules = append(modules, name)
+					}
+				}
+			}
+			status, err := svc.BuildOpenResty(r.Context(), modules)
+			if err != nil {
+				writeError(w, http.StatusServiceUnavailable, err)
+				return
+			}
+			wmhttp.JSON(w, http.StatusAccepted, map[string]any{"code": 200, "data": map[string]any{"status": "validated", "probe": status}})
+			return
+		}
 		var req model.OpenRestyConfig
-		if err := decodeJSON(r, &req); err != nil {
+		encoded, _ := json.Marshal(raw)
+		if err := json.Unmarshal(encoded, &req); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
