@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/todaybin/workmesh-server/i18n"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -24,5 +25,10 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	if err != nil {
 		message = err.Error()
 	}
-	wmhttp.JSON(w, status, map[string]any{"code": "ERR", "message": message})
+	code := i18n.ErrorCode(status, message)
+	wmhttp.JSON(w, status, map[string]any{
+		"code":    "ERR",
+		"details": map[string]string{"errCode": code},
+		"message": message,
+	})
 }

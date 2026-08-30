@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/i18n"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -65,51 +66,57 @@ func NewSecurityMiddleware(next http.Handler, options SecurityMiddlewareOptions)
 	}
 	provider := newSecuritySettingsProvider(options.DataDir)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 普通 JSON 请求携带语言元数据，统一错误响应由 runtime/http 按 Accept-Language 渲染。
+		// 流式和 WebSocket 请求必须保留原始 ResponseWriter 的 Flusher/Hijacker 能力。
+		responseWriter := w
+		if r != nil && !isSelfAuthenticatedStream(r.URL.Path) {
+			responseWriter = wmhttp.WithLocale(w, i18n.LocaleFromRequest(r))
+		}
 		if r == nil {
-			wmhttp.JSON(w, http.StatusBadRequest, securityError("INVALID_REQUEST", "请求不能为空"))
+			wmhttp.JSON(responseWriter, http.StatusBadRequest, securityError("INVALID_REQUEST", "请求不能为空"))
 			return
 		}
 		settings := provider.load()
-		if !checkBoundDomain(w, r, settings) {
+		if !checkBoundDomain(responseWriter, r, settings) {
 			return
 		}
 		// 节点透传请求由 NodeRelay 在更内层完成 HMAC、时间戳、nonce 和 epoch 校验。
 		// 在此处跳过本地安全入口、Session、CSRF 和密码过期检查，避免把已认证的
 		// 节点调用误判为浏览器请求；未经 NodeRelay 验证的伪造头部仍会被其拒绝。
 		if isForwardedRelayRequest(r) {
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(responseWriter, r)
 			return
 		}
-		if !checkSecurityEntrance(w, r, settings, options.Authorize) {
+		if !checkSecurityEntrance(responseWriter, r, settings, options.Authorize) {
 			return
 		}
 		if !isAPIRequest(r.URL.Path) {
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(responseWriter, r)
 			return
 		}
 		if isPublicSecurityPath(r) || isStaticAPIPath(r.URL.Path) {
-			ensureCSRFToken(w, r)
-			next.ServeHTTP(w, r)
+			ensureCSRFToken(responseWriter, r)
+			next.ServeHTTP(responseWriter, r)
 			return
 		}
 		// 流接口使用一次性令牌和握手来源校验，不能再要求普通 API Session。
 		if isSelfAuthenticatedStream(r.URL.Path) {
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(responseWriter, r)
 			return
 		}
 		if options.Authorize != nil && !options.Authorize(r) {
-			writeSecurityError(w, http.StatusUnauthorized, "LOCAL_AUTH_REQUIRED", "需要有效的本地登录会话")
+			writeSecurityError(responseWriter, http.StatusUnauthorized, "LOCAL_AUTH_REQUIRED", "需要有效的本地登录会话")
 			return
 		}
 		if passwordExpired(r, settings, options.Authorize) {
-			writeSecurityError(w, 313, "PASSWORD_EXPIRED", "登录密码已过期，请先重置密码")
+			writeSecurityError(responseWriter, 313, "PASSWORD_EXPIRED", "登录密码已过期，请先重置密码")
 			return
 		}
-		if !checkCSRF(w, r) {
+		if !checkCSRF(responseWriter, r) {
 			return
 		}
-		ensureCSRFToken(w, r)
-		next.ServeHTTP(w, r)
+		ensureCSRFToken(responseWriter, r)
+		next.ServeHTTP(responseWriter, r)
 	})
 }
 

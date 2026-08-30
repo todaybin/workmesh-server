@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/todaybin/workmesh-server/i18n"
 )
 
 // Server 是控制面与节点执行面共享的 HTTP 生命周期封装。
@@ -34,8 +36,74 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.server.Shutdown(
 func JSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	// 统一清理内部状态标识，避免把实现阶段术语暴露给客户端。
-	_ = json.NewEncoder(w).Encode(sanitizeResponse(value))
+	// 统一处理错误语言和内部状态标识，避免把实现阶段术语暴露给客户端。
+	_ = json.NewEncoder(w).Encode(sanitizeResponse(localizeResponse(value, status, LocaleOf(w))))
+}
+
+// localeResponseWriter 为普通 HTTP 响应携带请求语言；流式和 WebSocket 处理器可继续使用原始 writer。
+// 该包装器只增加语言元数据，不缓存响应体，也不会改变连接生命周期。
+type localeResponseWriter struct {
+	http.ResponseWriter
+	locale string
+}
+
+// WithLocale 返回带语言元数据的响应写入器。
+func WithLocale(w http.ResponseWriter, locale string) http.ResponseWriter {
+	if w == nil {
+		return nil
+	}
+	if existing, ok := w.(*localeResponseWriter); ok {
+		if strings.TrimSpace(locale) != "" {
+			existing.locale = i18n.NormalizeLocale(locale)
+		}
+		return existing
+	}
+	return &localeResponseWriter{ResponseWriter: w, locale: i18n.NormalizeLocale(locale)}
+}
+
+// LocaleOf 读取响应写入器绑定的语言；未绑定时返回默认中文。
+func LocaleOf(w http.ResponseWriter) string {
+	if localized, ok := w.(interface{ ResponseLocale() string }); ok {
+		return localized.ResponseLocale()
+	}
+	return i18n.NormalizeLocale("")
+}
+
+// ResponseLocale 返回当前响应的语言代码。
+func (w *localeResponseWriter) ResponseLocale() string { return w.locale }
+
+func localizeResponse(value any, status int, locale string) any {
+	item, ok := value.(map[string]any)
+	if !ok || strings.TrimSpace(fmtString(item["code"])) != "ERR" {
+		return value
+	}
+	result := make(map[string]any, len(item)+1)
+	for key, child := range item {
+		result[key] = child
+	}
+	code := ""
+	if details, ok := item["details"].(map[string]string); ok {
+		code = strings.TrimSpace(details["errCode"])
+	}
+	if details, ok := item["details"].(map[string]any); ok && code == "" {
+		code = strings.TrimSpace(fmtString(details["errCode"]))
+	}
+	fallback := strings.TrimSpace(fmtString(item["message"]))
+	if code == "" {
+		code = i18n.ErrorCode(status, fallback)
+		result["details"] = map[string]string{"errCode": code}
+	}
+	if fallback != "" {
+		result["message"] = i18n.LocalizeError(locale, code, fallback)
+	}
+	return result
+}
+
+func fmtString(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
 }
 
 // sanitizeResponse 将内部状态名称转换为稳定的公开错误码；复制容器，避免修改调用方持有的数据。

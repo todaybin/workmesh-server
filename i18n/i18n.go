@@ -10,6 +10,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,6 +58,137 @@ func NormalizeLocale(value string) string {
 		}
 	}
 	return defaultLocale
+}
+
+// LocaleFromRequest 根据 Accept-Language 选择服务端支持的语言。
+// 未提供请求或请求头时使用中文，避免把任意用户输入直接作为文件路径。
+func LocaleFromRequest(r *http.Request) string {
+	if r == nil {
+		return defaultLocale
+	}
+	return NormalizeLocale(r.Header.Get("Accept-Language"))
+}
+
+// ErrorCode 从错误文本和 HTTP 状态推导稳定的业务错误码。
+// 已经是大写下划线格式的错误码会原样保留，其他错误按状态归类，确保客户端可以可靠分支处理。
+func ErrorCode(status int, fallback string) string {
+	value := strings.TrimSpace(fallback)
+	if isStableErrorCode(value) {
+		return value
+	}
+	switch status {
+	case http.StatusBadRequest:
+		return "INVALID_PARAMS"
+	case http.StatusUnauthorized:
+		return "LOCAL_AUTH_REQUIRED"
+	case http.StatusForbidden:
+		return "FORBIDDEN"
+	case http.StatusNotFound:
+		return "NOT_FOUND"
+	case http.StatusConflict:
+		return "CONFLICT"
+	case http.StatusBadGateway, http.StatusGatewayTimeout:
+		return "UPSTREAM_ERROR"
+	case http.StatusServiceUnavailable:
+		return "SERVICE_UNAVAILABLE"
+	case http.StatusRequestTimeout:
+		return "REQUEST_TIMEOUT"
+	default:
+		return "REQUEST_FAILED"
+	}
+}
+
+func isStableErrorCode(value string) bool {
+	if value == "" || len(value) > 96 {
+		return false
+	}
+	for index, char := range value {
+		if (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' {
+			continue
+		}
+		// 错误码必须以大写字母或数字开头，避免把普通英文句子当成错误码。
+		if index == 0 || char == ' ' || char == ':' || char == '.' || char == '-' {
+			return false
+		}
+		return false
+	}
+	return strings.Contains(value, "_")
+}
+
+// LocalizeError 将稳定错误码映射到语言目录中的通用消息。
+// 未知业务码保留原始上下文；这比伪造成功或吞掉上游错误更安全。
+func LocalizeError(locale, code, fallback string) string {
+	code = strings.TrimSpace(code)
+	fallback = strings.TrimSpace(fallback)
+	key := map[string]string{
+		"INVALID_REQUEST":            "ErrInvalidParams",
+		"INVALID_PARAMS":             "ErrInvalidParams",
+		"LOCAL_AUTH_REQUIRED":        "ErrNotLogin",
+		"SESSION_REQUIRED":           "ErrNotLogin",
+		"SESSION_NOT_FOUND":          "ErrNotLogin",
+		"FORBIDDEN":                  "ErrApiConfigDisable",
+		"CSRF_INVALID":               "ErrApiConfigKeyInvalid",
+		"DOMAIN_MISMATCH":            "ErrApiConfigDisable",
+		"SECURITY_ENTRANCE_REQUIRED": "ErrApiConfigDisable",
+		"NOT_FOUND":                  "ErrRecordNotFound",
+		"CONFLICT":                   "ErrRecordExist",
+		"UPSTREAM_ERROR":             "ErrHttpReqFailed",
+		"REQUEST_TIMEOUT":            "ErrHttpReqTimeOut",
+		"SERVICE_UNAVAILABLE":        "ErrInternalServer",
+		"REQUEST_FAILED":             "ErrProxy",
+		"PASSWORD_EXPIRED":           "ErrPasswordExpired",
+		"AUTH_REQUIRED":              "ErrNotLogin",
+		"STREAM_AUTH_REQUIRED":       "ErrNotLogin",
+	}
+	keyName := key[code]
+	if keyName == "" {
+		upper := strings.ToUpper(code)
+		switch {
+		case strings.Contains(upper, "NOT_FOUND") || strings.HasSuffix(upper, "_MISSING"):
+			keyName = "ErrRecordNotFound"
+		case strings.Contains(upper, "UNAUTHORIZED") || strings.Contains(upper, "AUTH_REQUIRED"):
+			keyName = "ErrNotLogin"
+		case strings.Contains(upper, "FORBIDDEN") || strings.Contains(upper, "CSRF"):
+			keyName = "ErrApiConfigDisable"
+		case strings.Contains(upper, "TIMEOUT"):
+			keyName = "ErrHttpReqTimeOut"
+		case strings.Contains(upper, "INVALID") || strings.HasSuffix(upper, "_REQUIRED") || strings.HasSuffix(upper, "_EMPTY"):
+			keyName = "ErrInvalidParams"
+		case strings.Contains(upper, "FAILED") || strings.Contains(upper, "UNAVAILABLE") || strings.Contains(upper, "ERROR"):
+			keyName = "ErrInternalServer"
+		}
+	}
+	if keyName == "" {
+		return fallback
+	}
+	// 仅把可展示的上下文传给模板，错误码本身不重复拼入 detail。
+	detail := fallback
+	if strings.EqualFold(detail, code) {
+		detail = ""
+	}
+	if code == "CSRF_INVALID" {
+		// CSRF 失败原因可能包含客户端提交的原文；统一使用语言目录中的 Token 文案。
+		detail = ""
+	}
+	// 通用错误通常来自中文业务错误；在非中文界面不拼接原文，避免出现中英混排。
+	// 已知错误码仍保留 ASCII 资源标识、上游错误等上下文。
+	if NormalizeLocale(locale) != defaultLocale && containsNonASCII(detail) {
+		detail = ""
+	}
+	message, err := Format(locale, keyName, map[string]any{"detail": detail, "err": detail, "name": detail, "id": detail})
+	if err != nil || strings.TrimSpace(message) == "" {
+		return fallback
+	}
+	return message
+}
+
+func containsNonASCII(value string) bool {
+	for _, char := range value {
+		if char > 127 {
+			return true
+		}
+	}
+	return false
 }
 
 // Load 返回规范化语言对应的完整 YAML 资源。

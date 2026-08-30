@@ -92,6 +92,14 @@
 | --- | --- | --- | --- | --- |
 | [~] | 服务端 i18n/localizer | `core/i18n`、`agent/i18n` | 前端 `vue-i18n`；Go 错误仍有中文固定文本 | 提供 zh/en 资源加载、按请求语言返回错误 |
 | [~] | 业务错误、多错误聚合和错误码 | `core/buserr/*.go` | `runtime/http` ERR envelope | 完成错误码目录和逐域映射测试 |
+
+### 2026-08-31 通用错误语言协商与安全拒绝
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | Accept-Language 语言协商基础设施 | `core/i18n`、`agent/i18n` | `i18n.LocaleFromRequest`、`runtime/http.WithLocale`，普通 JSON 响应按请求语言渲染，未知语言回退中文 | zh/en 请求测试通过，流式和 WebSocket 不被包装器破坏 |
+| [~] | 通用错误 envelope 与稳定错误码 | `core/buserr/*.go`、`core/middleware/*.go` | `i18n.ErrorCode/LocalizeError`、`runtime/http.JSON` 自动补充 `details.errCode`；控制面和节点面 `writeError` 已接入 | 基础安全错误已覆盖；业务域仍需逐项迁移专用语言键和多错误聚合 |
+| [x] | Session/Bearer/API Key/CSRF/域名/密码过期拒绝文案 | `core/middleware/session.go`、`csrf_protect.go`、`bind_domain.go`、`password_expired.go` | `control/api/security_middleware.go` 统一执行，错误按 Accept-Language 本地化；英文未授权、CSRF、域名和过期测试通过 | 未授权请求不得伪造成功，Cookie 会话写请求仍需 CSRF 双提交 |
 | [x] | 异步任务、取消、重试、超时和日志 | `core/app/task/task.go`、`agent/global/global.go` | `node/service/cronjob.go`、任务 API；Go 单测 | 取消请求可终止执行，重启后记录可恢复 |
 | [x] | 任务隔离 Provider 生命周期与 CLI 白名单 | `apps/workmesh-node/agent/app/api/v2/workmesh_task.go`、`agent/utils/cubesandbox/task.go`、`forgevm_task_backend.go` | `node/service/taskruntime/taskruntime.go`、`node/api/ai_execution.go:taskHandler`；固定 sha256 CLI、argv 校验、状态转换和 30 分钟超时 | 未配置真实 CLI 时返回明确 503；配置摘要后 create/start/exec/collect/cancel/destroy 均调用受控 Provider，禁止宿主 Shell |
 | [x] | 任务日志滚动与清理 | `core/log`、`agent/log` | `runtime/log/logger.go`、`runtime/log/logger_test.go` | 按大小轮转并保留 5 个历史文件，写入线程安全，关闭时刷新 |

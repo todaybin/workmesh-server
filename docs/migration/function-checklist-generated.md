@@ -1125,6 +1125,8 @@
 | --- | --- | --- | --- | --- |
 | Core/Agent 后端语言包与前端语言入口 | `apps/workmesh-node/core/i18n`、`apps/workmesh-node/agent/i18n`、旧 frontend | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 12 种语言；后端每种 1037 键；前端键结构和菜单入口通过 `i18n-scan.mjs` | implemented |
 
+| 服务端通用错误语言协商与安全错误码 | `apps/workmesh-node/core/i18n`、`core/middleware`、`agent/i18n` | `i18n/i18n.go`、`runtime/http/server.go`、`control/api/security_middleware.go`、`node/api/errors.go` | `Accept-Language`；ERR envelope 自动生成 `details.errCode`，Session/CSRF/域名/密码过期拒绝文案按语言目录渲染 | partial |
+
 ## 2026-08-31 节点身份与透传链路
 
 | 功能 | 新实现 | 测试 | 状态 |

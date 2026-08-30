@@ -4,6 +4,7 @@
 package i18n
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -47,5 +48,22 @@ func TestFormatRendersTemplateData(t *testing.T) {
 	}
 	if _, err := Message("en", "missing.key"); err == nil {
 		t.Fatal("未知语言键应返回明确错误")
+	}
+}
+
+func TestErrorCodeAndLocalization(t *testing.T) {
+	if code := ErrorCode(http.StatusUnauthorized, "会话无效"); code != "LOCAL_AUTH_REQUIRED" {
+		t.Fatalf("未登录状态码映射错误: %q", code)
+	}
+	if code := ErrorCode(http.StatusBadRequest, "CUSTOM_RULE_INVALID"); code != "CUSTOM_RULE_INVALID" {
+		t.Fatalf("稳定错误码不应被覆盖: %q", code)
+	}
+	message := LocalizeError("en-US", "LOCAL_AUTH_REQUIRED", "需要有效的本地登录会话")
+	if strings.Contains(message, "本地登录") || !strings.Contains(strings.ToLower(message), "not logged") {
+		t.Fatalf("英文错误消息未按语言目录渲染: %q", message)
+	}
+	unknown := LocalizeError("en", "UNMAPPED_CUSTOM_CODE", "自定义失败: item-1")
+	if unknown != "自定义失败: item-1" {
+		t.Fatalf("未知错误码应保留原始上下文: %q", unknown)
 	}
 }

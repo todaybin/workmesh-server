@@ -147,6 +147,49 @@ func TestSecurityMiddlewareSecurityEntrance(t *testing.T) {
 	}
 }
 
+func TestSecurityMiddlewareLocalizesSecurityErrors(t *testing.T) {
+	root := t.TempDir()
+	writeSecurityDomains(t, root, map[string]any{"bindDomain": "panel.example.test"})
+	handler := NewSecurityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), SecurityMiddlewareOptions{DataDir: root, Authorize: func(*http.Request) bool { return false }})
+
+	unauthorized := httptest.NewRequest(http.MethodGet, "/api/v2/websites", nil)
+	unauthorized.Host = "panel.example.test"
+	unauthorized.Header.Set("Accept-Language", "en-US,en;q=0.8")
+	unauthorizedRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedRecorder, unauthorized)
+	if unauthorizedRecorder.Code != http.StatusUnauthorized || strings.Contains(unauthorizedRecorder.Body.String(), "本地登录") {
+		t.Fatalf("未授权错误未按英文返回: status=%d body=%s", unauthorizedRecorder.Code, unauthorizedRecorder.Body.String())
+	}
+
+	csrf := httptest.NewRequest(http.MethodPost, "/api/v2/websites", strings.NewReader(`{}`))
+	csrf.Host = "panel.example.test"
+	csrf.Header.Set("Accept-Language", "en")
+	csrf.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-1"})
+	csrf.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "csrf-1"})
+	csrf.Header.Set(csrfHeaderName, "bad")
+	csrfRecorder := httptest.NewRecorder()
+	// 授权器只验证会话，确保请求能走到 CSRF 校验分支。
+	allowSession := NewSecurityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }), SecurityMiddlewareOptions{DataDir: root, Authorize: func(r *http.Request) bool {
+		cookie, err := r.Cookie(sessionCookieName)
+		return err == nil && cookie.Value == "session-1"
+	}})
+	allowSession.ServeHTTP(csrfRecorder, csrf)
+	if csrfRecorder.Code != http.StatusForbidden || strings.Contains(csrfRecorder.Body.String(), "CSRF token invalid") {
+		t.Fatalf("CSRF 错误未本地化: status=%d body=%s", csrfRecorder.Code, csrfRecorder.Body.String())
+	}
+
+	domain := httptest.NewRequest(http.MethodGet, "/api/v2/health", nil)
+	domain.Host = "other.example.test"
+	domain.Header.Set("Accept-Language", "en")
+	domainRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(domainRecorder, domain)
+	if domainRecorder.Code != http.StatusForbidden || strings.Contains(domainRecorder.Body.String(), "域名") {
+		t.Fatalf("域名错误未本地化: status=%d body=%s", domainRecorder.Code, domainRecorder.Body.String())
+	}
+}
+
 func writeSecurityDomains(t *testing.T, root string, settings map[string]any) {
 	t.Helper()
 	if err := os.MkdirAll(root, 0o750); err != nil {

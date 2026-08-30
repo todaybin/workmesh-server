@@ -5,6 +5,11 @@
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 全局 Session、CSRF、域名绑定与密码过期策略 | `apps/workmesh-node/core/middleware/session.go`、`csrf_protect.go`、`bind_domain.go`、`password_expired.go` | 所有 `/api/v2/*` 请求及前端安全入口 | `control/api/security_middleware.go:NewSecurityMiddleware`、`cmd/workmesh-server/main.go` | API 全路径；前端 `/{securityEntrance}` | 本地 Session/Bearer/API Key/节点令牌；Cookie 写请求要求 `pcsrftoken` 与 `X-CSRF-Token` | `WORKMESH_DATA_DIR/domains.json.settings`（`bindDomain`、`securityEntrance`、`expirationDays`、`expirationTime`）及环境变量覆盖 | 读取设置采用 mtime/大小缓存；会话和令牌由 CoreService 管理 | `control/api/security_middleware_test.go`、`cmd/workmesh-server/main_test.go` | `go test -count=1 ./control/api ./cmd/workmesh-server -run 'Security|HTTPMux'` | 本地主进程包装器、健康检查和未登录控制面已验证；HTTPS/反向代理需部署验收 | implemented | 生产 `Secure` Cookie 和真实域名需部署配置 |
 
+## 2026-08-31 服务端错误国际化与安全错误码
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Accept-Language 通用错误响应与稳定错误码 | `apps/workmesh-node/core/i18n`、`agent/i18n`、`core/middleware/*.go` | 全部 `/api/v2/*` JSON 错误及安全拒绝响应 | `i18n/i18n.go`、`runtime/http/server.go`、`control/api/helpers.go`、`node/api/errors.go` | 所有 JSON `ERR` envelope；`GET/POST /api/v2/*` | 原有 Session/Bearer/API Key/节点令牌校验不变；仅本地化错误文案 | Accept-Language 与内置 12 种语言目录 | 语言目录 Go embed 只读缓存；无新增用户状态 | `i18n/i18n_test.go`、`runtime/http/server_test.go`、`control/api/security_middleware_test.go` | `node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='off'; Set-Location apps/workmesh-server; go test ./i18n ./runtime/http ./control/api ./node/api"` | 本地英文/中文拒绝路径已验证；生产 HTTPS/代理语言头需部署验收 | partial | 业务域仍有少量直接 `wmhttp.JSON` 错误未迁移专用语言键；需按错误目录逐域补齐 |
+
 ## 2026-08-31 容器日志与下载进度闭环
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
