@@ -61,11 +61,17 @@ func main() {
 
 func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) {
 	mux := http.NewServeMux()
+	// 静态资源必须在 API 兼容层之前命中文件系统，否则浏览器会收到 JSON 错误响应并拒绝执行模块脚本。
+	staticRoot := filepath.Join("web", "dist")
+	staticFiles := http.StripPrefix("/", http.FileServer(http.Dir(staticRoot)))
+	mux.HandleFunc("GET /assets/{filepath...}", func(w http.ResponseWriter, r *http.Request) {
+		staticFiles.ServeHTTP(w, r)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 发布包包含 web/dist 时由同一进程托管前端，开发环境无构建产物则返回服务信息。
-		index := filepath.Join("web", "dist", "index.html")
+		index := filepath.Join(staticRoot, "index.html")
 		if _, err := os.Stat(index); err == nil {
-			http.FileServer(http.Dir(filepath.Join("web", "dist"))).ServeHTTP(w, r)
+			http.FileServer(http.Dir(staticRoot)).ServeHTTP(w, r)
 			return
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]string{"service": "workmesh-server"}})

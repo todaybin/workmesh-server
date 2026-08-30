@@ -72,7 +72,9 @@ function scanFile(file, area, base = area === 'core' ? '/api/v2/core' : '/api/v2
       const handle = new RegExp('\\bHandleFunc\\(\\s*["\\x27]' + method + '\\s+([^"\\x27]+)["\\x27]');
       const handleMatch = line.match(handle);
       if (handleMatch) {
-        const normalized = handleMatch[1].replaceAll(/\{([A-Za-z_]\w*)\}/g, ':$1');
+        const normalized = handleMatch[1]
+          .replaceAll(/\{([A-Za-z_]\w*)\.\.\.\}/g, '*$1')
+          .replaceAll(/\{([A-Za-z_]\w*)\}/g, ':$1');
         routes.push({ method, path: joinRoute(normalized), source: path.relative(process.cwd(), file).replaceAll('\\', '/') });
       }
     }

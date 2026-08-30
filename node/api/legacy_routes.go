@@ -510,9 +510,6 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 	mux.HandleFunc("GET /api/v2/websites/waf/status", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
 	})
-	mux.HandleFunc("GET /assets/*filepath", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
 	mux.HandleFunc("POST /api/v2/access-lists", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
 	})
