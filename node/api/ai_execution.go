@@ -1038,6 +1038,10 @@ func handleAIPost(w http.ResponseWriter, r *http.Request, s *executionState, pat
 		handleAICollectionQuery(w, s, path, body)
 		return
 	}
+	if requiresAgentRuntime(path) {
+		aiError(w, http.StatusServiceUnavailable, "AGENT_RUNTIME_UNAVAILABLE", "该操作需要已配置的 Agent 容器运行时")
+		return
+	}
 	if strings.HasSuffix(path, "/delete") || strings.HasSuffix(path, "/del") || strings.HasSuffix(path, "/uninstall") {
 		aiDelete(w, s, path, body)
 		return
@@ -1079,6 +1083,22 @@ func handleAIPost(w http.ResponseWriter, r *http.Request, s *executionState, pat
 		_ = aiUpsert(s, path, item)
 	}
 	aiOK(w, sanitizeAIMap(item))
+}
+
+// requiresAgentRuntime 判断必须在 Agent 容器内执行的写操作，避免通用状态存储伪造执行结果。
+func requiresAgentRuntime(path string) bool {
+	if strings.HasPrefix(path, "agents/plugin/") || strings.HasPrefix(path, "agents/plugins/install") || strings.HasPrefix(path, "agents/plugins/operate") {
+		return true
+	}
+	if strings.HasPrefix(path, "agents/skills/") {
+		switch path {
+		case "agents/skills/list", "agents/skills/search":
+			return false
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 // handleAgentPairingApprove 通过固定的 Docker 参数调用 Agent 配对命令。

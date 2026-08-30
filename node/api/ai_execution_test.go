@@ -273,6 +273,19 @@ func TestAgentPairingRequiresRegisteredRuntime(t *testing.T) {
 	}
 }
 
+func TestAgentPluginAndSkillWritesRequireRuntime(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	for _, path := range []string{"agents/plugin/install", "agents/plugin/upgrade", "agents/plugin/uninstall", "agents/skills/install", "agents/skills/update", "agents/skills/uninstall", "agents/plugins/operate"} {
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/ai/"+path, strings.NewReader(`{"id":"item-1"}`)))
+		if res.Code != http.StatusServiceUnavailable || strings.Contains(res.Body.String(), `"code":200`) {
+			t.Fatalf("%s must require runtime: %d %s", path, res.Code, res.Body.String())
+		}
+	}
+}
+
 func TestAIAgentCollectionQueriesUsePersistedState(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
