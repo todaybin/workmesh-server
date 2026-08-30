@@ -1640,7 +1640,41 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 		mux.HandleFunc("POST "+path, update)
 	}
 	for _, path := range []string{"/api/v2/core/settings/menu/default", "/api/v2/core/settings/terminal/search", "/api/v2/core/settings/ssl/download", "/api/v2/core/settings/ssl/reload"} {
-		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, _ *http.Request) { success(w, map[string]any{}) })
+		endpoint := path
+		mux.HandleFunc("POST "+endpoint, func(w http.ResponseWriter, r *http.Request) {
+			s.mu.Lock()
+			if s.state.Settings == nil {
+				s.state.Settings = map[string]any{}
+			}
+			result := map[string]any{"path": endpoint, "status": "ready", "updatedAt": time.Now().UTC().Format(time.RFC3339)}
+			switch endpoint {
+			case "/api/v2/core/settings/menu/default":
+				// 菜单默认值由持久化配置覆盖，未配置时返回完整的基础菜单标识。
+				menu, ok := s.state.Settings["menu.default"]
+				if !ok {
+					menu = []string{"dashboard", "applications", "websites", "databases", "containers", "files", "terminal", "settings"}
+				}
+				result["items"] = menu
+			case "/api/v2/core/settings/terminal/search":
+				term, ok := s.state.Settings["terminal"]
+				if !ok {
+					term = map[string]any{"enabled": true, "shell": "default"}
+				}
+				result["config"] = term
+			case "/api/v2/core/settings/ssl/download":
+				result["config"] = s.state.Settings["ssl"]
+			case "/api/v2/core/settings/ssl/reload":
+				s.state.Settings["ssl.lastReloadAt"] = result["updatedAt"]
+				result["reloaded"] = true
+				if err := s.saveLocked(); err != nil {
+					s.mu.Unlock()
+					domainError(w, 500, "STATE_SAVE", err.Error())
+					return
+				}
+			}
+			s.mu.Unlock()
+			success(w, result)
+		})
 	}
 	// Agent 侧设置快照使用同一份轻量状态文件，支持创建、查询、导入、恢复、回滚和删除。
 	createSnapshot := func(w http.ResponseWriter, r *http.Request) {

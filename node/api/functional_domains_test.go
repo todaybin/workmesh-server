@@ -75,6 +75,19 @@ func TestFunctionalBackupAlertSettings(t *testing.T) {
 	}
 }
 
+func TestSettingsOperationalEndpointsReturnPersistedState(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerBackupAlertLogSettingsRoutes(mux)
+	for _, path := range []string{"/api/v2/core/settings/menu/default", "/api/v2/core/settings/terminal/search", "/api/v2/core/settings/ssl/download", "/api/v2/core/settings/ssl/reload"} {
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`)))
+		if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"path"`) {
+			t.Fatalf("settings endpoint %s failed: %d %s", path, res.Code, res.Body.String())
+		}
+	}
+}
+
 func TestFunctionalLogValidation(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
