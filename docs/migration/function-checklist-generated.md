@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T19:00:40.537Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T19:07:09.709Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -784,25 +784,25 @@
 | implemented | POST | `/api/v2/core/settings/apps/store/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/bind/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/memo` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/core/settings/menu/default` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/settings/menu/default` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/menu/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/port/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/proxy/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/search` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/search/base` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/core/settings/ssl/download` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
-| implemented | POST | `/api/v2/core/settings/ssl/reload` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/settings/ssl/download` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/core/settings/ssl/reload` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/ssl/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/core/settings/terminal/search` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/settings/terminal/search` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/terminal/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/core/settings/update` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/settings/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/upgrade` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/core/settings/upgrade/notes` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/settings/description/save` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
-| implemented | POST | `/api/v2/settings/file-history/search` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
-| implemented | POST | `/api/v2/settings/file-history/update` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
-| implemented | POST | `/api/v2/settings/files/ai/search` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
-| implemented | POST | `/api/v2/settings/files/ai/update` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/settings/description/save` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/settings/file-history/search` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/settings/file-history/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/settings/files/ai/search` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/settings/files/ai/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/settings/search` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/settings/snapshot` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/settings/snapshot/del` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
@@ -818,7 +818,7 @@
 | implemented | POST | `/api/v2/settings/ssh/default` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/settings/terminal/ai/search` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/settings/terminal/ai/update` | apps/workmesh-server/node/api/runtime_toolbox.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/settings/update` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/settings/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 
 ## sites
 

@@ -1639,9 +1639,8 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 	for _, path := range []string{"/api/v2/config/global", "/api/v2/core/settings/apps/store/update", "/api/v2/core/settings/bind/update", "/api/v2/core/settings/menu/update", "/api/v2/core/settings/port/update", "/api/v2/core/settings/proxy/update", "/api/v2/core/settings/search", "/api/v2/core/settings/search/base", "/api/v2/core/settings/terminal/update", "/api/v2/core/settings/ssl/update", "/api/v2/core/settings/upgrade", "/api/v2/core/settings/upgrade/notes", "/api/v2/core/settings/memo", "/api/v2/core/settings/update", "/api/v2/settings/description/save", "/api/v2/settings/file-history/search", "/api/v2/settings/file-history/update", "/api/v2/settings/files/ai/search", "/api/v2/settings/files/ai/update", "/api/v2/settings/search", "/api/v2/settings/update"} {
 		mux.HandleFunc("POST "+path, update)
 	}
-	for _, path := range []string{"/api/v2/core/settings/menu/default", "/api/v2/core/settings/terminal/search", "/api/v2/core/settings/ssl/download", "/api/v2/core/settings/ssl/reload"} {
-		endpoint := path
-		mux.HandleFunc("POST "+endpoint, func(w http.ResponseWriter, r *http.Request) {
+	settingsOperational := func(endpoint string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
 			s.mu.Lock()
 			if s.state.Settings == nil {
 				s.state.Settings = map[string]any{}
@@ -1674,8 +1673,13 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 			}
 			s.mu.Unlock()
 			success(w, result)
-		})
+		}
 	}
+	// 使用显式路由注册，确保契约扫描和运行时注册保持一一对应。
+	mux.HandleFunc("POST /api/v2/core/settings/menu/default", settingsOperational("/api/v2/core/settings/menu/default"))
+	mux.HandleFunc("POST /api/v2/core/settings/terminal/search", settingsOperational("/api/v2/core/settings/terminal/search"))
+	mux.HandleFunc("POST /api/v2/core/settings/ssl/download", settingsOperational("/api/v2/core/settings/ssl/download"))
+	mux.HandleFunc("POST /api/v2/core/settings/ssl/reload", settingsOperational("/api/v2/core/settings/ssl/reload"))
 	// Agent 侧设置快照使用同一份轻量状态文件，支持创建、查询、导入、恢复、回滚和删除。
 	createSnapshot := func(w http.ResponseWriter, r *http.Request) {
 		v, err := requestMap(r)
