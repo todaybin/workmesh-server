@@ -20,10 +20,11 @@ func TestNormalizeServeMuxPattern(t *testing.T) {
 	}
 }
 
-func TestCompatibilityRouteCRUD(t *testing.T) {
+func TestFallbackRouteCRUD(t *testing.T) {
 	mux := http.NewServeMux()
-	registerCompatibilityRoute(mux, "POST /api/v2/apps/{key}")
-	registerCompatibilityRoute(mux, "GET /api/v2/apps/{key}")
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	registerFallbackRoute(mux, "POST /api/v2/apps/{key}")
+	registerFallbackRoute(mux, "GET /api/v2/apps/{key}")
 
 	create := httptest.NewRecorder()
 	mux.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v2/apps/demo", bytes.NewBufferString(`{"name":"demo"}`)))

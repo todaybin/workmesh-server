@@ -34,7 +34,7 @@ func (m legacyFilterMux) HandleFunc(pattern string, handler http.HandlerFunc) {
 		return
 	}
 	defer func() { _ = recover() }()
-	registerCompatibilityRoute(m.mux, normalizeServeMuxPattern(pattern))
+	registerFallbackRoute(m.mux, normalizeServeMuxPattern(pattern))
 }
 
 // normalizeServeMuxPattern 将旧 Gin 风格 :id/*path 转换为 Go ServeMux 通配符。
