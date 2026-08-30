@@ -4,21 +4,78 @@
 package api
 
 import (
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
 func registerProcessRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/process/{pid}", handleProcessByID)
+	mux.HandleFunc("GET /api/v2/process/ws", handleProcessWebSocket)
 	mux.HandleFunc("POST /api/v2/process/stop", handleProcessStop)
 	mux.HandleFunc("POST /api/v2/process/listening", handleProcessListening)
+}
+
+// handleProcessWebSocket 按 RFC6455 提供轻量进程快照推送，不引入常驻 WebSocket 库。
+// 仅发送服务端文本帧，客户端关闭连接或请求上下文结束后立即释放连接。
+func handleProcessWebSocket(w http.ResponseWriter, r *http.Request) {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"websocket": true, "upgradeRequired": true}})
+		return
+	}
+	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
+	if key == "" {
+		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "WEBSOCKET_KEY_REQUIRED"}})
+		return
+	}
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "WEBSOCKET_UNAVAILABLE"}})
+		return
+	}
+	conn, rw, err := hj.Hijack()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	sum := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+	accept := base64.StdEncoding.EncodeToString(sum[:])
+	_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Accept: " + accept + "\\r\\n\\r\\n")
+	if err := rw.Flush(); err != nil {
+		return
+	}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		payload, _ := json.Marshal(map[string]any{"type": "process", "data": dashboardProcesses(), "updatedAt": time.Now().UTC()})
+		if err := writeWebSocketTextFrame(conn, payload); err != nil {
+			return
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func writeWebSocketTextFrame(conn net.Conn, payload []byte) error {
+	if len(payload) >= 126 {
+		return errors.New("进程流帧过大")
+	}
+	frame := append([]byte{0x81, byte(len(payload))}, payload...)
+	_, err := conn.Write(frame)
+	return err
 }
 
 func handleProcessByID(w http.ResponseWriter, r *http.Request) {

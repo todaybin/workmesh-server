@@ -19,4 +19,5 @@ func Register(mux *http.ServeMux) {
 	registerCoreAuthExtras(mux)
 	RegisterRuntimeToolboxRoutes(mux)
 	RegisterAppRoutes(mux)
+	registerAnalyticsRoutes(mux)
 }

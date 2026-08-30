@@ -30,7 +30,7 @@
 
 ## 进行中
 
-实现扫描器当前结果：`implemented 428`、`partial 228`、`compatibility 138`、`pending 37`、`missing 0`（基于 Core/Agent 全源码扫描，生成时间以报告为准）。隐藏初始化文件中的路由也已纳入去重统计。逐路由证据清单见 [`function-checklist-generated.md`](./function-checklist-generated.md)。剩余接口按以下域逐条替换占位实现；不得以兼容占位或固定空列表宣称完成。
+实现扫描器当前结果：`implemented 463`、`partial 230`、`compatibility 138`、`pending 0`、`missing 0`（基于 Core/Agent 全源码扫描，生成时间以报告为准）。隐藏初始化文件中的路由也已纳入去重统计。逐路由证据清单见 [`function-checklist-generated.md`](./function-checklist-generated.md)。`partial` 与 `compatibility` 仍需按真实副作用逐项验收，不得仅凭路由注册宣称完成。
 
 - 主机与系统：主机列表、连接测试、系统信息、命令历史和终端。
 - 文件：分享、回收站、压缩/解压、上传下载、权限和内容搜索。

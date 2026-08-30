@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/todaybin/workmesh-server/config"
@@ -67,6 +68,28 @@ func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) 
 	mux.HandleFunc("GET /assets/{filepath...}", func(w http.ResponseWriter, r *http.Request) {
 		staticFiles.ServeHTTP(w, r)
 	})
+	// 旧前端仍会请求 images/static 资源；统一映射到发布包 public 目录并拒绝路径穿越。
+	publicRoot := filepath.Join("public")
+	servePublic := func(w http.ResponseWriter, r *http.Request) {
+		relative := strings.TrimPrefix(r.URL.Path, "/api/v2/")
+		relative = strings.TrimPrefix(relative, "images/")
+		if strings.HasPrefix(r.URL.Path, "/api/v2/static/") {
+			relative = strings.TrimPrefix(r.URL.Path, "/api/v2/static/")
+		}
+		clean := filepath.Clean(filepath.FromSlash(relative))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "INVALID_ASSET_PATH"}})
+			return
+		}
+		file := filepath.Join(publicRoot, clean)
+		if _, err := os.Stat(file); err != nil {
+			wmhttp.JSON(w, http.StatusNotFound, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "ASSET_NOT_FOUND"}})
+			return
+		}
+		http.ServeFile(w, r, file)
+	}
+	mux.HandleFunc("GET /api/v2/images/{filename...}", servePublic)
+	mux.HandleFunc("GET /api/v2/static/{filename...}", servePublic)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 发布包包含 web/dist 时由同一进程托管前端，开发环境无构建产物则返回服务信息。
 		index := filepath.Join(staticRoot, "index.html")
