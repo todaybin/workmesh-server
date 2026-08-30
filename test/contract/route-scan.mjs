@@ -89,6 +89,12 @@ function scanFile(file, area, base = area === 'core' ? '/api/v2/core' : '/api/v2
         routes.push({ method, path: joinRoute(normalized), source: path.relative(process.cwd(), file).replaceAll('\\', '/') });
       }
     }
+    // 支持项目内的显式别名注册辅助函数：register("GET", "/path", handler)。
+    const alias = line.match(/\b(?:register|waf)\(\s*["'](GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)["']\s*,\s*["']([^"']+)["']/);
+    if (alias) {
+      const normalizedAlias = alias[2].replaceAll(/\{([A-Za-z_]\w*)\.\.\.\}/g, '*$1').replaceAll(/\{([A-Za-z_]\w*)\}/g, ':$1');
+      routes.push({ method: alias[1], path: joinRoute(normalizedAlias), source: path.relative(process.cwd(), file).replaceAll('\\', '/') });
+    }
   }
   // 展开 helper 函数中的 group.GET/POST 等注册，覆盖隐藏的 xpack/monitor、xpack/waf 路由。
   for (const [helper, prefixes] of helperPrefixes) {

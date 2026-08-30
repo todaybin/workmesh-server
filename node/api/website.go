@@ -28,44 +28,45 @@ func registerWebsiteFunctionalRoutes(mux *http.ServeMux) {
 // 专用统计采集器接入前，先使用统一兼容存储承接请求，避免隐藏路由返回 404。
 func registerXPackWebsiteAliases(mux *http.ServeMux, svc *service.WebsiteService) {
 	// 使用显式模式便于契约扫描器发现每一条隐藏路由，并保留方法级约束。
-	monitor := map[string]string{
-		"/api/v2/xpack/monitor/status":             "/api/v2/status",
-		"/api/v2/xpack/monitor/stat":               "/api/v2/stat",
-		"/api/v2/xpack/monitor/visitors":           "/api/v2/visitors",
-		"/api/v2/xpack/monitor/visitors/loc":       "/api/v2/visitors/loc",
-		"/api/v2/xpack/monitor/qps":                "/api/v2/qps",
-		"/api/v2/xpack/monitor/rank":               "/api/v2/rank",
-		"/api/v2/xpack/monitor/trend":              "/api/v2/trend",
-		"/api/v2/xpack/monitor/logs/search":        "/api/v2/stat",
-		"/api/v2/xpack/monitor/logs/stat":          "/api/v2/stat",
-		"/api/v2/xpack/monitor/logs/detail":        "/api/v2/stat",
-		"/api/v2/xpack/monitor/logs/clear":         "/api/v2/stat",
-		"/api/v2/xpack/monitor/websites":           "/api/v2/rank",
-		"/api/v2/xpack/monitor/config/global":      "/api/v2/global",
-		"/api/v2/xpack/monitor/config/site":        "/api/v2/config/site",
-		"/api/v2/xpack/monitor/config/site/update": "/api/v2/config/site/update",
-	}
-	for source, target := range monitor {
-		method := "POST "
-		if source == "/api/v2/xpack/monitor/status" || source == "/api/v2/xpack/monitor/config/global" {
-			method = "GET "
-		}
+	register := func(method, source, target string) {
 		mux.HandleFunc(method+source, proxyFunctionalPath(target, http.HandlerFunc(analyticsHandler)))
 	}
+	register("GET", "/api/v2/xpack/monitor/status", "/api/v2/status")
+	register("POST", "/api/v2/xpack/monitor/stat", "/api/v2/stat")
+	register("POST", "/api/v2/xpack/monitor/visitors", "/api/v2/visitors")
+	register("POST", "/api/v2/xpack/monitor/visitors/loc", "/api/v2/visitors/loc")
+	register("POST", "/api/v2/xpack/monitor/qps", "/api/v2/qps")
+	register("POST", "/api/v2/xpack/monitor/rank", "/api/v2/rank")
+	register("POST", "/api/v2/xpack/monitor/trend", "/api/v2/trend")
+	register("POST", "/api/v2/xpack/monitor/logs/search", "/api/v2/stat")
+	register("POST", "/api/v2/xpack/monitor/logs/stat", "/api/v2/stat")
+	register("POST", "/api/v2/xpack/monitor/logs/detail", "/api/v2/stat")
+	register("POST", "/api/v2/xpack/monitor/logs/clear", "/api/v2/stat")
+	register("POST", "/api/v2/xpack/monitor/websites", "/api/v2/rank")
+	register("GET", "/api/v2/xpack/monitor/config/global", "/api/v2/global")
+	register("POST", "/api/v2/xpack/monitor/config/global", "/api/v2/global")
+	register("POST", "/api/v2/xpack/monitor/config/site", "/api/v2/config/site")
+	register("POST", "/api/v2/xpack/monitor/config/site/update", "/api/v2/config/site/update")
 	wafMux := http.NewServeMux()
 	registerWAFRoutes(wafMux, svc)
-	for _, entry := range []struct {
-		method string
-		path   string
-	}{
-		{"GET", "/api/v2/xpack/waf/status"}, {"GET", "/api/v2/xpack/waf/standard-rules"}, {"POST", "/api/v2/xpack/waf/test"}, {"POST", "/api/v2/xpack/waf/global"}, {"GET", "/api/v2/xpack/waf/sites"}, {"POST", "/api/v2/xpack/waf/sites"}, {"GET", "/api/v2/xpack/waf/sites/{id}/rules"}, {"POST", "/api/v2/xpack/waf/rules"}, {"POST", "/api/v2/xpack/waf/rules/delete"}, {"GET", "/api/v2/xpack/waf/access-lists"}, {"POST", "/api/v2/xpack/waf/access-lists"},
-	} {
-		target := strings.Replace(entry.path, "/api/v2/xpack/waf", "/api/v2/websites/waf", 1)
-		mux.HandleFunc(entry.method+entry.path, proxyFunctionalPath(target, wafMux))
+	waf := func(method, source, target string) {
+		mux.HandleFunc(method+source, proxyFunctionalPath(target, wafMux))
 	}
-	for _, path := range []string{"/api/v2/xpack/waf/attack/stat", "/api/v2/xpack/waf/block/search", "/api/v2/xpack/waf/relation/stat", "/api/v2/xpack/waf/log/search"} {
-		mux.HandleFunc("POST "+path, proxyFunctionalPath(strings.Replace(path, "/api/v2/xpack/waf", "/api/v2", 1), http.HandlerFunc(analyticsHandler)))
-	}
+	waf("GET", "/api/v2/xpack/waf/status", "/api/v2/websites/waf/status")
+	waf("GET", "/api/v2/xpack/waf/standard-rules", "/api/v2/websites/waf/standard-rules")
+	waf("POST", "/api/v2/xpack/waf/test", "/api/v2/websites/waf/test")
+	waf("POST", "/api/v2/xpack/waf/global", "/api/v2/websites/waf/global")
+	waf("GET", "/api/v2/xpack/waf/sites", "/api/v2/websites/waf/sites")
+	waf("POST", "/api/v2/xpack/waf/sites", "/api/v2/websites/waf/sites")
+	waf("GET", "/api/v2/xpack/waf/sites/{id}/rules", "/api/v2/websites/waf/sites/{id}/rules")
+	waf("POST", "/api/v2/xpack/waf/rules", "/api/v2/websites/waf/rules")
+	waf("POST", "/api/v2/xpack/waf/rules/delete", "/api/v2/websites/waf/rules/delete")
+	waf("GET", "/api/v2/xpack/waf/access-lists", "/api/v2/websites/waf/access-lists")
+	waf("POST", "/api/v2/xpack/waf/access-lists", "/api/v2/websites/waf/access-lists")
+	register("POST", "/api/v2/xpack/waf/attack/stat", "/api/v2/attack/stat")
+	register("POST", "/api/v2/xpack/waf/block/search", "/api/v2/block/search")
+	register("POST", "/api/v2/xpack/waf/relation/stat", "/api/v2/relation/stat")
+	register("POST", "/api/v2/xpack/waf/log/search", "/api/v2/stat")
 }
 
 // proxyFunctionalPath 将旧别名请求映射到同一进程中的真实处理器。
