@@ -3,7 +3,7 @@
 
 # 隐藏功能迁移清单
 
-本清单覆盖旧 `apps/workmesh-node/core` 与 `agent` 中不一定表现为 HTTP 路由的能力。当前路由清单为 870 条（包含 helper 注册和去品牌化静态入口）；本文件用于防止初始化钩子、后台作业、中间件和协议升级能力在迁移时遗漏。
+本清单覆盖旧 `apps/workmesh-node/core` 与 `agent` 中不一定表现为 HTTP 路由的能力。当前路由清单为 871 条（包含 helper 注册、公共备份账号空路径和去品牌化静态入口）；本文件用于防止初始化钩子、后台作业、中间件和协议升级能力在迁移时遗漏。
 
 状态定义：
 
@@ -72,6 +72,18 @@
 实现状态扫描结果见逐路由清单，当前基线为 870 条路径；不能替代本节隐藏注册验收。特别关注以下固定/降级响应：`POST /api/v2/ai/agents/agent/list`、`POST /api/v2/ai/agents/agent/channels`、`POST /api/v2/ai/agents/overview`、GPU 无硬件时的空设备列表、`GET /api/v2/process/:pid`、文件回收站/收藏/上传查询、PHP/Node 运行时详情和工具箱配置。这些路径虽有处理器，仍需真实副作用或明确的能力不可用契约后才能将 `[~]` 改为 `[x]`。
 
 ## 迁移验收规则
+
+### 备份域逐功能验收（2026-08-30）
+
+| 状态 | 功能 | 接口/代码 | 验证证据 |
+| --- | --- | --- | --- |
+| [x] | 备份账号创建、更新、删除和脱敏列表 | `node/api/functional_domains.go:registerBackupRoutes`、`handleBackupAccount*` | `go test ./node/api -run TestBackupAccountAndRecordLifecycle` |
+| [x] | 本地目录、账号选项和账号占用检查 | `GET /api/v2/backups/local`、`GET /api/v2/backups/options`、`GET /api/v2/backups/check/{name}` | `TestBackupUploadAndConnectionChecks`、JSON 状态文件复读 |
+| [x] | 备份任务记录创建、分页搜索、Cronjob 过滤、批量删除和描述更新 | `handleBackupCreateRecord`、`handleBackupRecordSearch`、`handleBackupRecordDelete` | `TestBackupAccountAndRecordLifecycle` |
+| [x] | 记录大小、下载路径和受控文件清单 | `handleBackupRecordSize`、`handleBackupRecordDownload`、`handleBackupFiles` | 记录源文件复制后大小与路径断言 |
+| [x] | 本地文件上传、恢复和上传后恢复 | `handleBackupUpload`、`handleBackupRecover` | `TestBackupUploadAndConnectionChecks`、`TestBackupAccountAndRecordLifecycle` |
+| [x] | 备份连接检查、Bucket 查询和 token 刷新状态 | `handleBackupConnCheck`、`handleBackupBuckets`、`handleBackupRefreshToken` | 连接检查单测；刷新状态写入 `domains.json` |
+| [~] | OneDrive/阿里云等云端真实 token 刷新和远端 Bucket 操作 | 轻量实现返回本地状态，未引入云 SDK | 生产凭据和云端集成测试完成后才能标记 `[x]` |
 
 ### 2026-08-30 隐藏路由批次
 

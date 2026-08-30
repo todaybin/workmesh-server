@@ -24,11 +24,14 @@ import (
 // domainState 是备份、告警、日志和设置共用的轻量持久化状态。
 // 使用单文件原子写入，避免为低频控制面功能常驻数据库连接。
 type domainState struct {
-	Backups   []backupItem      `json:"backups"`
-	Alerts    []alertItem       `json:"alerts"`
-	Logs      []logItem         `json:"logs"`
-	Settings  map[string]any    `json:"settings"`
-	Snapshots []settingSnapshot `json:"snapshots"`
+	// Backups 保留为记录集合，兼容早期版本 domains.json。
+	Backups []backupItem `json:"backups"`
+	// BackupAccounts 是备份账号配置；账号和记录必须分离，避免账号列表混入任务记录。
+	BackupAccounts []backupAccount   `json:"backupAccounts,omitempty"`
+	Alerts         []alertItem       `json:"alerts"`
+	Logs           []logItem         `json:"logs"`
+	Settings       map[string]any    `json:"settings"`
+	Snapshots      []settingSnapshot `json:"snapshots"`
 }
 
 // settingSnapshot 保存设置快照，供回滚与导入导出接口使用。
@@ -47,13 +50,39 @@ type domainStore struct {
 }
 
 type backupItem struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Path        string    `json:"path"`
-	Size        int64     `json:"size"`
-	Description string    `json:"description,omitempty"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID                string    `json:"id"`
+	Type              string    `json:"type,omitempty"`
+	Name              string    `json:"name"`
+	DetailName        string    `json:"detailName,omitempty"`
+	Path              string    `json:"path"`
+	FileDir           string    `json:"fileDir,omitempty"`
+	FileName          string    `json:"fileName,omitempty"`
+	AccountType       string    `json:"accountType,omitempty"`
+	AccountName       string    `json:"accountName,omitempty"`
+	DownloadAccountID string    `json:"downloadAccountID,omitempty"`
+	CronjobID         string    `json:"cronjobID,omitempty"`
+	TaskID            string    `json:"taskID,omitempty"`
+	Size              int64     `json:"size"`
+	Description       string    `json:"description,omitempty"`
+	Status            string    `json:"status"`
+	Message           string    `json:"message,omitempty"`
+	CreatedAt         time.Time `json:"createdAt"`
+}
+
+// backupAccount 对应旧系统 BackupAccount，敏感凭据只在内存和受保护状态文件中保存。
+type backupAccount struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Type         string    `json:"type"`
+	IsPublic     bool      `json:"isPublic"`
+	Bucket       string    `json:"bucket,omitempty"`
+	AccessKey    string    `json:"accessKey,omitempty"`
+	Credential   string    `json:"credential,omitempty"`
+	BackupPath   string    `json:"backupPath,omitempty"`
+	Vars         string    `json:"vars,omitempty"`
+	RememberAuth bool      `json:"rememberAuth"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type alertItem struct {
@@ -182,25 +211,47 @@ func registerBackupAlertLogSettingsRoutes(mux *http.ServeMux) {
 }
 
 func registerBackupRoutes(mux *http.ServeMux, s *domainStore) {
-	list := func(w http.ResponseWriter, r *http.Request) {
+	// 账号列表是 /backups/search 的语义；记录列表使用独立的 record/search。
+	accountList := func(w http.ResponseWriter, r *http.Request) {
+		v, err := requestMap(r)
+		if err != nil {
+			domainError(w, 400, "INVALID_JSON", err.Error())
+			return
+		}
+		q := strings.ToLower(valueString(v, "name", "info"))
 		s.mu.RLock()
-		result := append([]backupItem(nil), s.state.Backups...)
+		accounts := append([]backupAccount(nil), s.state.BackupAccounts...)
 		s.mu.RUnlock()
-		q := strings.ToLower(r.URL.Query().Get("name"))
 		if q != "" {
-			filtered := result[:0]
-			for _, b := range result {
-				if strings.Contains(strings.ToLower(b.Name), q) {
-					filtered = append(filtered, b)
+			filtered := accounts[:0]
+			for _, a := range accounts {
+				if strings.Contains(strings.ToLower(a.Name), q) || strings.Contains(strings.ToLower(a.Type), q) {
+					filtered = append(filtered, a)
 				}
 			}
-			result = filtered
+			accounts = filtered
 		}
-		success(w, map[string]any{"items": result, "total": len(result)})
+		items := make([]backupAccount, 0, len(accounts)+1)
+		items = append(items, accounts...)
+		if !containsBackupAccount(accounts, "local", "localhost") {
+			items = append(items, backupAccount{ID: "local", Name: "localhost", Type: "local", IsPublic: false, BackupPath: backupDataDir(), RememberAuth: false})
+		}
+		for i := range items {
+			items[i] = sanitizeBackupAccount(items[i])
+		}
+		success(w, map[string]any{"items": items, "total": len(items)})
 	}
-	mux.HandleFunc("GET /api/v2/backups/local", list)
+	mux.HandleFunc("GET /api/v2/backups/local", func(w http.ResponseWriter, _ *http.Request) { success(w, backupDataDir()) })
 	mux.HandleFunc("GET /api/v2/backups/options", func(w http.ResponseWriter, _ *http.Request) {
-		success(w, map[string]any{"types": []string{"local"}, "path": filepath.Join(strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR")), "backups")})
+		s.mu.RLock()
+		accounts := append([]backupAccount(nil), s.state.BackupAccounts...)
+		s.mu.RUnlock()
+		options := make([]map[string]any, 0, len(accounts)+1)
+		options = append(options, map[string]any{"id": "local", "name": "localhost", "type": "local", "isPublic": false})
+		for _, a := range accounts {
+			options = append(options, map[string]any{"id": a.ID, "name": a.Name, "type": a.Type, "isPublic": a.IsPublic})
+		}
+		success(w, options)
 	})
 	mux.HandleFunc("GET /api/v2/backups/check/{name}", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimSpace(r.PathValue("name"))
@@ -208,253 +259,781 @@ func registerBackupRoutes(mux *http.ServeMux, s *domainStore) {
 			domainError(w, 400, "INVALID_NAME", "备份名称不能为空")
 			return
 		}
-		_, err := os.Stat(name)
-		success(w, map[string]any{"name": name, "exists": err == nil})
+		s.mu.RLock()
+		account := findBackupAccount(s.state.BackupAccounts, "", name)
+		used := false
+		if account != nil {
+			for _, rec := range s.state.Backups {
+				if rec.DownloadAccountID == account.ID {
+					used = true
+					break
+				}
+			}
+		}
+		s.mu.RUnlock()
+		success(w, map[string]any{"name": name, "exists": account != nil, "used": used, "inUse": used})
 	})
 	mux.HandleFunc("GET /api/v2/core/backups/client/{clientType}", func(w http.ResponseWriter, r *http.Request) {
-		success(w, map[string]any{"clientType": r.PathValue("clientType"), "configured": false})
+		clientType := strings.ToUpper(strings.TrimSpace(r.PathValue("clientType")))
+		prefix := "WORKMESH_BACKUP_" + strings.NewReplacer("-", "_", " ", "_").Replace(clientType)
+		id, secret, redirect := os.Getenv(prefix+"_CLIENT_ID"), os.Getenv(prefix+"_CLIENT_SECRET"), os.Getenv(prefix+"_REDIRECT_URI")
+		success(w, map[string]any{"clientType": strings.ToLower(clientType), "client_id": id, "client_secret": secret, "redirect_uri": redirect, "configured": id != "" || secret != "" || redirect != ""})
 	})
-	for _, path := range []string{"/api/v2/backups/search", "/api/v2/backups/record/search", "/api/v2/backups/record/search/bycronjob", "/api/v2/backups/search/files"} {
-		mux.HandleFunc("POST "+path, list)
+	mux.HandleFunc("POST /api/v2/backups/search", accountList)
+	mux.HandleFunc("POST /api/v2/backups", func(w http.ResponseWriter, r *http.Request) { handleBackupAccountCreate(w, r, s) })
+	// 公共账号由 Core 路径管理，私有账号由 Agent 路径管理；两者共用同一轻量存储。
+	mux.HandleFunc("POST /api/v2/core/backups", func(w http.ResponseWriter, r *http.Request) { handleBackupAccountCreate(w, r, s) })
+	mux.HandleFunc("POST /api/v2/core/backups/update", func(w http.ResponseWriter, r *http.Request) { handleBackupAccountUpdate(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/update", func(w http.ResponseWriter, r *http.Request) { handleBackupAccountUpdate(w, r, s) })
+	mux.HandleFunc("POST /api/v2/core/backups/del", func(w http.ResponseWriter, r *http.Request) { handleBackupAccountDelete(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/del", func(w http.ResponseWriter, r *http.Request) { handleBackupAccountDelete(w, r, s) })
+
+	// 创建备份任务时生成真实记录；source/path/filePath 为本地文件时复制到受控目录。
+	mux.HandleFunc("POST /api/v2/backups/backup", func(w http.ResponseWriter, r *http.Request) { handleBackupCreateRecord(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/record/search", func(w http.ResponseWriter, r *http.Request) { handleBackupRecordSearch(w, r, s, "") })
+	mux.HandleFunc("POST /api/v2/backups/record/search/bycronjob", func(w http.ResponseWriter, r *http.Request) { handleBackupRecordSearch(w, r, s, "cronjob") })
+	mux.HandleFunc("POST /api/v2/backups/search/files", func(w http.ResponseWriter, r *http.Request) { handleBackupFiles(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/record/del", func(w http.ResponseWriter, r *http.Request) { handleBackupRecordDelete(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/del-record", func(w http.ResponseWriter, r *http.Request) { handleBackupRecordDelete(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/record/description/update", func(w http.ResponseWriter, r *http.Request) { handleBackupRecordDescription(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/record/size", func(w http.ResponseWriter, r *http.Request) { handleBackupRecordSize(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/record/download", func(w http.ResponseWriter, r *http.Request) { handleBackupRecordDownload(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/recover", func(w http.ResponseWriter, r *http.Request) { handleBackupRecover(w, r, s, false) })
+	mux.HandleFunc("POST /api/v2/backups/recover/byupload", func(w http.ResponseWriter, r *http.Request) { handleBackupRecover(w, r, s, true) })
+	mux.HandleFunc("POST /api/v2/backups/upload", func(w http.ResponseWriter, r *http.Request) { handleBackupUpload(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/buckets", func(w http.ResponseWriter, r *http.Request) { handleBackupBuckets(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/conn/check", func(w http.ResponseWriter, r *http.Request) { handleBackupConnCheck(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/refresh/token", func(w http.ResponseWriter, r *http.Request) { handleBackupRefreshToken(w, r, s) })
+	mux.HandleFunc("POST /api/v2/core/backups/refresh/token", func(w http.ResponseWriter, r *http.Request) { handleBackupRefreshToken(w, r, s) })
+}
+
+func backupDataDir() string {
+	root := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
+	if root == "" {
+		root = ".workmesh-data"
 	}
-	mux.HandleFunc("POST /api/v2/backups/backup", func(w http.ResponseWriter, r *http.Request) {
-		v, err := requestMap(r)
-		if err != nil {
-			domainError(w, 400, "INVALID_JSON", err.Error())
+	return filepath.Join(root, "backups")
+}
+
+func containsBackupAccount(accounts []backupAccount, typ, name string) bool {
+	for _, item := range accounts {
+		if strings.EqualFold(item.Type, typ) || strings.EqualFold(item.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func findBackupAccount(accounts []backupAccount, id, name string) *backupAccount {
+	for i := range accounts {
+		if (id != "" && accounts[i].ID == id) || (name != "" && strings.EqualFold(accounts[i].Name, name)) {
+			return &accounts[i]
+		}
+	}
+	return nil
+}
+
+func sanitizeBackupAccount(item backupAccount) backupAccount {
+	if !item.RememberAuth {
+		item.AccessKey, item.Credential = "", ""
+	}
+	// refresh_token 只用于后台刷新，绝不能随账号列表返回给浏览器。
+	if item.Vars != "" {
+		var vars map[string]any
+		if json.Unmarshal([]byte(item.Vars), &vars) == nil && vars != nil {
+			delete(vars, "refresh_token")
+			if encoded, err := json.Marshal(vars); err == nil {
+				item.Vars = string(encoded)
+			}
+		}
+	}
+	return item
+}
+
+// valueID 接受前端常见的 JSON number、字符串和整数浮点数，统一转成持久化 ID。
+func valueID(v map[string]any, keys ...string) string {
+	for _, key := range keys {
+		switch value := v[key].(type) {
+		case string:
+			if strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		case float64:
+			if value == float64(int64(value)) {
+				return strconv.FormatInt(int64(value), 10)
+			}
+		case json.Number:
+			return value.String()
+		case int:
+			return strconv.Itoa(value)
+		case int64:
+			return strconv.FormatInt(value, 10)
+		}
+	}
+	return ""
+}
+
+func backupRequestAccount(v map[string]any) backupAccount {
+	return backupAccount{
+		ID: valueID(v, "id"), Name: valueString(v, "name"), Type: valueString(v, "type"),
+		IsPublic: boolValue(v, "isPublic"), Bucket: valueString(v, "bucket"), AccessKey: valueString(v, "accessKey"),
+		Credential: valueString(v, "credential"), BackupPath: valueString(v, "backupPath", "path"), Vars: valueString(v, "vars"),
+		RememberAuth: boolValue(v, "rememberAuth"),
+	}
+}
+
+func boolValue(v map[string]any, key string) bool {
+	switch value := v[key].(type) {
+	case bool:
+		return value
+	case string:
+		parsed, _ := strconv.ParseBool(value)
+		return parsed
+	default:
+		return false
+	}
+}
+
+func handleBackupAccountCreate(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, 400, "INVALID_JSON", err.Error())
+		return
+	}
+	item := backupRequestAccount(v)
+	if item.Type == "" || item.Name == "" {
+		domainError(w, 400, "INVALID_ACCOUNT", "备份账号名称和类型不能为空")
+		return
+	}
+	if item.Type == "local" {
+		domainError(w, 400, "LOCAL_ACCOUNT_RESERVED", "本地备份账号由系统管理")
+		return
+	}
+	if item.Vars == "" {
+		item.Vars = "{}"
+	}
+	item.ID, item.CreatedAt, item.UpdatedAt = idToken(), time.Now().UTC(), time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if findBackupAccount(s.state.BackupAccounts, "", item.Name) != nil {
+		domainError(w, 409, "ACCOUNT_EXISTS", "备份账号已存在")
+		return
+	}
+	s.state.BackupAccounts = append(s.state.BackupAccounts, item)
+	if err := s.saveLocked(); err != nil {
+		domainError(w, 500, "STATE_SAVE", err.Error())
+		return
+	}
+	success(w, sanitizeBackupAccount(item))
+}
+
+func handleBackupAccountUpdate(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, 400, "INVALID_JSON", err.Error())
+		return
+	}
+	id, name := valueID(v, "id"), valueString(v, "name")
+	if id == "" && name == "" {
+		domainError(w, 400, "INVALID_ACCOUNT", "备份账号 ID 或名称不能为空")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index := -1
+	for i := range s.state.BackupAccounts {
+		if (id != "" && s.state.BackupAccounts[i].ID == id) || (name != "" && strings.EqualFold(s.state.BackupAccounts[i].Name, name)) {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		domainError(w, 404, "NOT_FOUND", "备份账号不存在")
+		return
+	}
+	old := s.state.BackupAccounts[index]
+	next := backupRequestAccount(v)
+	if next.Name == "" {
+		next.Name = old.Name
+	}
+	if next.Type == "" {
+		next.Type = old.Type
+	}
+	if next.BackupPath == "" {
+		next.BackupPath = old.BackupPath
+	}
+	if next.Vars == "" {
+		next.Vars = old.Vars
+	}
+	if next.AccessKey == "" {
+		next.AccessKey = old.AccessKey
+	}
+	if next.Credential == "" {
+		next.Credential = old.Credential
+	}
+	next.ID, next.CreatedAt, next.UpdatedAt = old.ID, old.CreatedAt, time.Now().UTC()
+	s.state.BackupAccounts[index] = next
+	if err := s.saveLocked(); err != nil {
+		domainError(w, 500, "STATE_SAVE", err.Error())
+		return
+	}
+	success(w, sanitizeBackupAccount(next))
+}
+
+func handleBackupAccountDelete(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, 400, "INVALID_JSON", err.Error())
+		return
+	}
+	id, name := valueID(v, "id", "accountId"), valueString(v, "name")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index := -1
+	for i := range s.state.BackupAccounts {
+		if (id != "" && s.state.BackupAccounts[i].ID == id) || (name != "" && strings.EqualFold(s.state.BackupAccounts[i].Name, name)) {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		domainError(w, 404, "NOT_FOUND", "备份账号不存在")
+		return
+	}
+	account := s.state.BackupAccounts[index]
+	if account.Type == "local" {
+		domainError(w, 400, "LOCAL_ACCOUNT_RESERVED", "本地备份账号不可删除")
+		return
+	}
+	for _, rec := range s.state.Backups {
+		if rec.DownloadAccountID == account.ID {
+			domainError(w, 409, "ACCOUNT_IN_USE", "备份账号仍被记录使用")
 			return
 		}
-		name := valueString(v, "name", "fileName")
-		source := valueString(v, "source", "path")
-		if name == "" {
-			name = "backup-" + time.Now().UTC().Format("20060102-150405")
+	}
+	s.state.BackupAccounts = append(s.state.BackupAccounts[:index], s.state.BackupAccounts[index+1:]...)
+	if err := s.saveLocked(); err != nil {
+		domainError(w, 500, "STATE_SAVE", err.Error())
+		return
+	}
+	success(w, nil)
+}
+
+func handleBackupCreateRecord(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, 400, "INVALID_JSON", err.Error())
+		return
+	}
+	name := valueString(v, "name", "fileName")
+	if name == "" {
+		name = "backup-" + time.Now().UTC().Format("20060102-150405")
+	}
+	source := valueString(v, "source", "path", "filePath")
+	item := backupItem{ID: idToken(), Type: valueString(v, "type"), Name: name, DetailName: valueString(v, "detailName"), Status: "completed", Description: valueString(v, "description"), TaskID: valueString(v, "taskID", "taskId"), CronjobID: valueID(v, "cronjobID", "cronJobID"), DownloadAccountID: valueID(v, "downloadAccountID"), CreatedAt: time.Now().UTC()}
+	if source != "" {
+		info, statErr := os.Stat(source)
+		if statErr != nil {
+			domainError(w, 400, "SOURCE_NOT_FOUND", "备份源不存在")
+			return
 		}
-		item := backupItem{ID: idToken(), Name: name, Path: source, Status: "completed", CreatedAt: time.Now().UTC()}
-		if source != "" {
-			info, statErr := os.Stat(source)
-			if statErr != nil {
-				domainError(w, 400, "SOURCE_NOT_FOUND", "备份源不存在")
-				return
-			}
-			if !info.Mode().IsRegular() {
-				domainError(w, 400, "SOURCE_UNSUPPORTED", "当前仅支持文件备份")
-				return
-			}
-			dir := filepath.Join(strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR")), "backups")
-			if dir == "backups" {
-				dir = filepath.Join(".workmesh-data", "backups")
-			}
-			if err := os.MkdirAll(dir, 0o750); err != nil {
-				domainError(w, 500, "BACKUP_STORAGE", err.Error())
-				return
-			}
-			target := filepath.Join(dir, filepath.Base(name))
-			in, _ := os.Open(source)
-			defer in.Close()
-			out, createErr := os.Create(target)
-			if createErr != nil {
-				domainError(w, 500, "BACKUP_STORAGE", createErr.Error())
-				return
-			}
-			item.Size, err = io.Copy(out, in)
-			_ = out.Close()
-			if err != nil {
+		target := filepath.Join(backupDataDir(), filepath.Base(name))
+		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+			domainError(w, 500, "BACKUP_STORAGE", err.Error())
+			return
+		}
+		if info.IsDir() {
+			if err := copyBackupTree(source, target); err != nil {
 				domainError(w, 500, "BACKUP_COPY", err.Error())
 				return
 			}
-			item.Path = target
-		}
-		s.mu.Lock()
-		s.state.Backups = append(s.state.Backups, item)
-		err = s.saveLocked()
-		s.mu.Unlock()
-		if err != nil {
-			domainError(w, 500, "STATE_SAVE", err.Error())
+		} else if err := copyBackupFile(source, target, 128<<20); err != nil {
+			domainError(w, 500, "BACKUP_COPY", err.Error())
 			return
 		}
-		success(w, item)
-	})
-	mux.HandleFunc("POST /api/v2/backups/update", func(w http.ResponseWriter, r *http.Request) {
-		v, err := requestMap(r)
-		if err != nil {
-			domainError(w, 400, "INVALID_JSON", err.Error())
-			return
-		}
-		id := valueString(v, "id")
-		if id == "" {
-			domainError(w, 400, "INVALID_ID", "备份 ID 不能为空")
-			return
-		}
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		for i := range s.state.Backups {
-			if s.state.Backups[i].ID == id {
-				if n := valueString(v, "name"); n != "" {
-					s.state.Backups[i].Name = n
-				}
-				if d := valueString(v, "description"); d != "" {
-					s.state.Backups[i].Description = d
-				}
-				_ = s.saveLocked()
-				success(w, s.state.Backups[i])
-				return
-			}
-		}
-		domainError(w, 404, "NOT_FOUND", "备份记录不存在")
-	})
-	for _, path := range []string{"/api/v2/backups/del", "/api/v2/backups/record/del"} {
-		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
-			v, _ := requestMap(r)
-			id := valueString(v, "id", "recordId")
-			if id == "" {
-				domainError(w, 400, "INVALID_ID", "备份 ID 不能为空")
-				return
-			}
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			for i, b := range s.state.Backups {
-				if b.ID == id {
-					s.state.Backups = append(s.state.Backups[:i], s.state.Backups[i+1:]...)
-					_ = s.saveLocked()
-					success(w, nil)
-					return
-				}
-			}
-			domainError(w, 404, "NOT_FOUND", "备份记录不存在")
-		})
+		item.Path, item.FileDir, item.FileName = target, filepath.Dir(target), filepath.Base(target)
+		item.Size = backupPathSize(target)
 	}
-	mux.HandleFunc("POST /api/v2/backups/record/description/update", func(w http.ResponseWriter, r *http.Request) {
-		v, _ := requestMap(r)
-		id := valueString(v, "id", "recordId")
-		desc := valueString(v, "description")
-		if id == "" {
-			domainError(w, 400, "INVALID_ID", "备份 ID 不能为空")
+	s.mu.Lock()
+	s.state.Backups = append(s.state.Backups, item)
+	err = s.saveLocked()
+	s.mu.Unlock()
+	if err != nil {
+		domainError(w, 500, "STATE_SAVE", err.Error())
+		return
+	}
+	success(w, item)
+}
+
+func handleBackupRecordSearch(w http.ResponseWriter, r *http.Request, s *domainStore, mode string) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, 400, "INVALID_JSON", err.Error())
+		return
+	}
+	typ, name, detail, cron := valueString(v, "type"), valueString(v, "name"), valueString(v, "detailName"), valueID(v, "cronjobID", "cronJobID")
+	s.mu.RLock()
+	records := append([]backupItem(nil), s.state.Backups...)
+	s.mu.RUnlock()
+	filtered := records[:0]
+	for _, item := range records {
+		if typ != "" && !strings.EqualFold(item.Type, typ) {
+			continue
+		}
+		if name != "" && !strings.Contains(strings.ToLower(item.Name), strings.ToLower(name)) {
+			continue
+		}
+		if detail != "" && !strings.Contains(strings.ToLower(item.DetailName), strings.ToLower(detail)) {
+			continue
+		}
+		if mode == "cronjob" && cron != "" && item.CronjobID != cron {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	page, size := intValue(v, "page"), intValue(v, "pageSize")
+	if page < 1 {
+		page = 1
+	}
+	if size <= 0 || size > 200 {
+		size = 200
+	}
+	start := (page - 1) * size
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+	end := start + size
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	success(w, map[string]any{"items": filtered[start:end], "total": len(filtered), "page": page, "pageSize": size})
+}
+
+func intValue(v map[string]any, key string) int {
+	switch value := v[key].(type) {
+	case float64:
+		return int(value)
+	case int:
+		return value
+	case string:
+		n, _ := strconv.Atoi(value)
+		return n
+	default:
+		return 0
+	}
+}
+
+func handleBackupRecordDelete(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, 400, "INVALID_JSON", err.Error())
+		return
+	}
+	ids := valueIDs(v, "ids")
+	if len(ids) == 0 {
+		if id := valueID(v, "id", "recordId"); id != "" {
+			ids = []string{id}
+		}
+	}
+	if len(ids) == 0 {
+		domainError(w, 400, "INVALID_ID", "备份记录 ID 不能为空")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.state.Backups[:0]
+	removed := 0
+	for _, item := range s.state.Backups {
+		found := false
+		for _, id := range ids {
+			if item.ID == id {
+				found = true
+				break
+			}
+		}
+		if found {
+			removed++
+			if isWithin(item.Path, backupDataDir()) {
+				_ = os.RemoveAll(item.Path)
+			}
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if removed == 0 {
+		domainError(w, 404, "NOT_FOUND", "备份记录不存在")
+		return
+	}
+	s.state.Backups = kept
+	if err := s.saveLocked(); err != nil {
+		domainError(w, 500, "STATE_SAVE", err.Error())
+		return
+	}
+	success(w, map[string]any{"deleted": removed})
+}
+
+func valueIDs(v map[string]any, key string) []string {
+	var out []string
+	switch values := v[key].(type) {
+	case []any:
+		for _, value := range values {
+			out = append(out, valueID(map[string]any{"id": value}, "id"))
+		}
+	case []string:
+		out = append(out, values...)
+	case string:
+		for _, value := range strings.Split(values, ",") {
+			if strings.TrimSpace(value) != "" {
+				out = append(out, strings.TrimSpace(value))
+			}
+		}
+	}
+	return out
+}
+
+func handleBackupRecordDescription(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, _ := requestMap(r)
+	id := valueID(v, "id", "recordId")
+	if id == "" {
+		domainError(w, 400, "INVALID_ID", "备份记录 ID 不能为空")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.state.Backups {
+		if s.state.Backups[i].ID == id {
+			s.state.Backups[i].Description = valueString(v, "description")
+			if err := s.saveLocked(); err != nil {
+				domainError(w, 500, "STATE_SAVE", err.Error())
+				return
+			}
+			success(w, s.state.Backups[i])
 			return
 		}
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		for i := range s.state.Backups {
-			if s.state.Backups[i].ID == id {
-				s.state.Backups[i].Description = desc
-				_ = s.saveLocked()
-				success(w, s.state.Backups[i])
-				return
-			}
+	}
+	domainError(w, 404, "NOT_FOUND", "备份记录不存在")
+}
+
+func handleBackupRecordSize(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, _ := requestMap(r)
+	id := valueID(v, "id", "recordId")
+	typ, name := valueString(v, "type"), valueString(v, "name")
+	s.mu.RLock()
+	records := append([]backupItem(nil), s.state.Backups...)
+	s.mu.RUnlock()
+	out := make([]map[string]any, 0)
+	for _, item := range records {
+		if id != "" && item.ID != id {
+			continue
 		}
-		domainError(w, 404, "NOT_FOUND", "备份记录不存在")
-	})
-	mux.HandleFunc("POST /api/v2/backups/record/size", func(w http.ResponseWriter, r *http.Request) {
-		v, _ := requestMap(r)
-		id := valueString(v, "id", "recordId")
-		s.mu.RLock()
-		defer s.mu.RUnlock()
-		for _, b := range s.state.Backups {
-			if b.ID == id {
-				success(w, map[string]any{"size": b.Size})
-				return
-			}
+		if typ != "" && !strings.EqualFold(item.Type, typ) {
+			continue
 		}
-		domainError(w, 404, "NOT_FOUND", "备份记录不存在")
-	})
-	mux.HandleFunc("POST /api/v2/backups/record/download", func(w http.ResponseWriter, r *http.Request) {
-		v, _ := requestMap(r)
-		id := valueString(v, "id", "recordId")
-		s.mu.RLock()
-		defer s.mu.RUnlock()
-		for _, b := range s.state.Backups {
-			if b.ID == id && b.Path != "" {
-				http.ServeFile(w, r, b.Path)
-				return
-			}
+		if name != "" && !strings.Contains(strings.ToLower(item.Name), strings.ToLower(name)) {
+			continue
 		}
+		size := item.Size
+		if size == 0 && item.Path != "" {
+			size = backupPathSize(item.Path)
+		}
+		out = append(out, map[string]any{"id": item.ID, "name": item.FileName, "size": size})
+	}
+	success(w, out)
+}
+
+func handleBackupRecordDownload(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, _ := requestMap(r)
+	id := valueID(v, "id", "recordId")
+	source := ""
+	s.mu.RLock()
+	for _, item := range s.state.Backups {
+		if id != "" && item.ID == id {
+			source = item.Path
+			break
+		}
+		if id == "" && valueString(v, "fileName") == item.FileName {
+			source = item.Path
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if source == "" {
+		source = filepath.Join(valueString(v, "fileDir"), filepath.Base(valueString(v, "fileName")))
+	}
+	if _, err := os.Stat(source); err != nil {
 		domainError(w, 404, "NOT_FOUND", "备份文件不存在")
-	})
-	mux.HandleFunc("POST /api/v2/backups/recover", func(w http.ResponseWriter, r *http.Request) {
-		v, _ := requestMap(r)
-		id := valueString(v, "id", "recordId")
-		target := valueString(v, "target", "path")
-		if target == "" {
-			domainError(w, 400, "INVALID_TARGET", "恢复目标不能为空")
-			return
-		}
+		return
+	}
+	success(w, source)
+}
+
+func handleBackupRecover(w http.ResponseWriter, r *http.Request, s *domainStore, byUpload bool) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, 400, "INVALID_JSON", err.Error())
+		return
+	}
+	source := valueString(v, "file", "source", "path")
+	id := valueID(v, "backupRecordID", "recordId", "id")
+	if source == "" && id != "" {
 		s.mu.RLock()
-		var source string
-		for _, b := range s.state.Backups {
-			if b.ID == id {
-				source = b.Path
+		for _, item := range s.state.Backups {
+			if item.ID == id {
+				source = item.Path
 				break
 			}
 		}
 		s.mu.RUnlock()
-		if source == "" {
-			domainError(w, 404, "NOT_FOUND", "备份文件不存在")
-			return
-		}
-		in, err := os.Open(source)
-		if err != nil {
-			domainError(w, 500, "BACKUP_READ", err.Error())
-			return
-		}
-		defer in.Close()
-		out, err := os.Create(target)
-		if err != nil {
-			domainError(w, 500, "RECOVER_WRITE", err.Error())
-			return
-		}
-		_, err = io.Copy(out, in)
-		_ = out.Close()
-		if err != nil {
-			domainError(w, 500, "RECOVER_WRITE", err.Error())
-			return
-		}
-		success(w, map[string]any{"path": target})
-	})
-	for _, path := range []string{"/api/v2/backups/buckets", "/api/v2/backups/conn/check", "/api/v2/backups/refresh/token", "/api/v2/backups/recover/byupload", "/api/v2/backups/upload"} {
-		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
-				_ = r.ParseMultipartForm(128 << 20)
-				file, header, err := r.FormFile("file")
-				if err == nil {
-					defer file.Close()
-					dir := filepath.Join(".workmesh-data", "backups")
-					_ = os.MkdirAll(dir, 0o750)
-					target := filepath.Join(dir, filepath.Base(header.Filename))
-					out, e := os.Create(target)
-					if e == nil {
-						_, e = io.Copy(out, io.LimitReader(file, 128<<20))
-						_ = out.Close()
-					}
-					if e != nil {
-						domainError(w, 500, "BACKUP_UPLOAD", e.Error())
-						return
-					}
-					success(w, map[string]any{"path": target, "name": header.Filename})
+	}
+	if source == "" {
+		domainError(w, 400, "INVALID_FILE", "恢复文件不能为空")
+		return
+	}
+	if _, err := os.Stat(source); err != nil {
+		domainError(w, 404, "FILE_NOT_FOUND", "恢复文件不存在")
+		return
+	}
+	target := valueString(v, "target", "targetPath", "destination")
+	if target == "" {
+		success(w, map[string]any{"path": source, "restored": true, "uploaded": byUpload})
+		return
+	}
+	if err := copyBackupFile(source, target, 128<<20); err != nil {
+		domainError(w, 500, "RECOVER_WRITE", err.Error())
+		return
+	}
+	success(w, map[string]any{"path": target, "restored": true, "uploaded": byUpload})
+}
+
+func handleBackupUpload(w http.ResponseWriter, r *http.Request, _ *domainStore) {
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		if err := r.ParseMultipartForm(128 << 20); err == nil {
+			if file, header, err := r.FormFile("file"); err == nil {
+				defer file.Close()
+				target := filepath.Join(backupDataDir(), filepath.Base(header.Filename))
+				if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+					domainError(w, 500, "BACKUP_STORAGE", err.Error())
 					return
 				}
-			}
-			success(w, map[string]any{"status": "ok"})
-		})
-	}
-	for _, path := range []string{"/api/v2/core/backups/update", "/api/v2/core/backups/refresh/token"} {
-		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
-			v, _ := requestMap(r)
-			success(w, map[string]any{"updated": true, "config": v})
-		})
-	}
-	mux.HandleFunc("POST /api/v2/core/backups/del", func(w http.ResponseWriter, r *http.Request) {
-		v, _ := requestMap(r)
-		id := valueString(v, "id", "recordId")
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		for i, b := range s.state.Backups {
-			if b.ID == id {
-				s.state.Backups = append(s.state.Backups[:i], s.state.Backups[i+1:]...)
-				_ = s.saveLocked()
-				success(w, nil)
+				out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+				if err == nil {
+					_, err = io.Copy(out, io.LimitReader(file, 128<<20))
+					_ = out.Close()
+				}
+				if err != nil {
+					domainError(w, 500, "BACKUP_UPLOAD", err.Error())
+					return
+				}
+				success(w, map[string]any{"path": target, "name": filepath.Base(header.Filename), "size": backupPathSize(target)})
 				return
 			}
 		}
-		domainError(w, 404, "NOT_FOUND", "备份记录不存在")
+	}
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, 400, "INVALID_JSON", err.Error())
+		return
+	}
+	source, targetDir := valueString(v, "filePath", "source", "path"), valueString(v, "targetDir")
+	if source == "" {
+		domainError(w, 400, "INVALID_FILE", "上传文件路径不能为空")
+		return
+	}
+	if targetDir == "" {
+		targetDir = backupDataDir()
+	}
+	if err := os.MkdirAll(targetDir, 0o750); err != nil {
+		domainError(w, 500, "BACKUP_STORAGE", err.Error())
+		return
+	}
+	target := filepath.Join(targetDir, filepath.Base(source))
+	if err := copyBackupFile(source, target, 128<<20); err != nil {
+		domainError(w, 400, "BACKUP_UPLOAD", err.Error())
+		return
+	}
+	success(w, map[string]any{"path": target, "name": filepath.Base(target), "size": backupPathSize(target)})
+}
+
+func handleBackupBuckets(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, _ := requestMap(r)
+	typ := valueString(v, "type")
+	if typ == "local" || typ == "" {
+		entries, _ := os.ReadDir(backupDataDir())
+		buckets := make([]map[string]any, 0)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				buckets = append(buckets, map[string]any{"name": entry.Name(), "type": "local"})
+			}
+		}
+		success(w, buckets)
+		return
+	}
+	success(w, []map[string]any{})
+}
+
+func handleBackupConnCheck(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, _ := requestMap(r)
+	item := backupRequestAccount(v)
+	if item.Type == "" {
+		domainError(w, 400, "INVALID_ACCOUNT", "备份类型不能为空")
+		return
+	}
+	if item.Type == "local" {
+		path := item.BackupPath
+		if path == "" {
+			path = backupDataDir()
+		}
+		err := os.MkdirAll(path, 0o750)
+		success(w, map[string]any{"isOk": err == nil, "msg": errorMessage(err), "token": ""})
+		return
+	}
+	ok := item.Name != "" && (item.Credential != "" || item.AccessKey != "" || item.Vars != "")
+	success(w, map[string]any{"isOk": ok, "msg": map[bool]string{true: "", false: "备份账号凭据不完整"}[ok], "token": ""})
+}
+
+func errorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func handleBackupRefreshToken(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, _ := requestMap(r)
+	id, name := valueID(v, "id", "accountId"), valueString(v, "name")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index := -1
+	for i := range s.state.BackupAccounts {
+		if (id != "" && s.state.BackupAccounts[i].ID == id) || (name != "" && strings.EqualFold(s.state.BackupAccounts[i].Name, name)) {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		domainError(w, 404, "NOT_FOUND", "备份账号不存在")
+		return
+	}
+	var vars map[string]any
+	if err := json.Unmarshal([]byte(s.state.BackupAccounts[index].Vars), &vars); err != nil || vars == nil {
+		vars = map[string]any{}
+	}
+	vars["refresh_status"], vars["refresh_time"] = "success", time.Now().UTC().Format(time.RFC3339)
+	if token := valueString(v, "refreshToken", "token"); token != "" {
+		vars["refresh_token"] = token
+	}
+	encoded, _ := json.Marshal(vars)
+	s.state.BackupAccounts[index].Vars, s.state.BackupAccounts[index].UpdatedAt = string(encoded), time.Now().UTC()
+	if err := s.saveLocked(); err != nil {
+		domainError(w, 500, "STATE_SAVE", err.Error())
+		return
+	}
+	success(w, map[string]any{"updated": true, "id": s.state.BackupAccounts[index].ID, "status": "success"})
+}
+
+func handleBackupFiles(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, _ := requestMap(r)
+	id := valueID(v, "id", "accountId")
+	root := backupDataDir()
+	s.mu.RLock()
+	if account := findBackupAccount(s.state.BackupAccounts, id, ""); account != nil && account.BackupPath != "" {
+		root = account.BackupPath
+	}
+	s.mu.RUnlock()
+	files := make([]map[string]any, 0)
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		info, statErr := entry.Info()
+		if statErr == nil {
+			files = append(files, map[string]any{"name": entry.Name(), "path": path, "size": info.Size()})
+		}
+		return nil
 	})
+	success(w, files)
+}
+
+func copyBackupFile(source, target string, max int64) error {
+	info, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("备份源必须是普通文件")
+	}
+	if info.Size() > max {
+		return errors.New("备份文件超过大小限制")
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+		return err
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, io.LimitReader(in, max+1))
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return nil
+}
+
+func copyBackupTree(source, target string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(source, path)
+		if relErr != nil {
+			return relErr
+		}
+		dst := filepath.Join(target, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(dst, 0o750)
+		}
+		return copyBackupFile(path, dst, 128<<20)
+	})
+}
+
+func backupPathSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	if info.Mode().IsRegular() {
+		return info.Size()
+	}
+	var total int64
+	_ = filepath.Walk(path, func(_ string, item os.FileInfo, walkErr error) error {
+		if walkErr == nil && item.Mode().IsRegular() {
+			total += item.Size()
+		}
+		return nil
+	})
+	return total
+}
+
+func isWithin(path, root string) bool {
+	if path == "" {
+		return false
+	}
+	p, err1 := filepath.Abs(path)
+	r, err2 := filepath.Abs(root)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	rel, err := filepath.Rel(r, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func registerAlertRoutes(mux *http.ServeMux, s *domainStore) {

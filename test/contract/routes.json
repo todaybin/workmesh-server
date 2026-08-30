@@ -1950,6 +1950,11 @@
     },
     {
       "method": "POST",
+      "path": "/api/v2/core/backups",
+      "source": "apps/workmesh-node/core/router/ro_backup.go"
+    },
+    {
+      "method": "POST",
       "path": "/api/v2/core/backups/del",
       "source": "apps/workmesh-node/core/router/ro_backup.go"
     },

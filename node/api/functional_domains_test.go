@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -88,6 +89,112 @@ func TestFunctionalLogValidation(t *testing.T) {
 	_ = json.NewDecoder(res.Body).Decode(&body)
 	if body["code"] != "ERR" {
 		t.Fatalf("unexpected envelope: %#v", body)
+	}
+}
+
+// TestBackupAccountAndRecordLifecycle 覆盖账号、记录、上传和恢复的端到端最小闭环。
+func TestBackupAccountAndRecordLifecycle(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	mux := http.NewServeMux()
+	registerBackupAlertLogSettingsRoutes(mux)
+	post := func(path, payload string) *httptest.ResponseRecorder {
+		res := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(payload))
+		req.Header.Set("Content-Type", "application/json")
+		mux.ServeHTTP(res, req)
+		return res
+	}
+	created := post("/api/v2/backups", `{"name":"archive","type":"s3","vars":"{}","accessKey":"key","credential":"secret"}`)
+	if created.Code != http.StatusOK {
+		t.Fatalf("create account status=%d body=%s", created.Code, created.Body.String())
+	}
+	var accountEnvelope struct {
+		Data backupAccount `json:"data"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &accountEnvelope); err != nil || accountEnvelope.Data.ID == "" {
+		t.Fatalf("account response=%s err=%v", created.Body.String(), err)
+	}
+	if accountEnvelope.Data.AccessKey != "" || accountEnvelope.Data.Credential != "" {
+		t.Fatalf("敏感字段未脱敏: %#v", accountEnvelope.Data)
+	}
+
+	source := filepath.Join(dataDir, "source.txt")
+	if err := os.WriteFile(source, []byte("backup-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recordBody, _ := json.Marshal(map[string]any{"type": "website", "name": "site", "source": source, "downloadAccountID": accountEnvelope.Data.ID})
+	record := post("/api/v2/backups/backup", string(recordBody))
+	if record.Code != http.StatusOK {
+		t.Fatalf("create record status=%d body=%s", record.Code, record.Body.String())
+	}
+	var recordEnvelope struct {
+		Data backupItem `json:"data"`
+	}
+	if err := json.Unmarshal(record.Body.Bytes(), &recordEnvelope); err != nil || recordEnvelope.Data.ID == "" || recordEnvelope.Data.Size != int64(len("backup-content")) {
+		t.Fatalf("record response=%s err=%v", record.Body.String(), err)
+	}
+
+	search := post("/api/v2/backups/record/search", `{"type":"website","page":1,"pageSize":20}`)
+	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), recordEnvelope.Data.ID) {
+		t.Fatalf("record search=%d body=%s", search.Code, search.Body.String())
+	}
+	sizePayload, _ := json.Marshal(map[string]any{"id": recordEnvelope.Data.ID})
+	sizes := post("/api/v2/backups/record/size", string(sizePayload))
+	if sizes.Code != http.StatusOK || !strings.Contains(sizes.Body.String(), `"size":14`) {
+		t.Fatalf("record size=%d body=%s", sizes.Code, sizes.Body.String())
+	}
+
+	target := filepath.Join(dataDir, "restored.txt")
+	recoverPayload, _ := json.Marshal(map[string]any{"backupRecordID": recordEnvelope.Data.ID, "target": target})
+	recovered := post("/api/v2/backups/recover", string(recoverPayload))
+	if recovered.Code != http.StatusOK {
+		t.Fatalf("recover status=%d body=%s", recovered.Code, recovered.Body.String())
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "backup-content" {
+		t.Fatalf("recovered content=%q err=%v", got, err)
+	}
+
+	updatePayload, _ := json.Marshal(map[string]any{"id": accountEnvelope.Data.ID, "name": "archive-updated"})
+	updated := post("/api/v2/backups/update", string(updatePayload))
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), "archive-updated") {
+		t.Fatalf("update account=%d body=%s", updated.Code, updated.Body.String())
+	}
+	deletePayload, _ := json.Marshal(map[string]any{"ids": []string{recordEnvelope.Data.ID}})
+	deleted := post("/api/v2/backups/record/del", string(deletePayload))
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete record=%d body=%s", deleted.Code, deleted.Body.String())
+	}
+	if deletedAccount := post("/api/v2/core/backups/del", `{"name":"archive-updated"}`); deletedAccount.Code != http.StatusOK {
+		t.Fatalf("delete account=%d body=%s", deletedAccount.Code, deletedAccount.Body.String())
+	}
+}
+
+func TestBackupUploadAndConnectionChecks(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	mux := http.NewServeMux()
+	registerBackupAlertLogSettingsRoutes(mux)
+	source := filepath.Join(dataDir, "upload.tar.gz")
+	if err := os.WriteFile(source, []byte("uploaded"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	uploadBody, _ := json.Marshal(map[string]string{"filePath": source, "targetDir": filepath.Join(dataDir, "incoming")})
+	body := bytes.NewBuffer(uploadBody)
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/backups/upload", body)
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "upload.tar.gz") {
+		t.Fatalf("upload=%d body=%s", res.Code, res.Body.String())
+	}
+	checkBody, _ := json.Marshal(map[string]string{"type": "local", "backupPath": filepath.Join(dataDir, "local")})
+	check := httptest.NewRecorder()
+	checkReq := httptest.NewRequest(http.MethodPost, "/api/v2/backups/conn/check", bytes.NewBuffer(checkBody))
+	checkReq.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(check, checkReq)
+	if check.Code != http.StatusOK || !strings.Contains(check.Body.String(), `"isOk":true`) {
+		t.Fatalf("connection check=%d body=%s", check.Code, check.Body.String())
 	}
 }
 

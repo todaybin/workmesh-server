@@ -3,8 +3,8 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T06:22:41.810Z。
-共 870 条接口：implemented 476、partial 225、compatibility 169。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T06:57:07.761Z。
+共 871 条接口：implemented 479、partial 223、compatibility 169。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
 
@@ -212,30 +212,31 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| partial | GET | `/api/v2/backups/check/:name` | apps/workmesh-server/node/api/functional_domains.go | required | database | present | 检测到固定空列表响应 |
+| implemented | GET | `/api/v2/backups/check/:name` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
 | implemented | GET | `/api/v2/backups/local` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | GET | `/api/v2/backups/options` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| partial | GET | `/api/v2/core/backups/client/:clientType` | apps/workmesh-server/node/api/functional_domains.go | required | database | present | 检测到固定空列表响应 |
-| implemented | POST | `/api/v2/backups/backup` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
-| implemented | POST | `/api/v2/backups/buckets` | apps/workmesh-server/node/api/functional_domains.go | required | database | present | - |
-| implemented | POST | `/api/v2/backups/conn/check` | apps/workmesh-server/node/api/functional_domains.go | required | database | present | - |
+| implemented | GET | `/api/v2/core/backups/client/:clientType` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/backups/backup` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/backups/buckets` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/backups/conn/check` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
 | implemented | POST | `/api/v2/backups/del` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/backups/record/del` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/backups/record/description/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/backups/record/download` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/backups/record/search` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
-| implemented | POST | `/api/v2/backups/record/search/bycronjob` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/backups/record/download` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/backups/record/search` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/backups/record/search/bycronjob` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/backups/record/size` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
-| implemented | POST | `/api/v2/backups/recover` | apps/workmesh-server/node/api/functional_domains.go | required | database | present | - |
-| implemented | POST | `/api/v2/backups/recover/byupload` | apps/workmesh-server/node/api/functional_domains.go | required | database | present | - |
-| implemented | POST | `/api/v2/backups/refresh/token` | apps/workmesh-server/node/api/functional_domains.go | required | database | present | - |
-| implemented | POST | `/api/v2/backups/search` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
-| implemented | POST | `/api/v2/backups/search/files` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/backups/recover` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/backups/recover/byupload` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/backups/refresh/token` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/backups/search` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
+| implemented | POST | `/api/v2/backups/search/files` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 | implemented | POST | `/api/v2/backups/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
-| implemented | POST | `/api/v2/backups/upload` | apps/workmesh-server/node/api/functional_domains.go | required | database | present | - |
+| implemented | POST | `/api/v2/backups/upload` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/backups` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/backups/del` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/backups/refresh/token` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
-| implemented | POST | `/api/v2/core/backups/update` | apps/workmesh-server/node/api/functional_domains.go | required | memory | present | - |
+| implemented | POST | `/api/v2/core/backups/update` | apps/workmesh-server/node/api/functional_domains.go | unknown | memory | present | - |
 
 ## block
 

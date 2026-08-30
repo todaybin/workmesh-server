@@ -22,6 +22,9 @@ const dynamicEmptyResponseRoutes = new Set([
   'POST /api/v2/ai/agents/agent/channels',
   'POST /api/v2/ai/agents/overview',
   'POST /api/v2/ai/agents/delete/check',
+  // 这些接口返回布尔状态或配置对象，源码文件中同时包含其他空集合，不能按文件级上下文误判。
+  'GET /api/v2/backups/check/:name',
+  'GET /api/v2/core/backups/client/:clientType',
 ]);
 
 function filesUnder(root, { includeTests = false } = {}) {
