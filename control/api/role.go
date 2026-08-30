@@ -61,7 +61,20 @@ func RegisterRoleRoutes(mux *http.ServeMux, nodeID, initialRole string) {
 // NewRoleManager 创建控制面和节点链路共同使用的角色管理器。
 // 初始化失败时沿用旧接口的兼容行为，回退到次节点角色。
 func NewRoleManager(nodeID, initialRole string) *role.Manager {
-	manager, err := role.New(nodeID, initialRole)
+	// 生产环境通过 WORKMESH_DATA_DIR 持久化角色 epoch；未设置时保持纯内存模式，
+	// 避免开发测试在仓库目录产生状态文件。
+	dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
+	var manager *role.Manager
+	var err error
+	if dataDir != "" {
+		statePath := filepath.Join(dataDir, "role-state.json")
+		if absolute, absErr := filepath.Abs(statePath); absErr == nil {
+			statePath = absolute
+		}
+		manager, err = role.NewPersistent(nodeID, initialRole, statePath)
+	} else {
+		manager, err = role.New(nodeID, initialRole)
+	}
 	if err != nil {
 		manager, _ = role.New(nodeID, role.Secondary)
 	}

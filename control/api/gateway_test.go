@@ -95,6 +95,7 @@ func TestGatewayRegisterRejectsMissingClient(t *testing.T) {
 func TestGatewayLoginRegistersNodeAndPersistsBinding(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	t.Setenv("WORKMESH_GATEWAY_ALLOW_HTTP", "1")
 	registered := false
 	cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -168,5 +169,52 @@ func TestGatewayLoginDoesNotReportSuccessWhenNodeRegistrationFails(t *testing.T)
 	mux.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/gateway/login", strings.NewReader(`{"username":"workmesh","password":"secret"}`)))
 	if login.Code != http.StatusBadGateway || strings.Contains(login.Body.String(), `"bound":true`) {
 		t.Fatalf("login status = %d, body = %s", login.Code, login.Body.String())
+	}
+}
+
+func TestGatewayRegisterAcceptsFrontendBindingPayloadAndRestoresURL(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	t.Setenv("WORKMESH_GATEWAY_ALLOW_HTTP", "1")
+	t.Setenv("WORKMESH_GATEWAY_ID", "gateway-front")
+	var authHeader string
+	cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"item": map[string]any{"nodeId": "node-front"}}})
+	}))
+	defer cloud.Close()
+	mux := http.NewServeMux()
+	RegisterGatewayRoutes(mux, "node-front", "secondary")
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/gateway/register", strings.NewReader(`{"gatewayUrl":"`+cloud.URL+`","nodeId":"node-front","registrationToken":"registration-token","displayName":"front"}`))
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"registered":true`) {
+		t.Fatalf("注册响应错误 status=%d body=%s", response.Code, response.Body.String())
+	}
+	if authHeader != "Bearer registration-token" {
+		t.Fatalf("未转发 registrationToken，Authorization=%q", authHeader)
+	}
+	state, err := os.ReadFile(filepath.Join(dataDir, "gateway-binding.json"))
+	if err != nil || !strings.Contains(string(state), cloud.URL) {
+		t.Fatalf("绑定快照未正确保存: err=%v state=%s", err, state)
+	}
+
+	// 重启时只提供数据目录，不提供 WORKMESH_GATEWAY_URL，也应恢复地址和绑定摘要。
+	reloadedMux := http.NewServeMux()
+	reloaded := RegisterGatewayRoutes(reloadedMux, "node-front", "secondary")
+	if reloaded.gatewayURL != cloud.URL || reloaded.auth.BindingID == "" {
+		t.Fatalf("重启未恢复 Gateway 地址/绑定: url=%q auth=%+v", reloaded.gatewayURL, reloaded.auth)
+	}
+}
+
+func TestGatewayRegisterRejectsCredentialBearingURL(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	RegisterGatewayRoutes(mux, "node-front", "secondary")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/gateway/register", strings.NewReader(`{"gatewayUrl":"https://user:pass@example.com","nodeId":"node-front","registrationToken":"token"}`)))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("带凭据 URL 应拒绝，status=%d body=%s", response.Code, response.Body.String())
 	}
 }

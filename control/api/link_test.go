@@ -137,3 +137,26 @@ func TestNodeAddRejectsUnsafeEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestRoleControllerRestoresPersistentEpoch(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	first := NewRoleManager("persistent-node", "primary")
+	mux := http.NewServeMux()
+	RegisterRoleRoutesWithManager(mux, first)
+	transition := `{"operationId":"persist-switch","nodeId":"persistent-node","from":"primary","to":"secondary","expectedEpoch":1}`
+	prepare := httptest.NewRecorder()
+	mux.ServeHTTP(prepare, httptest.NewRequest(http.MethodPost, "/api/v2/core/nodes/role/prepare", strings.NewReader(transition)))
+	if prepare.Code != http.StatusOK {
+		t.Fatalf("prepare status=%d body=%s", prepare.Code, prepare.Body.String())
+	}
+	commit := httptest.NewRecorder()
+	mux.ServeHTTP(commit, httptest.NewRequest(http.MethodPost, "/api/v2/core/nodes/role/commit", strings.NewReader(`{}`)))
+	if commit.Code != http.StatusOK {
+		t.Fatalf("commit status=%d body=%s", commit.Code, commit.Body.String())
+	}
+	second := NewRoleManager("persistent-node", "primary")
+	state := second.State(nil)
+	if state.Role != "secondary" || state.RoleEpoch != 2 {
+		t.Fatalf("角色状态未跨重启恢复: %+v", state)
+	}
+}

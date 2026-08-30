@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T20:18:01.741Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T20:37:50.998Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -278,7 +278,7 @@
 | implemented | GET | `/api/v2/containers/limit` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/list/stats` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/network` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
-| implemented | GET | `/api/v2/containers/repo` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
+| implemented | GET | `/api/v2/containers/repo` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
 | implemented | GET | `/api/v2/containers/search/log` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/stats/:id` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/status` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
@@ -325,16 +325,16 @@
 | implemented | POST | `/api/v2/containers/operate` | apps/workmesh-server/node/api/containers.go | unknown | database | missing | - |
 | implemented | POST | `/api/v2/containers/prune` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/containers/rename` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/containers/repo` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/containers/repo` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
 | implemented | POST | `/api/v2/containers/repo/del` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/containers/repo/search` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/containers/repo/status` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/containers/repo/update` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/containers/repo/search` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
+| implemented | POST | `/api/v2/containers/repo/status` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
+| implemented | POST | `/api/v2/containers/repo/update` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
 | implemented | POST | `/api/v2/containers/search` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/containers/template` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/containers/template/batch` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/containers/template/batch` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
 | implemented | POST | `/api/v2/containers/template/del` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/containers/template/search` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
+| implemented | POST | `/api/v2/containers/template/search` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
 | implemented | POST | `/api/v2/containers/template/update` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/containers/update` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/containers/upgrade` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
@@ -1119,9 +1119,15 @@
 | implemented | POST | `/api/v2/xpack/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
 | implemented | POST | `/api/v2/xpack/waf/test` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | - |
 
+## 2026-08-31 Gateway 与角色状态补齐
+
+| 功能 | 新实现 | 测试 | 状态 |
+| --- | --- | --- | --- |
+| 前端绑定注册字段透传、Gateway 地址恢复 | `control/api/gateway.go` | `control/api/gateway_test.go:TestGatewayRegisterAcceptsFrontendBindingPayloadAndRestoresURL` | implemented |
+| 角色 epoch 持久化与重启恢复 | `runtime/role/manager.go`、`control/api/role.go` | `runtime/role/manager_test.go`、`control/api/link_test.go:TestRoleControllerRestoresPersistentEpoch` | implemented |
+
 ## 国际化完整性批次
 
 | 功能 | 来源 | 新实现 | 覆盖 | 状态 |
 | --- | --- | --- | --- | --- |
 | Core/Agent 后端语言包与前端语言入口 | `apps/workmesh-node/core/i18n`、`apps/workmesh-node/agent/i18n`、旧 frontend | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 12 种语言；后端每种 1037 键；前端键结构和菜单入口通过 `i18n-scan.mjs` | implemented |
-

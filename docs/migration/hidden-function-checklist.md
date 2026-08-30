@@ -66,7 +66,7 @@
 | --- | --- | --- | --- | --- |
 | [x] | 单进程 HTTP 服务、静态资源和优雅停机 | `core/init`、`agent/init` | `cmd/workmesh-server/main.go`、`runtime/http/server.go`；`go test ./...` | SIGTERM 在超时内停止监听并刷新状态 |
 | [x] | 健康与就绪探针 | `core/init/router` | `/health` 不访问依赖，`/ready` 可检查依赖；双节点 HTTP 200 | 探针响应保持 200/ERR envelope 契约 |
-| [x] | 节点角色与 epoch/fencing | `core/utils/xpack/providers/multi_node.go`、`agent/utils/xpack/providers/multi_node.go` | `runtime/role`、`runtime/link`；链路单元测试 | 旧 epoch 请求返回 409，禁止双主写入 |
+| [x] | 节点角色与 epoch/fencing | `core/utils/xpack/providers/multi_node.go`、`agent/utils/xpack/providers/multi_node.go` | `runtime/role`、`runtime/link`、`control/api/role.go`；链路和重启恢复测试 | 旧 epoch 请求返回 409，角色状态通过 `role-state.json` 原子保存并在重启后恢复，禁止双主写入 |
 | [~] | 启动配置、数据目录和资源限制 | `core/global/config.go`、`agent/global/config.go` | `config/config.go`、`WORKMESH_*` 环境变量 | 补充生产配置校验和资源上限 E2E |
 
 ## 安全中间件与授权
@@ -112,7 +112,7 @@
 | [~] | 本地/SSH/容器终端 WebSocket | `core/middleware/demo_handle.go`、Agent terminal routers | `node/api/process.go`、`deployment_runtime.go` | 完成真实双向帧、关闭码和权限测试 |
 | [~] | SSE/流式任务输出 | Agent 执行与日志路由 | Gateway/link 与任务 API 边界已建 | 增加断线续传、心跳和背压测试 |
 | [x] | 节点 handshake/heartbeat/sync | xpack multi-node provider | `runtime/link`；HMAC、timestamp、nonce、防重放测试 | 双节点公网链路和 fencing 验收 |
-| [~] | Gateway 登录、注册、心跳和解绑 | WorkMesh gateway router | `runtime/gateway/http_client.go` | 写入真实 Gateway 凭据后状态必须为 `registered/connected` |
+| [~] | Gateway 登录、注册、心跳和解绑 | WorkMesh gateway router | `runtime/gateway/http_client.go`、`control/api/gateway.go` | 前端绑定字段、Bearer 注册、Ed25519/HMAC 心跳、解绑和地址持久化均有真实处理；云端未提供 authorization refresh/revoke 标准端点时刷新只能返回明确错误 |
 
 ## 路由扫描盲区与隐藏注册
 
@@ -267,3 +267,13 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 |---|---|---|---|---|
 | MCP Streamable HTTP initialize 探测 | `apps/workmesh-node/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 发送 JSON-RPC initialize，10 秒超时，网络失败返回明确错误 |
 | MCP SSE 响应类型校验 | `apps/workmesh-node/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 要求 `text/event-stream`，拒绝伪造成功 |
+
+## 2026-08-31 容器管理隐藏能力
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新项目证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | 镜像仓库配置持久化与密码脱敏 | `apps/workmesh-node/agent/app/service/image_repo.go` | `node/api/containers.go:containerStore`、`registerContainerRepositoryRoutes`；`containers.json` 原子写入 | CRUD、搜索、删除、状态接口测试通过 |
+| [x] | Compose 模板持久化与批量导入 | `apps/workmesh-node/agent/app/service/compose_template.go` | `node/api/containers.go:registerContainerTemplateRoutes`；正文 4 MiB 上限 | 新增/更新/批量/删除/搜索和重启复读测试通过 |
+| [x] | Compose 文件创建、更新、置顶及 `.env` 读取 | `apps/workmesh-node/agent/app/api/v2/container.go` | `node/api/containers.go:handleComposeCreate/Update/Pin/Env`；临时文件原子 rename | 路径穿越拒绝、文件内容和环境变量测试通过 |
+| [x] | 容器用户及尺寸查询 | `apps/workmesh-node/agent/app/api/v2/container.go` | `node/api/containers.go:handleContainerPost`；固定 Docker argv 调用 `exec /etc/passwd`、`inspect --size` | 参数校验和 Docker 不可用错误可观测 |
+| [x] | 镜像归档导入导出路径安全 | `apps/workmesh-node/agent/app/api/v2/container.go` | `node/api/containers.go:handleImageOperation`；`docker load -i`、`save -o`，拒绝 `..` | 无路径/穿越参数测试通过 |

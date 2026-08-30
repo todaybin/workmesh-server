@@ -109,6 +109,14 @@
 | 计划任务 | `/api/v2/cronjobs/*` | 任务持久化、启停、单次执行、按五字段 Spec 每分钟调度、执行记录、清理、导入导出和下一次执行计算 | `go test ./node/service ./node/api` |
 | Gateway 客户端 | `/api/v2/workmesh/gateway/*` | 登录、注册、心跳、解绑、授权刷新、Ed25519 签名 | Gateway 契约测试 |
 | 节点链路 | handshake/heartbeat/sync/fencing | HMAC、时间戳、nonce、防重放和角色 fencing | `go test ./runtime/link ./control/api` |
+
+### 2026-08-31 Gateway 绑定与角色状态闭环
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 前端 Gateway 绑定注册 | `apps/workmesh-node/agent/app/api/v2/workmesh_gateway.go:RegisterWorkMeshGateway` | `POST /api/v2/workmesh/gateway/register` | `control/api/gateway.go:registerHandler` | POST `/api/v2/workmesh/gateway/register`、`/api/v2/gateway/register` | 本机会话；Gateway Bearer registrationToken；地址白名单 | Gateway `/workmesh/node/register` 返回的节点记录 | `WORKMESH_DATA_DIR/gateway-binding.json` 原子替换，地址和授权摘要可恢复 | `control/api/gateway_test.go:TestGatewayRegisterAcceptsFrontendBindingPayloadAndRestoresURL` | `go test ./control/api -run GatewayRegister` | 待真实 Gateway 凭据联调 | implemented | 远端 Gateway 必须已启用 WorkMeshCore 节点注册接口 |
+| Gateway 账号登录并幂等复用绑定 | `apps/workmesh-node/agent/app/api/v2/workmesh_gateway.go:LoginWorkMeshGateway` | `POST /api/v2/workmesh/gateway/login` | `control/api/gateway.go:loginHandler` | POST `/api/v2/workmesh/gateway/login` | Gateway 用户名密码仅 TLS 传输；旧绑定通过心跳验证 | Gateway `/workmesh/auth/login`、`/workmesh/node/heartbeat` | `gateway-binding.json`，令牌不通过 HTTP 响应返回 | `control/api/gateway_test.go:TestGatewayLoginRegistersNodeAndPersistsBinding` | `go test ./control/api -run GatewayLogin` | 待真实 Gateway 凭据联调 | implemented | Gateway 授权刷新接口需云端提供对应端点 |
+| 角色切换 epoch 跨重启恢复 | `apps/workmesh-node/core/utils/xpack/providers/multi_node.go` | `/api/v2/core/nodes/role/*`、`/api/v2/link/fencing/*` | `runtime/role/manager.go`、`control/api/role.go` | POST `/api/v2/core/nodes/role/{check,prepare,commit,abort}`、`/api/v2/link/fencing/{check,prepare,commit,abort}` | HMAC 链路签名；本机管理面会话 | 角色状态和 compare-and-set epoch | `WORKMESH_DATA_DIR/role-state.json` 原子替换 | `runtime/role/manager_test.go`、`control/api/link_test.go` | `go test ./runtime/role ./control/api -run Role` | 待双节点切换演练 | implemented | 生产部署需确保两个节点使用独立、受保护的数据目录 |
 | 文件/数据库首批扩展 | `/api/v2/files/share/*`、`/api/v2/databases/db/update` | 分享 token 与数据库登记持久化、输入校验、分页和更新 | `go test ./node/api ./node/service` |
 | 脚本资源 | `/api/v2/core/script`、`search`、`update`、`del`、`sync` | 统一资源存储提供脚本 CRUD 和同步兼容行为 | `go test ./node/api` |
 | AI 执行面 | `/api/v2/ai/ollama/*`、`mcp/*`、`tensorrt/*`、`gpu/*` | 模型、MCP、TensorRT-LLM、GPU 状态和域名绑定均使用 `ai.json` 持久化；无硬件时返回可识别降级状态 | `go test ./node/api -run AI` |
@@ -168,6 +176,16 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 仪表盘主机资源采集 | `apps/workmesh-node/agent/api/v2/dashboard.go` | `/api/v2/dashboard/base/*`、`/api/v2/dashboard/current/*` | `apps/workmesh-server/node/api/dashboard.go` | `GET /api/v2/dashboard/base/{ioOption}/{netOption}`、`GET /api/v2/dashboard/current/{ioOption}/{netOption}` | 节点会话鉴权（由上层中间件执行） | `/proc/loadavg`、`/proc/meminfo`、`/proc/net/dev`、`/proc/mounts`、运行时信息 | 无状态实时采集 | `node/api/dashboard_test.go` | `go test ./node/api -run Dashboard` | 待下一批制品部署 | implemented | Windows 无 `/proc` 时返回 supported=false，GPU/NPU/XPU 需驱动适配 |
+
+## 2026-08-31 容器仓库、模板与 Compose 管理
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 镜像仓库 CRUD、搜索和状态 | `apps/workmesh-node/agent/app/api/v2/image_repo.go`、`service/image_repo.go` | `/api/v2/containers/repo*` | `node/api/containers.go:registerContainerRepositoryRoutes` | `GET/POST /api/v2/containers/repo`、`POST /repo/{search,status,update,del}` | 节点会话/上层权限 | 用户提交的仓库元数据 | `WORKMESH_DATA_DIR/containers.json` 原子 rename，密码脱敏 | `node/api/container_features_test.go` | `go test ./node/api -run ContainerRepository` | 本地已验证 | implemented | 远程镜像推送/拉取仍由 Docker CLI 按需执行 |
+| Compose 模板 CRUD 与批量导入 | `apps/workmesh-node/agent/app/service/compose_template.go` | `/api/v2/containers/template*` | `node/api/containers.go:registerContainerTemplateRoutes` | `GET /template`、`POST /template/{search,update,batch,del}` | 节点会话/上层权限 | 模板正文和描述 | `containers.json` 原子 rename，正文 4 MiB 上限 | `node/api/container_features_test.go` | `go test ./node/api -run ContainerRepository` | 本地已验证 | implemented | 无外部模板市场同步 |
+| Compose 创建、更新、置顶和环境读取 | `apps/workmesh-node/agent/app/api/v2/container.go` | `/api/v2/containers/compose*` | `node/api/containers.go:handleComposeCreate/Update/Pin` | `POST /compose`、`/compose/update`、`/compose/pin`、`/compose/env` | 节点会话/上层权限 | Compose 文件、项目 `.env` | 文件临时写入后原子 rename；记录保存至 `containers.json` | `node/api/container_features_test.go` | `go test ./node/api -run ComposeCreate` | 本地已验证 | implemented | Docker 编排执行依赖主机 Docker 服务 |
+| 容器用户与尺寸统计 | `apps/workmesh-node/agent/app/api/v2/container.go` | `/api/v2/containers/users`、`item/stats` | `node/api/containers.go:handleContainerPost` | `POST /users`、`POST /item/stats` | 节点会话/命令白名单 | 容器内 `/etc/passwd`、Docker inspect --size | 无状态实时查询 | `node/api/containers.go` 参数校验 | `go test ./node/api` | 待 Docker 主机验收 | implemented | Docker 不可用时返回明确命令错误 |
+| 镜像安全导入导出 | `apps/workmesh-node/agent/app/api/v2/container.go` | `/api/v2/containers/image/load`、`image/save` | `node/api/containers.go:handleImageOperation` | `POST /image/load`、`POST /image/save` | 节点会话/上层权限 | 受校验的宿主路径与 Docker CLI | Docker 负责镜像归档，路径拒绝穿越 | `node/api/container_features_test.go` | `go test ./node/api -run ImageImport` | 待 Docker 主机验收 | implemented | 不支持无路径把二进制写入 JSON 响应 |
 
 ## 2026-08-30 节点部署入口
 
