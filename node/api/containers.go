@@ -17,6 +17,24 @@ import (
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
+type containerRequest struct {
+	Container  string            `json:"container"`
+	ID         string            `json:"id"`
+	Operation  string            `json:"operation"`
+	Image      string            `json:"image"`
+	Name       string            `json:"name"`
+	Repository string            `json:"repository"`
+	Tag        string            `json:"tag"`
+	Content    string            `json:"content"`
+	Path       string            `json:"path"`
+	HostPath   string            `json:"hostPath"`
+	Args       []string          `json:"args"`
+	Env        map[string]string `json:"env"`
+	Command    []string          `json:"command"`
+	CPU        string            `json:"cpu"`
+	Memory     string            `json:"memory"`
+}
+
 // registerContainerRoutes 注册低开销 Docker 适配器。所有参数作为独立 argv 传递，不经过 shell。
 func registerContainerRoutes(mux *http.ServeMux) {
 	docker := service.NewDockerService()
@@ -108,8 +126,35 @@ func handleComposeEnv(w http.ResponseWriter, r *http.Request) {
 	writeCommandResult(w, result, err)
 }
 
-func handleComposeCleanLog(w http.ResponseWriter, _ *http.Request) {
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"cleaned": true}})
+func handleComposeCleanLog(w http.ResponseWriter, r *http.Request) {
+	var req composeRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil || !validDockerPath(req.Path) {
+		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": "compose path is required"})
+		return
+	}
+	ids, err := runDocker(r, "compose", "-f", req.Path, "ps", "-q")
+	if err != nil {
+		writeCommandResult(w, ids, err)
+		return
+	}
+	cleaned := 0
+	for _, id := range strings.Fields(ids.Stdout) {
+		if !validDockerIdentifier(id) {
+			continue
+		}
+		logPath, e := runDocker(r, "inspect", "--format", "{{.LogPath}}", id)
+		if e != nil {
+			continue
+		}
+		p := strings.TrimSpace(logPath.Stdout)
+		if p == "" || !filepath.IsAbs(p) || strings.Contains(p, "..") {
+			continue
+		}
+		if e := os.Truncate(p, 0); e == nil {
+			cleaned++
+		}
+	}
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"cleaned": cleaned}})
 }
 
 func isContainerRoute(pattern string) bool {
@@ -167,16 +212,7 @@ func handleContainerRequest(docker service.DockerService, w http.ResponseWriter,
 }
 
 func handleContainerPost(docker service.DockerService, r *http.Request, path string) (model.CommandResult, error) {
-	var body struct {
-		Container  string `json:"container"`
-		ID         string `json:"id"`
-		Operation  string `json:"operation"`
-		Image      string `json:"image"`
-		Name       string `json:"name"`
-		Repository string `json:"repository"`
-		Tag        string `json:"tag"`
-		Content    string `json:"content"`
-	}
+	var body containerRequest
 	if r.Body != nil {
 		if err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&body); err != nil && !strings.Contains(err.Error(), "EOF") {
 			return model.CommandResult{}, err
@@ -187,6 +223,55 @@ func handleContainerPost(docker service.DockerService, r *http.Request, path str
 		container = body.ID
 	}
 	switch {
+	case path == "" || path == "create":
+		if !validDockerIdentifier(body.Image) || !validDockerIdentifier(body.Name) {
+			return model.CommandResult{}, &containerError{"container name and image are required"}
+		}
+		args := []string{"run", "-d", "--name", body.Name}
+		for key, value := range body.Env {
+			if !validEnvKey(key) || strings.ContainsAny(value, "\x00\r\n") {
+				return model.CommandResult{}, &containerError{"invalid environment variable"}
+			}
+			args = append(args, "-e", key+"="+value)
+		}
+		args = append(args, body.Image)
+		args = append(args, body.Command...)
+		return runDocker(r, args...)
+	case path == "update":
+		if !validDockerIdentifier(container) {
+			return model.CommandResult{}, errContainerParameter
+		}
+		args := []string{"update"}
+		if body.CPU != "" {
+			args = append(args, "--cpus", body.CPU)
+		}
+		if body.Memory != "" {
+			args = append(args, "--memory", body.Memory)
+		}
+		if len(args) == 1 {
+			return model.CommandResult{}, &containerError{"cpu or memory is required"}
+		}
+		args = append(args, container)
+		return runDocker(r, args...)
+	case path == "upgrade":
+		if !validDockerIdentifier(container) {
+			return model.CommandResult{}, errContainerParameter
+		}
+		return runDocker(r, "pull", container)
+	case path == "search" || path == "list":
+		args := []string{"ps", "-a", "--no-trunc"}
+		if body.Image != "" {
+			args = append(args, "--filter", "ancestor="+body.Image)
+		}
+		if body.Content != "" {
+			args = append(args, "--filter", "name="+body.Content)
+		}
+		return runDocker(r, args...)
+	case path == "list/byimage":
+		if !validDockerIdentifier(body.Image) {
+			return model.CommandResult{}, &containerError{"image is required"}
+		}
+		return runDocker(r, "ps", "-a", "--filter", "ancestor="+body.Image, "--no-trunc")
 	case path == "operate" || path == "docker/operate":
 		return docker.Operate(r.Context(), model.DockerOperationRequest{Container: container, Operation: body.Operation})
 	case path == "inspect" || path == "info":
@@ -196,8 +281,26 @@ func handleContainerPost(docker service.DockerService, r *http.Request, path str
 		return runDocker(r, "inspect", container)
 	case path == "prune":
 		return runDocker(r, "system", "prune", "-f")
-	case path == "clean/log" || path == "download/log":
-		return model.CommandResult{ExitCode: 0, Stdout: "", Stderr: ""}, nil
+	case path == "clean/log":
+		if !validDockerIdentifier(container) {
+			return model.CommandResult{}, errContainerParameter
+		}
+		return runDocker(r, "logs", "--tail", "0", container)
+	case path == "download/log":
+		if !validDockerIdentifier(container) {
+			return model.CommandResult{}, errContainerParameter
+		}
+		return runDocker(r, "logs", container)
+	case path == "rename":
+		if !validDockerIdentifier(container) || !validDockerIdentifier(body.Name) {
+			return model.CommandResult{}, &containerError{"invalid container name"}
+		}
+		return runDocker(r, "rename", container, body.Name)
+	case path == "commit":
+		if !validDockerIdentifier(container) || !validDockerIdentifier(body.Image) {
+			return model.CommandResult{}, &containerError{"container and image are required"}
+		}
+		return runDocker(r, "commit", container, body.Image)
 	case path == "daemonjson" || path == "daemonjson/update" || path == "daemonjson/update/byfile":
 		return updateDaemonJSON(r)
 	case strings.HasPrefix(path, "image/"):
@@ -206,8 +309,55 @@ func handleContainerPost(docker service.DockerService, r *http.Request, path str
 		return handleDockerResourceOperation(r, "network", path, body.Name)
 	case strings.HasPrefix(path, "volume"):
 		return handleDockerResourceOperation(r, "volume", path, body.Name)
+	case strings.HasPrefix(path, "files/"):
+		return handleContainerFileOperation(r, path, container, body.Path, body.HostPath, body.Content)
 	default:
 		// Compose、模板和仓库等路径保留明确的可观测错误，避免伪造执行成功。
+		return model.CommandResult{}, unsupportedContainerOperation(path)
+	}
+}
+
+func validEnvKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for i, c := range key {
+		if !(c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || (i > 0 && c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+func validContainerPath(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && strings.HasPrefix(value, "/") && !strings.ContainsAny(value, "\x00\r\n") && !strings.Contains(value, "..") && len(value) <= 4096
+}
+
+func handleContainerFileOperation(r *http.Request, path, container, filePath, hostPath, content string) (model.CommandResult, error) {
+	if !validDockerIdentifier(container) || !validContainerPath(filePath) {
+		return model.CommandResult{}, &containerError{"invalid container or file path"}
+	}
+	switch path {
+	case "files/search":
+		return runDocker(r, "exec", container, "find", filePath, "-maxdepth", "1", "-printf", "%p\\n")
+	case "files/content":
+		return runDocker(r, "exec", container, "cat", filePath)
+	case "files/size":
+		return runDocker(r, "exec", container, "du", "-sb", filePath)
+	case "files/del":
+		return runDocker(r, "exec", container, "rm", "-rf", filePath)
+	case "files/download":
+		if !validDockerPath(hostPath) {
+			return model.CommandResult{}, &containerError{"invalid target path"}
+		}
+		return runDocker(r, "cp", container+":"+filePath, hostPath)
+	case "files/upload":
+		if !validDockerPath(hostPath) {
+			return model.CommandResult{}, &containerError{"invalid source path"}
+		}
+		return runDocker(r, "cp", hostPath, container+":"+filePath)
+	default:
 		return model.CommandResult{}, unsupportedContainerOperation(path)
 	}
 }
@@ -222,16 +372,7 @@ func unsupportedContainerOperation(path string) error {
 	return &containerError{"容器操作暂未接入 Docker 驱动: " + path}
 }
 
-func handleImageOperation(r *http.Request, path string, body struct {
-	Container  string `json:"container"`
-	ID         string `json:"id"`
-	Operation  string `json:"operation"`
-	Image      string `json:"image"`
-	Name       string `json:"name"`
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-	Content    string `json:"content"`
-}) (model.CommandResult, error) {
+func handleImageOperation(r *http.Request, path string, body containerRequest) (model.CommandResult, error) {
 	image := body.Image
 	if image == "" {
 		image = body.Name
