@@ -32,6 +32,14 @@
 
 ## 运行时初始化与生命周期
 
+## 2026-08-30 文件域运行时能力
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | wget 下载任务上下文、超时和取消 | `apps/workmesh-node/agent/app/service/file.go:Wget`、`StopWget` | `node/api/files_routes.go:handleFileWget` 使用 30 分钟 context、临时文件和原子 rename | process/keys 可查询，stop 可取消，失败状态可见 |
+| [x] | AI 文件内容搜索扫描限制 | `apps/workmesh-node/agent/app/service/file.go:AISearch`、`utils/files/ai_content_search.go` | `node/api/files_routes.go:handleFileAISearch` 限制 500 文件、500 命中、8 MiB 单文件 | 参数错误、目录不存在、正则错误均返回结构化错误 |
+| [x] | 批量文件操作路径校验 | `apps/workmesh-node/agent/app/service/file.go:BatchDelete/BatchCheckFiles/BatchChangeModeAndOwner` | `node/api/files_routes.go:fileAdvancedHandler` 每路径 clean/stat，数量和 mode 有上限 | 非法路径不执行，部分失败逐项返回 |
+
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
 | [x] | 单进程 HTTP 服务、静态资源和优雅停机 | `core/init`、`agent/init` | `cmd/workmesh-server/main.go`、`runtime/http/server.go`；`go test ./...` | SIGTERM 在超时内停止监听并刷新状态 |

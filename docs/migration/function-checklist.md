@@ -49,6 +49,24 @@
 
 ## 进行中
 
+### 2026-08-30 文件域批次（批量、分享、搜索与下载）
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 回收站状态 | `apps/workmesh-node/agent/app/api/v2/recycle_bin.go:GetRecycleStatus` | `GET /files/recycle/status` | `node/api/files_routes.go:fileAdvancedHandler` | `GET /api/v2/files/recycle/status` | 节点会话 | `files.json` 回收站条目 | `WORKMESH_DATA_DIR/files.json` | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileFavorite` | 待制品部署 | implemented | 仅返回本地回收站计数 |
+| 分享校验 | `apps/workmesh-node/agent/app/api/v2/file.go:CheckFileShare` | `GET /files/share/check` | `node/api/files_routes.go:fileAdvancedHandler` | `GET /api/v2/files/share/check` | token/code 公共校验 | 分享 token 与目标文件 | `file-shares.json` | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileShare` | 待制品部署 | implemented | 支持 code/token 别名 |
+| 分享信息 | `apps/workmesh-node/agent/app/api/v2/file.go:GetPublicFileShareInfo` | `GET /files/share/info` | `node/api/files_routes.go:fileAdvancedHandler` | `GET /api/v2/files/share/info` | token/code 公共查询 | 分享记录、文件 stat | `file-shares.json` | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileShare` | 待制品部署 | implemented | 文件不存在返回 exists=false |
+| 分享下载 | `apps/workmesh-node/agent/app/api/v2/file.go:DownloadFileShare` | `GET /files/share/download` | `node/api/files_routes.go:fileAdvancedHandler` | `GET /api/v2/files/share/download` | token/code 公共校验 | 分享记录与文件内容 | 无状态读取 | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileShare` | 待制品部署 | implemented | 目标删除返回 404 |
+| 分享二维码数据 | `apps/workmesh-node/agent/app/api/v2/file.go:GetFileShareQRCode` | `GET /files/share/qrcode` | `node/api/files_routes.go:fileAdvancedHandler` | `GET /api/v2/files/share/qrcode` | token/code 公共校验 | 分享 URL | 无状态 | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileShare` | 待制品部署 | implemented | 返回 URL 数据，前端可编码展示 |
+| wget 进度查询 | `apps/workmesh-node/agent/app/api/v2/file.go:WgetProcess` | `GET /files/wget/process` | `node/api/files_routes.go:fileAdvancedHandler` | `GET /api/v2/files/wget/process` | 节点会话 | 进程内下载状态 | 进程内有界 map | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileShare` | 待制品部署 | implemented | 服务重启后任务不恢复 |
+| wget 任务 key | `apps/workmesh-node/agent/app/api/v2/file.go:ProcessKeys` | `GET /files/wget/process/keys` | `node/api/files_routes.go:fileAdvancedHandler` | `GET /api/v2/files/wget/process/keys` | 节点会话 | 下载任务 map | 进程内 | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileShare` | 待制品部署 | implemented | 仅返回当前进程任务 |
+| AI 文件内容搜索 | `apps/workmesh-node/agent/app/service/file.go:AISearch` | `POST /files/ai-search` | `node/api/files_routes.go:handleFileAISearch` | `POST /api/v2/files/ai-search` | 节点会话 | 目录文件内容、查询参数 | 无状态 | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileBatch` | 待制品部署 | implemented | grep 模式；LLM 摘要待独立 AI 域接入 |
+| 批量文件存在检查 | `apps/workmesh-node/agent/app/service/file.go:BatchCheckFiles` | `POST /files/batch/check` | `node/api/files_routes.go:fileAdvancedHandler` | `POST /api/v2/files/batch/check` | 节点会话 | `os.Stat` | 无状态 | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileBatch` | 待制品部署 | implemented | 单次最多 500 路径 |
+| 批量删除 | `apps/workmesh-node/agent/app/service/file.go:BatchDelete` | `POST /files/batch/del` | `node/api/files_routes.go:fileAdvancedHandler` | `POST /api/v2/files/batch/del` | 节点会话、路径校验 | 文件系统 | 直接删除 | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileBatch` | 待制品部署 | implemented | 每次最多 200 路径 |
+| 批量权限更新 | `apps/workmesh-node/agent/app/service/file.go:BatchChangeModeAndOwner` | `POST /files/batch/role` | `node/api/files_routes.go:fileAdvancedHandler` | `POST /api/v2/files/batch/role` | 节点会话、mode 白名单 | 文件系统 chmod | 无状态 | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileBatch` | 待制品部署 | implemented | 当前跨平台仅保证 mode，owner 字段回显 |
+| 单文件存在检查 | `apps/workmesh-node/agent/app/api/v2/file.go:CheckFile` | `POST /files/check` | `node/api/files_routes.go:fileAdvancedHandler` | `POST /api/v2/files/check` | 节点会话 | `os.Stat` / Mkdir | 文件系统副作用（withInit） | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileBatch` | 待制品部署 | implemented | withInit 只创建目录 |
+| 收藏分页查询 | `apps/workmesh-node/agent/app/api/v2/favorite.go:SearchFavorite` | `POST /files/favorite/search` | `node/api/files_routes.go:fileAdvancedHandler` | `POST /api/v2/files/favorite/search` | 节点会话 | `files.json` favorites | `WORKMESH_DATA_DIR/files.json` | `node/api/files_routes_test.go` | `go test ./node/api -run TestFileFavorite` | 待制品部署 | implemented | page/pageSize 上限 200 |
+
 实现扫描器当前结果以 [`function-checklist-generated.md`](./function-checklist-generated.md) 和 `.tmp/implementation-status.json` 为准（基于 863 条路由）。隐藏初始化文件中的路由也已纳入去重统计。`partial` 与 `compatibility` 仍需按真实副作用逐项验收，不得仅凭路由注册宣称完成。
 
 - 主机与系统：主机列表、连接测试、系统信息、命令历史和终端。

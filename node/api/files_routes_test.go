@@ -119,3 +119,67 @@ func TestFileFavoriteAndRecycleLifecycle(t *testing.T) {
 		t.Fatalf("restored file missing: %v", err)
 	}
 }
+
+func TestFileBatchCheckRoleAndAISearch(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	path := filepath.Join(root, "needle.txt")
+	if err := os.WriteFile(path, []byte("hello needle\nsecond line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+	post := func(route string, value map[string]any) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(value)
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, route, bytes.NewReader(body)))
+		return res
+	}
+	if res := post("/api/v2/files/check", map[string]any{"path": path}); res.Code != http.StatusOK || !bytes.Contains(res.Body.Bytes(), []byte(`"exist":true`)) {
+		t.Fatalf("check=%d %s", res.Code, res.Body.String())
+	}
+	if res := post("/api/v2/files/batch/check", map[string]any{"paths": []string{path, filepath.Join(root, "missing")}}); res.Code != http.StatusOK || !bytes.Contains(res.Body.Bytes(), []byte("needle.txt")) {
+		t.Fatalf("batch check=%d %s", res.Code, res.Body.String())
+	}
+	if res := post("/api/v2/files/batch/role", map[string]any{"paths": []string{path}, "mode": 0o640, "user": "", "group": ""}); res.Code != http.StatusOK {
+		t.Fatalf("batch role=%d %s", res.Code, res.Body.String())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("权限更新后文件不存在: %v", err)
+	}
+	if res := post("/api/v2/files/ai-search", map[string]any{"path": root, "query": "needle", "containSub": true}); res.Code != http.StatusOK || !bytes.Contains(res.Body.Bytes(), []byte("needle.txt")) {
+		t.Fatalf("ai search=%d %s", res.Code, res.Body.String())
+	}
+}
+
+func TestFileShareQueryAliasesAndWgetKeys(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	path := filepath.Join(root, "share.txt")
+	if err := os.WriteFile(path, []byte("shared"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+	body, _ := json.Marshal(map[string]any{"path": path})
+	create := httptest.NewRecorder()
+	mux.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v2/files/share/create", bytes.NewReader(body)))
+	var envelope struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(create.Body.Bytes(), &envelope)
+	for _, endpoint := range []string{"share/check", "share/info", "share/qrcode"} {
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v2/files/"+endpoint+"?code="+envelope.Data.Token, nil))
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s=%d %s", endpoint, res.Code, res.Body.String())
+		}
+	}
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v2/files/wget/process/keys", nil))
+	if res.Code != http.StatusOK || !bytes.Contains(res.Body.Bytes(), []byte(`"keys"`)) {
+		t.Fatalf("wget keys=%d %s", res.Code, res.Body.String())
+	}
+}
