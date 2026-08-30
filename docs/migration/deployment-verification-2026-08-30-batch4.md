@@ -22,6 +22,7 @@
 - 主次节点 `/health`、`/ready`：HTTP 200，JSON `code=200`。
 - Vite 生产构建：7656 个模块，构建成功。
 - 次节点公网 `:9999` 可在 SSH 本机访问，但主节点到 `162.14.96.198:9999` 连接超时；该端口仍需在云安全组放行后才能验收跨机心跳/同步。
+- `/api/v2/workmesh/gateway/status` 当前返回 `registration=pending`；远端 `server.env` 仅配置 Gateway URL，缺少 Gateway ID/Secret 或账号凭据，主动注册返回 HTTP 502，网关授权尚未完成。
 
 ## 节点管理验收
 
