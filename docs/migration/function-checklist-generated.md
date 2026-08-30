@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T21:37:40.804Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-30T21:44:51.083Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -279,7 +279,7 @@
 | implemented | GET | `/api/v2/containers/list/stats` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/network` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/repo` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
-| implemented | GET | `/api/v2/containers/search/log` | apps/workmesh-server/node/api/container_log_stream.go | stream token/session | stateless Docker stream | present | Compose 多文件、tail=0/since=all、断开取消已覆盖 |
+| implemented | GET | `/api/v2/containers/search/log` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/stats/:id` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | GET | `/api/v2/containers/status` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
 | implemented | GET | `/api/v2/containers/template` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
