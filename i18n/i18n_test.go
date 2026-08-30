@@ -36,6 +36,12 @@ func TestNormalizeLocaleAndFallback(t *testing.T) {
 			t.Fatalf("NormalizeLocale(%q)=%q，期望 %q", input, actual, expected)
 		}
 	}
+	if actual := NormalizeLocale("fr-FR;q=0.9,en;q=0.8,zh;q=0.1"); actual != "en" {
+		t.Fatalf("NormalizeLocale 应选择最高质量值，实际 %q", actual)
+	}
+	if actual := NormalizeLocale("en;q=0,zh;q=0.5"); actual != "zh" {
+		t.Fatalf("q=0 语言应被忽略，实际 %q", actual)
+	}
 }
 
 func TestFormatRendersTemplateData(t *testing.T) {

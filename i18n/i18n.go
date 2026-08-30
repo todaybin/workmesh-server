@@ -46,16 +46,41 @@ func NormalizeLocale(value string) string {
 		"ru": "ru", "ms": "ms", "ko": "ko", "lo": "lo", "tr": "tr",
 		"es": "es-ES", "es-es": "es-ES", "fa": "fa",
 	}
-	for _, item := range strings.Split(value, ",") {
-		languageCode := strings.ToLower(strings.TrimSpace(strings.SplitN(item, ";", 2)[0]))
-		if locale, ok := aliases[languageCode]; ok {
-			return locale
-		}
-		if separator := strings.IndexByte(languageCode, '-'); separator > 0 {
-			if locale, ok := aliases[languageCode[:separator]]; ok {
-				return locale
+	bestLocale, bestQuality := "", -1.0
+	for order, item := range strings.Split(value, ",") {
+		parts := strings.Split(item, ";")
+		languageCode := strings.ToLower(strings.TrimSpace(parts[0]))
+		quality := 1.0
+		for _, parameter := range parts[1:] {
+			parameter = strings.TrimSpace(parameter)
+			if !strings.HasPrefix(strings.ToLower(parameter), "q=") {
+				continue
+			}
+			parsed, err := strconv.ParseFloat(strings.TrimSpace(parameter[2:]), 64)
+			if err != nil || parsed < 0 || parsed > 1 {
+				quality = 0
+			} else {
+				quality = parsed
 			}
 		}
+		if quality <= 0 {
+			continue
+		}
+		locale, ok := aliases[languageCode]
+		if !ok {
+			if languageCode == "*" {
+				locale = defaultLocale
+				ok = true
+			} else if separator := strings.IndexByte(languageCode, '-'); separator > 0 {
+				locale, ok = aliases[languageCode[:separator]]
+			}
+		}
+		if ok && (quality > bestQuality || (quality == bestQuality && bestLocale == "" && order == 0)) {
+			bestLocale, bestQuality = locale, quality
+		}
+	}
+	if bestLocale != "" {
+		return bestLocale
 	}
 	return defaultLocale
 }
