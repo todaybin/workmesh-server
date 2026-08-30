@@ -9,8 +9,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -835,11 +837,7 @@ func handleBackupUpload(w http.ResponseWriter, r *http.Request, _ *domainStore) 
 					domainError(w, 500, "BACKUP_STORAGE", err.Error())
 					return
 				}
-				out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
-				if err == nil {
-					_, err = io.Copy(out, io.LimitReader(file, 128<<20))
-					_ = out.Close()
-				}
+				err := copyBackupStream(file, target, 128<<20)
 				if err != nil {
 					domainError(w, 500, "BACKUP_UPLOAD", err.Error())
 					return
@@ -888,7 +886,8 @@ func handleBackupBuckets(w http.ResponseWriter, r *http.Request, s *domainStore)
 		success(w, buckets)
 		return
 	}
-	success(w, make([]map[string]any, 0))
+	// 云端 Bucket 必须通过账号提供商 API 获取；未配置端点时不能以空列表冒充成功。
+	domainError(w, http.StatusServiceUnavailable, "BACKUP_PROVIDER_UNAVAILABLE", "备份提供商未配置 Bucket 查询端点")
 }
 
 func handleBackupConnCheck(w http.ResponseWriter, r *http.Request, s *domainStore) {
@@ -938,10 +937,63 @@ func handleBackupRefreshToken(w http.ResponseWriter, r *http.Request, s *domainS
 	if err := json.Unmarshal([]byte(s.state.BackupAccounts[index].Vars), &vars); err != nil || vars == nil {
 		vars = map[string]any{}
 	}
-	vars["refresh_status"], vars["refresh_time"] = "success", time.Now().UTC().Format(time.RFC3339)
-	if token := valueString(v, "refreshToken", "token"); token != "" {
-		vars["refresh_token"] = token
+	refreshToken := valueString(v, "refreshToken", "token")
+	if refreshToken == "" {
+		if token, ok := vars["refresh_token"].(string); ok {
+			refreshToken = strings.TrimSpace(token)
+		}
 	}
+	refreshURL, _ := vars["refresh_url"].(string)
+	if refreshToken == "" || strings.TrimSpace(refreshURL) == "" {
+		domainError(w, http.StatusServiceUnavailable, "TOKEN_REFRESH_UNAVAILABLE", "备份账号缺少 refresh_token 或 refresh_url")
+		return
+	}
+	u, err := url.Parse(strings.TrimSpace(refreshURL))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.RawQuery != "" {
+		domainError(w, http.StatusBadRequest, "TOKEN_REFRESH_URL_INVALID", "refresh_url 必须是无查询凭据的 HTTP(S) 地址")
+		return
+	}
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(form.Encode()))
+	if err != nil {
+		domainError(w, 400, "TOKEN_REFRESH_REQUEST", err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		domainError(w, http.StatusBadGateway, "TOKEN_REFRESH_FAILED", fmt.Sprintf("刷新备份账号令牌失败: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		domainError(w, 502, "TOKEN_REFRESH_READ", readErr.Error())
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		domainError(w, http.StatusBadGateway, "TOKEN_REFRESH_FAILED", fmt.Sprintf("令牌端点返回 HTTP %d", resp.StatusCode))
+		return
+	}
+	var tokenResponse struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int64  `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &tokenResponse); err != nil || strings.TrimSpace(tokenResponse.AccessToken) == "" {
+		domainError(w, http.StatusBadGateway, "TOKEN_REFRESH_RESPONSE_INVALID", "令牌端点未返回 access_token")
+		return
+	}
+	vars["access_token"] = tokenResponse.AccessToken
+	if tokenResponse.RefreshToken != "" {
+		vars["refresh_token"] = tokenResponse.RefreshToken
+	}
+	if tokenResponse.ExpiresIn > 0 {
+		vars["expires_in"] = tokenResponse.ExpiresIn
+	}
+	vars["refresh_status"], vars["refresh_time"] = "success", time.Now().UTC().Format(time.RFC3339)
 	encoded, _ := json.Marshal(vars)
 	s.state.BackupAccounts[index].Vars, s.state.BackupAccounts[index].UpdatedAt = string(encoded), time.Now().UTC()
 	if err := s.saveLocked(); err != nil {
@@ -993,10 +1045,13 @@ func copyBackupFile(source, target string, max int64) error {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	out, err := os.CreateTemp(filepath.Dir(target), ".backup-upload-*")
 	if err != nil {
 		return err
 	}
+	tmp := out.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	_ = out.Chmod(0o640)
 	_, copyErr := io.Copy(out, io.LimitReader(in, max+1))
 	closeErr := out.Close()
 	if copyErr != nil {
@@ -1004,6 +1059,34 @@ func copyBackupFile(source, target string, max int64) error {
 	}
 	if closeErr != nil {
 		return closeErr
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		return err
+	}
+	return nil
+}
+
+func copyBackupStream(source io.Reader, target string, max int64) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+		return err
+	}
+	out, err := os.CreateTemp(filepath.Dir(target), ".backup-upload-*")
+	if err != nil {
+		return err
+	}
+	tmp := out.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	_ = out.Chmod(0o640)
+	_, copyErr := io.Copy(out, io.LimitReader(source, max+1))
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		return err
 	}
 	return nil
 }

@@ -14,6 +14,57 @@ import (
 	"testing"
 )
 
+func TestBackupCloudEndpointsDoNotFakeSuccess(t *testing.T) {
+	dir := filepath.Join(".tmp", "backup-cloud-test")
+	_ = os.RemoveAll(dir)
+	t.Setenv("WORKMESH_DATA_DIR", dir)
+	mux := http.NewServeMux()
+	registerBackupAlertLogSettingsRoutes(mux)
+	buckets := httptest.NewRecorder()
+	mux.ServeHTTP(buckets, httptest.NewRequest(http.MethodPost, "/api/v2/backups/buckets", bytes.NewBufferString(`{"type":"s3"}`)))
+	if buckets.Code != http.StatusServiceUnavailable || !bytes.Contains(buckets.Body.Bytes(), []byte("BACKUP_PROVIDER_UNAVAILABLE")) {
+		t.Fatalf("cloud buckets=%d %s", buckets.Code, buckets.Body.String())
+	}
+	created := httptest.NewRecorder()
+	mux.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/api/v2/backups", bytes.NewBufferString(`{"name":"cloud","type":"onedrive","vars":"{}"}`)))
+	var envelope struct {
+		Data backupAccount `json:"data"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &envelope); err != nil || envelope.Data.ID == "" {
+		t.Fatalf("create account: %v %s", err, created.Body.String())
+	}
+	refresh := httptest.NewRecorder()
+	body, _ := json.Marshal(map[string]any{"id": envelope.Data.ID, "refreshToken": "secret"})
+	mux.ServeHTTP(refresh, httptest.NewRequest(http.MethodPost, "/api/v2/backups/refresh/token", bytes.NewReader(body)))
+	if refresh.Code != http.StatusServiceUnavailable || !bytes.Contains(refresh.Body.Bytes(), []byte("TOKEN_REFRESH_UNAVAILABLE")) {
+		t.Fatalf("refresh=%d %s", refresh.Code, refresh.Body.String())
+	}
+	oauth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.FormValue("grant_type") != "refresh_token" || r.FormValue("refresh_token") != "rt" {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at","refresh_token":"rt2","expires_in":3600}`))
+	}))
+	defer oauth.Close()
+	configured := httptest.NewRecorder()
+	varsBody, _ := json.Marshal(map[string]any{"name": "cloud-oauth", "type": "onedrive", "vars": `{"refresh_url":"` + oauth.URL + `","refresh_token":"rt"}`})
+	mux.ServeHTTP(configured, httptest.NewRequest(http.MethodPost, "/api/v2/backups", bytes.NewReader(varsBody)))
+	var configuredEnvelope struct {
+		Data backupAccount `json:"data"`
+	}
+	if err := json.Unmarshal(configured.Body.Bytes(), &configuredEnvelope); err != nil || configuredEnvelope.Data.ID == "" {
+		t.Fatalf("configured account: %v %s", err, configured.Body.String())
+	}
+	okRefresh := httptest.NewRecorder()
+	okBody, _ := json.Marshal(map[string]any{"id": configuredEnvelope.Data.ID})
+	mux.ServeHTTP(okRefresh, httptest.NewRequest(http.MethodPost, "/api/v2/backups/refresh/token", bytes.NewReader(okBody)))
+	if okRefresh.Code != http.StatusOK || !bytes.Contains(okRefresh.Body.Bytes(), []byte(`"success"`)) {
+		t.Fatalf("oauth refresh=%d %s", okRefresh.Code, okRefresh.Body.String())
+	}
+}
+
 func TestFunctionalBackupAlertSettings(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("WORKMESH_DATA_DIR", dataDir)
