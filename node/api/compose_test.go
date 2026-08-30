@@ -20,3 +20,14 @@ func TestComposeRequiresPath(t *testing.T) {
 		t.Fatalf("unexpected response: %d %s", res.Code, res.Body.String())
 	}
 }
+
+func TestContainerImageRejectsInvalidIdentifier(t *testing.T) {
+	mux := http.NewServeMux()
+	registerContainerRoutes(mux)
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/containers/image/pull", bytes.NewBufferString(`{"image":"bad; rm -rf /"}`))
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusInternalServerError || !bytes.Contains(res.Body.Bytes(), []byte("镜像名称")) {
+		t.Fatalf("unexpected response: %d %s", res.Code, res.Body.String())
+	}
+}

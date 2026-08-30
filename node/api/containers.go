@@ -63,7 +63,9 @@ func composeCommand(r *http.Request, req composeRequest, op string) (model.Comma
 	}
 	args := []string{"compose", "-f", req.Path, op}
 	for _, service := range req.Services {
-		if !validDockerIdentifier(service) { return model.CommandResult{}, &containerError{"Compose 服务名称无效"} }
+		if !validDockerIdentifier(service) {
+			return model.CommandResult{}, &containerError{"Compose 服务名称无效"}
+		}
 		args = append(args, service)
 	}
 	return runDocker(r, args...)
@@ -132,7 +134,10 @@ func handleContainerRequest(docker service.DockerService, w http.ResponseWriter,
 		result, err = docker.List(r.Context())
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "stats/"):
 		id := strings.TrimPrefix(path, "stats/")
-		if !validDockerIdentifier(id) { wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": "容器标识无效"}); return }
+		if !validDockerIdentifier(id) {
+			wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": "容器标识无效"})
+			return
+		}
 		result, err = runDocker(r, "stats", "--no-stream", id)
 	case r.Method == http.MethodGet && (path == "image" || path == "image/all"):
 		result, err = runDocker(r, "images", "--no-trunc")
@@ -223,8 +228,8 @@ func handleImageOperation(r *http.Request, path string, body struct {
 	Image      string `json:"image"`
 	Name       string `json:"name"`
 	Repository string `json:"repository"`
-		Tag        string `json:"tag"`
-		Content    string `json:"content"`
+	Tag        string `json:"tag"`
+	Content    string `json:"content"`
 }) (model.CommandResult, error) {
 	image := body.Image
 	if image == "" {
@@ -232,31 +237,39 @@ func handleImageOperation(r *http.Request, path string, body struct {
 	}
 	switch path {
 	case "image/pull":
-		if image == "" {
+		if !validDockerIdentifier(image) {
 			return model.CommandResult{}, &containerError{"镜像名称不能为空"}
 		}
 		return runDocker(r, "pull", image)
 	case "image/remove":
-		if image == "" {
+		if !validDockerIdentifier(image) {
 			return model.CommandResult{}, &containerError{"镜像名称不能为空"}
 		}
 		return runDocker(r, "rmi", image)
 	case "image/search":
-		if image == "" {
+		if !validDockerIdentifier(image) {
 			return model.CommandResult{}, &containerError{"镜像关键词不能为空"}
 		}
 		return runDocker(r, "search", image)
 	case "image/tag":
-		if image == "" || !validDockerIdentifier(body.Repository) || !validDockerIdentifier(body.Tag) { return model.CommandResult{}, &containerError{"镜像名称或标签无效"} }
+		if image == "" || !validDockerIdentifier(body.Repository) || !validDockerIdentifier(body.Tag) {
+			return model.CommandResult{}, &containerError{"镜像名称或标签无效"}
+		}
 		return runDocker(r, "tag", image, body.Repository+":"+body.Tag)
 	case "image/push":
-		if image == "" || !validDockerIdentifier(image) { return model.CommandResult{}, &containerError{"镜像名称无效"} }
+		if image == "" || !validDockerIdentifier(image) {
+			return model.CommandResult{}, &containerError{"镜像名称无效"}
+		}
 		return runDocker(r, "push", image)
 	case "image/build":
-		if !validDockerPath(body.Name) { return model.CommandResult{}, &containerError{"构建目录不能为空"} }
+		if !validDockerPath(body.Name) || !validDockerIdentifier(image) {
+			return model.CommandResult{}, &containerError{"构建目录或镜像名称无效"}
+		}
 		return runDocker(r, "build", "-t", image, body.Name)
 	case "image/save":
-		if image == "" || !validDockerIdentifier(image) { return model.CommandResult{}, &containerError{"镜像名称无效"} }
+		if image == "" || !validDockerIdentifier(image) {
+			return model.CommandResult{}, &containerError{"镜像名称无效"}
+		}
 		return runDocker(r, "save", image)
 	case "image/load":
 		return runDocker(r, "load")
@@ -268,12 +281,12 @@ func handleImageOperation(r *http.Request, path string, body struct {
 func handleDockerResourceOperation(r *http.Request, resource, path, name string) (model.CommandResult, error) {
 	switch {
 	case path == resource:
-		if name == "" {
+		if !validDockerIdentifier(name) {
 			return model.CommandResult{}, &containerError{resource + "名称不能为空"}
 		}
 		return runDocker(r, resource, "create", name)
 	case path == resource+"/del":
-		if name == "" {
+		if !validDockerIdentifier(name) {
 			return model.CommandResult{}, &containerError{resource + "名称不能为空"}
 		}
 		return runDocker(r, resource, "rm", name)
@@ -287,24 +300,59 @@ func runDocker(r *http.Request, args ...string) (model.CommandResult, error) {
 }
 
 func daemonJSONPath() string {
-	if p := strings.TrimSpace(os.Getenv("WORKMESH_DOCKER_DAEMON_JSON")); p != "" { return p }
-	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR")); if dir == "" { dir = ".workmesh-data" }
+	if p := strings.TrimSpace(os.Getenv("WORKMESH_DOCKER_DAEMON_JSON")); p != "" {
+		return p
+	}
+	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
+	if dir == "" {
+		dir = ".workmesh-data"
+	}
 	return filepath.Join(dir, "docker-daemon.json")
 }
 
 func handleDaemonJSON(w http.ResponseWriter, _ *http.Request) {
 	path := daemonJSONPath()
 	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) { b = []byte("{}") } else if err != nil { wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error()}); return }
+	if os.IsNotExist(err) {
+		b = []byte("{}")
+	} else if err != nil {
+		wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": path, "content": string(b)}})
 }
 
 func updateDaemonJSON(r *http.Request) (model.CommandResult, error) {
-	var req struct { Content string `json:"content"`; File string `json:"file"` }
-	if r.Body != nil { if err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&req); err != nil && !strings.Contains(err.Error(), "EOF") { return model.CommandResult{}, err } }
-	content := req.Content; if content == "" { content = req.File }; if content == "" { content = "{}" }
-	var parsed any; if err := json.Unmarshal([]byte(content), &parsed); err != nil { return model.CommandResult{}, &containerError{"daemon.json 内容不是有效 JSON"} }
-	path := daemonJSONPath(); if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil { return model.CommandResult{}, err }
-	tmp := path + ".tmp"; if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil { return model.CommandResult{}, err }; if err := os.Rename(tmp, path); err != nil { return model.CommandResult{}, err }
+	var req struct {
+		Content string `json:"content"`
+		File    string `json:"file"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&req); err != nil && !strings.Contains(err.Error(), "EOF") {
+			return model.CommandResult{}, err
+		}
+	}
+	content := req.Content
+	if content == "" {
+		content = req.File
+	}
+	if content == "" {
+		content = "{}"
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		return model.CommandResult{}, &containerError{"daemon.json 内容不是有效 JSON"}
+	}
+	path := daemonJSONPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return model.CommandResult{}, err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(content), 0o600); err != nil {
+		return model.CommandResult{}, err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return model.CommandResult{}, err
+	}
 	return model.CommandResult{ExitCode: 0, Stdout: path}, nil
 }
