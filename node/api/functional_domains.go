@@ -616,11 +616,15 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 	mux.HandleFunc("POST /api/v2/logs/tasks/read", func(w http.ResponseWriter, r *http.Request) {
 		success(w, map[string]any{"content": "", "id": valueStringFromRequest(r, "id")})
 	})
-	for _, path := range []string{"/api/v2/logs/system/files", "/api/v2/logs/system/services", "/api/v2/logs/system/status", "/api/v2/logs/tasks/executing/count"} {
+	for _, path := range []string{"/api/v2/logs/system/files", "/api/v2/logs/system/services", "/api/v2/logs/system/status"} {
 		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, _ *http.Request) {
 			success(w, map[string]any{"items": []any{}, "total": 0, "status": "ready"})
 		})
 	}
+	// 执行中任务接口的 data 必须是数字，前端直接将其作为计数器使用。
+	mux.HandleFunc("GET /api/v2/logs/tasks/executing/count", func(w http.ResponseWriter, _ *http.Request) {
+		success(w, 0)
+	})
 }
 
 func valueStringFromRequest(r *http.Request, key string) string {

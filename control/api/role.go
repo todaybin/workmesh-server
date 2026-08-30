@@ -19,6 +19,18 @@ type RoleController struct {
 	state   role.Transition
 }
 
+// nodeListItem 是前端节点选择器使用的兼容字段集合。
+type nodeListItem struct {
+	ID          string `json:"id"`
+	NodeID      string `json:"nodeId"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Role        string `json:"role"`
+	Status      string `json:"status"`
+	Endpoint    string `json:"endpoint,omitempty"`
+	IsCurrent   bool   `json:"isCurrent"`
+}
+
 // RegisterRoleRoutes 注册角色状态、预检查、准备、提交、取消接口。
 func RegisterRoleRoutes(mux *http.ServeMux, nodeID, initialRole string) {
 	RegisterRoleRoutesWithManager(mux, NewRoleManager(nodeID, initialRole))
@@ -40,11 +52,23 @@ func RegisterRoleRoutesWithManager(mux *http.ServeMux, manager *role.Manager) {
 		return
 	}
 	controller := &RoleController{manager: manager}
+	// 节点列表是前端切换主/次节点的基础接口，必须返回真实的当前节点而非占位响应。
+	mux.HandleFunc("POST /api/v2/core/nodes/list", controller.list)
+	mux.HandleFunc("GET /api/v2/core/nodes/simple/all", controller.list)
 	mux.HandleFunc("GET /api/v2/core/nodes/role", controller.current)
 	mux.HandleFunc("POST /api/v2/core/nodes/role/check", controller.check)
 	mux.HandleFunc("POST /api/v2/core/nodes/role/prepare", controller.prepare)
 	mux.HandleFunc("POST /api/v2/core/nodes/role/commit", controller.commit)
 	mux.HandleFunc("POST /api/v2/core/nodes/role/abort", controller.abort)
+}
+
+func (c *RoleController) list(w http.ResponseWriter, r *http.Request) {
+	state := c.manager.State(r.Context())
+	item := nodeListItem{
+		ID: state.NodeID, NodeID: state.NodeID, Name: state.NodeID,
+		DisplayName: state.NodeID, Role: state.Role, Status: "online", IsCurrent: true,
+	}
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": []nodeListItem{item}})
 }
 
 func (c *RoleController) current(w http.ResponseWriter, r *http.Request) {

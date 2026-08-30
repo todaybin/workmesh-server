@@ -46,3 +46,27 @@ func TestLinkFencingSharesRoleManagerWithCoreRoutes(t *testing.T) {
 		t.Fatalf("角色管理器未共享: %+v", envelope.Data)
 	}
 }
+
+func TestNodeListReturnsCurrentNode(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterRoleRoutesWithManager(mux, NewRoleManager("test-node", "secondary"))
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/core/nodes/list", strings.NewReader(`{"type":"all"}`))
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", res.Code)
+	}
+	var body struct {
+		Code int `json:"code"`
+		Data []struct {
+			NodeID string `json:"nodeId"`
+			Role   string `json:"role"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != 200 || len(body.Data) != 1 || body.Data[0].NodeID != "test-node" || body.Data[0].Role != "secondary" {
+		t.Fatalf("unexpected node list: %+v", body)
+	}
+}
