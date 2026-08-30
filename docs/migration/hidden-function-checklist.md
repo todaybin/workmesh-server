@@ -232,6 +232,10 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | 数据库变量和配置文件 | 数据库管理接口 | `node/api/database_admin_routes.go` | implemented | 限制配置大小，支持重启恢复 |
 # 计划任务隐藏能力核对
 
+| 主机信息采集 | hosts 初始化 | node/api/hosts.go | implemented | 实时采集主机名、系统、架构、CPU、内存和运行时诊断 |
+| Docker CLI 适配 | containers 初始化 | node/service/docker.go | implemented | 所有命令使用独立参数、超时和输出上限 |
+| 容器文件操作 | containers service | node/api/containers.go | implemented | exec/cp 操作限制绝对路径并拒绝路径穿越 |
+
 | 隐藏能力 | 发现位置 | 实现位置 | 状态 | 说明 |
 |---|---|---|---|---|
 | cron 后台轮询 | agent service/entry.go | node/service/cronjob.go | implemented | 单实例分钟调度，避免重复执行 |

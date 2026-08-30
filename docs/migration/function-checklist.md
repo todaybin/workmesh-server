@@ -223,3 +223,11 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 | 记录分页清理 | agent cronjobRepo | node/service/cronjob.go、node/api/host_container_cron.go | POST /api/v2/cronjobs/search/records | 节点会话 | 本地执行记录 | cronjobs.json（最多 1000 条/任务） | node/service/cronjob_test.go | implemented | 记录文件日志关联待补充 |
 | 脚本库持久化与审核执行 | core script library | node/api/core_resources.go | POST /api/v2/core/script、GET /api/v2/core/script/run | Session + X-WorkMesh-Token | scripts.json | 原子 JSON 文件 | node/api/core_resources_test.go | implemented | 远程签名同步待接入 |
 | 命令执行白名单 | core command | node/service/cronjob.go、node/service/command.go | POST /api/v2/system/command | X-WorkMesh-Token | 白名单程序与参数 | 审计日志 | node/service/command_test.go | implemented | 完整审计查询待补充 |
+## 主机与容器功能补齐
+| 功能名称 | 来源模块 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|
+| 主机信息与诊断 | hosts | `node/api/hosts.go` | GET `/api/v2/hosts/info`、`/diagnostics/summary` | 节点会话 | runtime、系统主机信息 | 无状态实时采集 | `node/api/hosts_containers_test.go` | implemented | 防火墙和 SSH 专用驱动待补 |
+| 主机记录 CRUD 与分组 | hosts | `node/api/hosts.go` | POST `/api/v2/hosts`、`/info`、`/update`、`/del`、`/search`、`/tree` | 节点会话/HMAC | 主机记录 | `WORKMESH_DATA_DIR/hosts.json` 原子写入 | `node/api/hosts_containers_test.go` | implemented | 远程连通性需接入 SSH 驱动 |
+| Docker 容器生命周期 | containers | `node/api/containers.go`、`node/service/docker.go` | POST `/api/v2/containers`、`/operate`、`/update`、`/rename`、`/commit`、`/prune` | 节点会话/HMAC | Docker CLI | Docker daemon | `node/api/hosts_containers_test.go` | implemented | 资源配额字段需按平台扩展 |
+| Docker 容器文件 | containers | `node/api/containers.go` | POST `/api/v2/containers/files/{search,content,size,del,upload,download}` | 节点会话/HMAC | Docker exec/cp | 容器文件系统 | `node/api/hosts_containers_test.go` | implemented | 大文件下载需流式响应 |
+| Docker 镜像、网络、卷 | containers | `node/api/containers.go` | GET/POST `/api/v2/containers/image*`、`network*`、`volume*` | 节点会话/HMAC | Docker CLI | Docker daemon | `node/api/hosts_containers_test.go` | implemented | 仓库与模板管理待接入持久化 |

@@ -140,6 +140,41 @@ func appCatalogFromEnv() []appRecord {
 	return result
 }
 
+// versionGreater 比较常见的点分数字版本，无法解析的版本按字典序比较。
+func versionGreater(latest, current string) bool {
+	parse := func(value string) []int {
+		parts := strings.Split(strings.TrimSpace(value), ".")
+		result := make([]int, len(parts))
+		for i, part := range parts {
+			part = strings.TrimLeft(part, "vV")
+			for j, r := range part {
+				if r < '0' || r > '9' {
+					part = part[:j]
+					break
+				}
+			}
+			if n, err := strconv.Atoi(part); err == nil {
+				result[i] = n
+			}
+		}
+		return result
+	}
+	a, b := parse(latest), parse(current)
+	for i := 0; i < len(a) || i < len(b); i++ {
+		av, bv := 0, 0
+		if i < len(a) {
+			av = a[i]
+		}
+		if i < len(b) {
+			bv = b[i]
+		}
+		if av != bv {
+			return av > bv
+		}
+	}
+	return latest > current
+}
+
 // RegisterAppRoutes 注册应用目录与已安装应用接口，所有写操作都会原子持久化到 apps.json。
 func RegisterAppRoutes(mux *http.ServeMux) {
 	s := getAppStore()
@@ -185,7 +220,22 @@ func RegisterAppRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST "+path, searchCatalog)
 	}
 	mux.HandleFunc("GET /api/v2/apps/checkupdate", func(w http.ResponseWriter, _ *http.Request) {
-		appOK(w, map[string]any{"canUpdate": false, "isSyncing": false, "lastSyncAt": time.Now().UTC()})
+		s.mu.RLock()
+		catalog := append([]appRecord(nil), s.state.Catalog...)
+		installed := append([]appRecord(nil), s.state.Apps...)
+		s.mu.RUnlock()
+		updates := make([]map[string]any, 0)
+		for _, current := range installed {
+			for _, candidate := range catalog {
+				if (candidate.Key != "" && candidate.Key == current.Key) || (candidate.Name != "" && candidate.Name == current.Name) {
+					if versionGreater(candidate.Version, current.Version) {
+						updates = append(updates, map[string]any{"key": current.Key, "currentVersion": current.Version, "latestVersion": candidate.Version})
+					}
+					break
+				}
+			}
+		}
+		appOK(w, map[string]any{"canUpdate": len(updates) > 0, "updates": updates, "total": len(updates), "isSyncing": false, "lastSyncAt": time.Now().UTC()})
 	})
 	mux.HandleFunc("GET /api/v2/apps/tags", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.RLock()

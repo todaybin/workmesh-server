@@ -42,7 +42,8 @@ func handleProcessWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	hj, ok := w.(http.Hijacker)
 	if !ok {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "WEBSOCKET_UNAVAILABLE"}})
+		// 当前传输层不支持 Hijack 时返回依赖不可用，而不是把接口标记为未实现。
+		wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "WEBSOCKET_UNAVAILABLE"}})
 		return
 	}
 	conn, rw, err := hj.Hijack()

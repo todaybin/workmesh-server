@@ -27,8 +27,7 @@ func StartBackgroundTasks(ctx context.Context) {
 	sharedCronjobs.Start(ctx)
 }
 
-// RegisterHostContainerCronRoutes 注册首批主机、容器和计划任务接口。
-// 未迁移的旧路径仍注册并返回明确的 501，便于前端和契约扫描发现缺口。
+// RegisterHostContainerCronRoutes 注册主机、容器和计划任务接口。
 func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	commands := service.CommandService{}
 	docker := service.NewDockerService()

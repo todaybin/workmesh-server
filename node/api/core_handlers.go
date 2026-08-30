@@ -36,14 +36,14 @@ func registerCoreAuthExtras(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("POST /api/v2/core/auth/oidc/begin", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, map[string]any{"authorizationURL": ""}) })
 	mux.HandleFunc("POST /api/v2/core/auth/oidc/finish", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotImplemented, errors.New("OIDC 未启用"))
+		writeError(w, http.StatusServiceUnavailable, errors.New("OIDC 未启用"))
 	})
 	mux.HandleFunc("GET /api/v2/core/auth/saml2/status", func(w http.ResponseWriter, _ *http.Request) {
 		coreJSON(w, map[string]any{"enabled": false, "displayName": "", "syncLogout": false})
 	})
 	mux.HandleFunc("POST /api/v2/core/auth/saml2/begin", func(w http.ResponseWriter, _ *http.Request) { coreJSON(w, map[string]any{"navigation": nil}) })
 	mux.HandleFunc("POST /api/v2/core/auth/saml2/finish", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotImplemented, errors.New("SAML2 未启用"))
+		writeError(w, http.StatusServiceUnavailable, errors.New("SAML2 未启用"))
 	})
 	mux.HandleFunc("GET /api/v2/core/auth/passkey/list", handleCorePasskeyList)
 	mux.HandleFunc("POST /api/v2/core/auth/api/generate", handleCoreAPIGenerate)

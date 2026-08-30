@@ -233,12 +233,17 @@ function inspectRoute(route, sources) {
   }));
   const matches = findImplementations(route, scanSources);
   const markers = new Set();
+  const concreteMarkers = new Set();
   const evidence = [];
   let best = matches[0];
   const contexts = matches.map((source) => {
     const indexes = [source.text.indexOf(route.path), source.text.indexOf(normalizePath(route.path))].filter((index) => index >= 0);
     const index = indexes[0] ?? -1;
-    return { source, context: index >= 0 ? source.text.slice(Math.max(0, index - 160), index + 1000) : source.text };
+    // 未找到具体注册文本时不应把整个文件当作该路由上下文；同一文件
+    // 可能同时包含已实现处理器和一个独立的占位处理器，整文件扫描会
+    // 将无关标记错误归因到当前路由。注册匹配仍由 findImplementations
+    // 完成，这里只负责提取邻近证据。
+    return { source, context: index >= 0 ? source.text.slice(Math.max(0, index - 160), index + 1000) : '' };
   });
   const legacyConcreteHandler = contexts.some(({ source }) => {
     if (!source.relative.endsWith('legacy_routes.go')) return false;
@@ -248,7 +253,11 @@ function inspectRoute(route, sources) {
   });
   for (const { source, context } of contexts) {
     for (const [marker, key] of MARKERS) {
-      if (context.includes(marker)) { markers.add(key); evidence.push(`${key}:${source.relative}`); }
+      if (context.includes(marker)) {
+        markers.add(key);
+        if (!source.relative.endsWith('legacy_routes.go')) concreteMarkers.add(key);
+        evidence.push(`${key}:${source.relative}`);
+      }
     }
     if (/compatibilityHandler/.test(context)) best = source;
   }
@@ -266,7 +275,9 @@ function inspectRoute(route, sources) {
   best = concrete[0]?.source ?? best;
   let status = 'missing';
   // 明确的未实现标记优先级最高，不能被同文件中的通用路由或其他处理器掩盖。
-  if (markers.has('migration_pending') || markers.has('status_not_implemented')) status = 'pending';
+  // legacy_routes.go 仅用于未覆盖契约的明确兜底；当同一路由已有
+  // 具体处理器时，不能因为兜底文件包含占位标记而覆盖真实实现状态。
+  if (concreteMarkers.has('migration_pending') || concreteMarkers.has('status_not_implemented') || (!legacyConcreteHandler && concrete.length === 0 && (markers.has('migration_pending') || markers.has('status_not_implemented')))) status = 'pending';
   else if (hasCompatibility) status = 'compatibility';
   else if (hasConcrete) status = 'implemented';
   else if (markers.has('legacy_concrete_handler')) status = 'implemented';

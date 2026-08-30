@@ -110,8 +110,7 @@ func registerCoreResourceRoutes(mux *http.ServeMux) {
 	}
 }
 
-// handleScriptRun 在显式配置命令令牌时执行短时脚本；未配置令牌时拒绝执行，避免
-// 迁移期间把脚本接口意外暴露成任意命令执行入口。
+// handleScriptRun 在显式配置命令令牌且脚本已审核时执行短时脚本。
 func handleScriptRun(w http.ResponseWriter, r *http.Request) {
 	token := strings.TrimSpace(os.Getenv("WORKMESH_COMMAND_TOKEN"))
 	if token == "" || r.Header.Get("X-WorkMesh-Token") != token {

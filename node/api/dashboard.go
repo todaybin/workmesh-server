@@ -67,11 +67,11 @@ func handleDashboardQuickOption(w http.ResponseWriter, _ *http.Request) {
 }
 
 func handleDashboardLauncher(w http.ResponseWriter, _ *http.Request) {
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": []map[string]any{}})
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": dashboardQuickJump})
 }
 
 func handleDashboardLauncherOption(w http.ResponseWriter, _ *http.Request) {
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": []map[string]any{}})
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": dashboardQuickJump})
 }
 
 func handleDashboardMutation(w http.ResponseWriter, r *http.Request) {

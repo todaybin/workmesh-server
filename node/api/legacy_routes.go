@@ -58,11 +58,18 @@ func normalizeServeMuxPattern(pattern string) string {
 func isLegacyConcreteRoute(pattern string) bool {
 	for _, route := range []string{
 		"GET /api/v2/dashboard/app/launcher",
+		"GET /api/v2/dashboard/base/:ioOption/:netOption",
 		"GET /api/v2/dashboard/base/os",
+		"GET /api/v2/dashboard/current/:ioOption/:netOption",
 		"GET /api/v2/dashboard/current/node",
 		"GET /api/v2/dashboard/current/top/cpu",
 		"GET /api/v2/dashboard/current/top/mem",
 		"GET /api/v2/dashboard/quick/option",
+		"POST /api/v2/dashboard/app/launcher/option",
+		"POST /api/v2/dashboard/app/launcher/show",
+		"POST /api/v2/dashboard/quick/change",
+		"POST /api/v2/core/auth/login",
+		"POST /api/v2/core/auth/logout",
 		"GET /api/v2/files/download",
 		"GET /api/v2/files/tree",
 		"POST /api/v2/files/upload",
@@ -255,13 +262,13 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 		handleDashboardLauncher(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/dashboard/base/:ioOption/:netOption", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		handleDashboardBase(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/dashboard/base/os", func(w http.ResponseWriter, r *http.Request) {
 		handleDashboardOS(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/dashboard/current/:ioOption/:netOption", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
+		handleDashboardCurrent(w, r)
 	})
 	mux.HandleFunc("GET /api/v2/dashboard/current/node", func(w http.ResponseWriter, r *http.Request) {
 		handleDashboardNode(w, r)

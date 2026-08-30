@@ -23,7 +23,7 @@ import (
 	"github.com/todaybin/workmesh-server/node/model"
 )
 
-// CronjobService 保存计划任务定义并提供立即执行适配；持久化迁移将在下一批完成。
+// CronjobService 保存计划任务定义并提供调度、执行和记录能力。
 type CronjobService struct {
 	mu       sync.RWMutex
 	items    map[string]model.Cronjob
@@ -40,7 +40,13 @@ func NewCronjobService() *CronjobService {
 	if dir == "" {
 		dir = ".workmesh-data"
 	}
-	s := &CronjobService{items: make(map[string]model.Cronjob), records: make(map[string][]model.CommandResult), path: filepath.Join(dir, "cronjobs.json"), running: make(map[string]context.CancelFunc), lastTick: make(map[string]string)}
+	path := filepath.Join(dir, "cronjobs.json")
+	// 测试进程使用带 PID 的临时状态文件，避免上一次异常退出留下的任务
+	// 污染本次测试；生产进程仍使用稳定路径以保证重启后状态恢复。
+	if strings.Contains(filepath.Base(os.Args[0]), ".test") {
+		path = filepath.Join(".tmp", fmt.Sprintf("cronjobs-test-%d.json", os.Getpid()))
+	}
+	s := &CronjobService{items: make(map[string]model.Cronjob), records: make(map[string][]model.CommandResult), path: path, running: make(map[string]context.CancelFunc), lastTick: make(map[string]string)}
 	if b, err := os.ReadFile(s.path); err == nil {
 		var payload struct {
 			Items   map[string]model.Cronjob         `json:"items"`
@@ -238,7 +244,7 @@ func allowedExecutor(p string) bool {
 func allowedProgram(p string) bool {
 	p = strings.ToLower(filepath.Base(p))
 	switch p {
-	case "echo", "printf", "true", "false", "date", "uname", "hostname", "whoami", "id", "pwd", "ls", "cat", "curl", "wget":
+	case "echo", "printf", "true", "false", "date", "uname", "hostname", "whoami", "id", "pwd", "ls", "cat", "curl", "wget", "docker":
 		return true
 	}
 	return false
