@@ -43,6 +43,16 @@ type WebsiteDeleteRequest struct {
 	ID uint `json:"id"`
 }
 
+// WebsiteDomain 表示网站绑定的域名记录。
+type WebsiteDomain struct {
+	ID        string `json:"id"`
+	WebsiteID uint   `json:"websiteID"`
+	Domain    string `json:"domain"`
+	Port      int    `json:"port,omitempty"`
+	SSL       bool   `json:"ssl"`
+	Remark    string `json:"remark,omitempty"`
+}
+
 // WAFRule 是网站自定义防护规则。
 type WAFRule struct {
 	ID       string `json:"id"`

@@ -19,9 +19,312 @@ import (
 func registerWebsiteFunctionalRoutes(mux *http.ServeMux) {
 	svc := service.NewWebsiteService("")
 	registerWebsiteCRUD(mux, svc)
+	registerWebsiteAdvancedRoutes(mux, svc)
 	registerWAFRoutes(mux, svc)
 	registerOpenRestyRoutes(mux, svc)
 	registerXPackWebsiteAliases(mux, svc)
+}
+
+// registerWebsiteAdvancedRoutes 注册站点运行、域名、HTTPS 和配置管理接口。
+func registerWebsiteAdvancedRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
+	mux.HandleFunc("POST /api/v2/websites/operate", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID        uint   `json:"id"`
+			WebsiteID uint   `json:"websiteID"`
+			Operate   string `json:"operate"`
+			Operation string `json:"operation"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if in.ID == 0 {
+			in.ID = in.WebsiteID
+		}
+		if in.Operation == "" {
+			in.Operation = in.Operate
+		}
+		item, err := svc.Operate(in.ID, in.Operation)
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
+	})
+	mux.HandleFunc("POST /api/v2/websites/check", func(w http.ResponseWriter, r *http.Request) {
+		var in model.WebsiteCreateRequest
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		items := svc.List(in.PrimaryDomain, 0, 2)
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"available": len(items) == 0, "domain": strings.TrimSpace(in.PrimaryDomain)}})
+	})
+	mux.HandleFunc("POST /api/v2/websites/options", func(w http.ResponseWriter, r *http.Request) {
+		items := svc.List("", 0, 500)
+		types := []map[string]string{{"value": "static", "label": "静态网站"}, {"value": "proxy", "label": "反向代理"}, {"value": "php", "label": "PHP"}}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"types": types, "websites": items}})
+	})
+	registerDomainRoutes(mux, svc)
+	registerWebsiteConfigRoutes(mux, svc)
+}
+
+func registerDomainRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
+	list := func(w http.ResponseWriter, r *http.Request) {
+		idText := strings.TrimPrefix(r.URL.Path, "/api/v2/websites/domains/")
+		if idText == r.URL.Path {
+			idText = r.PathValue("second")
+		}
+		id, err := parseID(idText)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		items, err := svc.ListDomains(id)
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
+	}
+	// 仅注册旧契约的 websiteId 参数，避免与站点配置通配符产生 ServeMux 冲突。
+	// 兼容旧路径 GET /api/v2/websites/domains/:websiteId；与 HTTPS 双段路径统一分发。
+	mux.HandleFunc("GET /api/v2/websites/{first}/{second}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("first") == "domains" {
+			list(w, r)
+			return
+		}
+		if r.PathValue("second") == "https" {
+			id, err := parseID(r.PathValue("first"))
+			if err != nil {
+				writeError(w, 400, err)
+				return
+			}
+			cfg, err := svc.GetConfig(id, "https")
+			if errors.Is(err, os.ErrNotExist) {
+				writeError(w, 404, err)
+				return
+			}
+			if err != nil {
+				writeError(w, 500, err)
+				return
+			}
+			wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
+			return
+		}
+		websiteFallbackHandler(w, r)
+	})
+	mux.HandleFunc("POST /api/v2/websites/domains", func(w http.ResponseWriter, r *http.Request) {
+		var in model.WebsiteDomain
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		item, err := svc.UpsertDomain(in)
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, 404, err)
+			return
+		}
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": item})
+	})
+	mux.HandleFunc("POST /api/v2/websites/domains/update", func(w http.ResponseWriter, r *http.Request) {
+		var in model.WebsiteDomain
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		item, err := svc.UpsertDomain(in)
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, 404, err)
+			return
+		}
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": item})
+	})
+	mux.HandleFunc("POST /api/v2/websites/domains/del", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			WebsiteID uint   `json:"websiteID"`
+			ID        string `json:"id"`
+			DomainID  string `json:"domainID"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if in.ID == "" {
+			in.ID = in.DomainID
+		}
+		if err := svc.DeleteDomain(in.WebsiteID, in.ID); errors.Is(err, os.ErrNotExist) {
+			writeError(w, 404, err)
+			return
+		} else if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200})
+	})
+}
+
+func registerWebsiteConfigRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
+	get := func(w http.ResponseWriter, r *http.Request) {
+		id, err := parseID(r.PathValue("id"))
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		cfg, err := svc.GetConfig(id, r.PathValue("type"))
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, 404, err)
+			return
+		}
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
+	}
+	mux.HandleFunc("GET /api/v2/websites/{id}/config/{type}", get)
+	mux.HandleFunc("POST /api/v2/websites/config", func(w http.ResponseWriter, r *http.Request) { websiteConfigWrite(svc, w, r) })
+	mux.HandleFunc("POST /api/v2/websites/config/update", func(w http.ResponseWriter, r *http.Request) { websiteConfigWrite(svc, w, r) })
+	mux.HandleFunc("POST /api/v2/websites/nginx/update", func(w http.ResponseWriter, r *http.Request) { websiteConfigWrite(svc, w, r) })
+	// 以下配置接口复用同一持久化存储，但每个类型均单独命名，避免配置相互覆盖。
+	for _, item := range []struct{ path, typ string }{
+		{"/api/v2/websites/rewrite", "rewrite"}, {"/api/v2/websites/rewrite/update", "rewrite"}, {"/api/v2/websites/rewrite/custom", "rewrite-custom"},
+		{"/api/v2/websites/dir", "dir"}, {"/api/v2/websites/dir/update", "dir"}, {"/api/v2/websites/dir/permission", "dir-permission"},
+		{"/api/v2/websites/leech", "leech"}, {"/api/v2/websites/leech/update", "leech"},
+		{"/api/v2/websites/redirect", "redirect"}, {"/api/v2/websites/redirect/update", "redirect"}, {"/api/v2/websites/redirect/file", "redirect-file"},
+	} {
+		typ := item.typ
+		mux.HandleFunc("POST "+item.path, func(w http.ResponseWriter, r *http.Request) {
+			websiteConfigWriteType(svc, typ, w, r)
+		})
+	}
+	mux.HandleFunc("GET /api/v2/websites/rewrite/custom", func(w http.ResponseWriter, r *http.Request) {
+		id, err := parseID(r.URL.Query().Get("websiteID"))
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		cfg, err := svc.GetConfig(id, "rewrite-custom")
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, 404, err)
+			return
+		}
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
+	})
+	// GET /api/v2/websites/:id/https 由上方双段路由分发。
+	mux.HandleFunc("POST /api/v2/websites/{id}/https", func(w http.ResponseWriter, r *http.Request) {
+		id, err := parseID(r.PathValue("id"))
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		var in struct {
+			Enabled *bool  `json:"enabled"`
+			Operate string `json:"operate"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		enabled := in.Enabled != nil && *in.Enabled
+		if in.Operate != "" {
+			enabled = in.Operate == "enable"
+		}
+		cfg, err := svc.UpdateConfig(id, "https", map[string]any{"enabled": enabled})
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, 404, err)
+			return
+		}
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
+	})
+}
+
+func websiteConfigWrite(svc *service.WebsiteService, w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		WebsiteID uint           `json:"websiteID"`
+		ID        uint           `json:"id"`
+		Type      string         `json:"type"`
+		Config    map[string]any `json:"config"`
+		Content   string         `json:"content"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	if in.WebsiteID == 0 {
+		in.WebsiteID = in.ID
+	}
+	if in.Type == "" {
+		in.Type = "nginx"
+	}
+	value := in.Config
+	if value == nil {
+		value = map[string]any{"content": in.Content}
+	}
+	cfg, err := svc.UpdateConfig(in.WebsiteID, in.Type, value)
+	if errors.Is(err, os.ErrNotExist) {
+		writeError(w, 404, err)
+		return
+	}
+	if err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
+}
+
+func websiteConfigWriteType(svc *service.WebsiteService, typ string, w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		WebsiteID uint           `json:"websiteID"`
+		ID        uint           `json:"id"`
+		Config    map[string]any `json:"config"`
+		Content   string         `json:"content"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	if in.WebsiteID == 0 {
+		in.WebsiteID = in.ID
+	}
+	value := in.Config
+	if value == nil {
+		value = map[string]any{"content": in.Content}
+	}
+	cfg, err := svc.UpdateConfig(in.WebsiteID, typ, value)
+	if errors.Is(err, os.ErrNotExist) {
+		writeError(w, 404, err)
+		return
+	}
+	if err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
 }
 
 // registerXPackWebsiteAliases 保留旧 Agent 的 xpack 监控/WAF 路径。

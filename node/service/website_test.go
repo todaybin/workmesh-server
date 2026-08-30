@@ -57,3 +57,49 @@ func TestWebsiteServiceRejectsInvalidWAFRule(t *testing.T) {
 		t.Fatal("无效 IP 应被拒绝")
 	}
 }
+
+func TestWebsiteServiceAdvancedStatePersists(t *testing.T) {
+	root := t.TempDir()
+	svc := NewWebsiteService(root)
+	website, err := svc.Create(model.WebsiteCreateRequest{PrimaryDomain: "advanced.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	domain, err := svc.UpsertDomain(model.WebsiteDomain{WebsiteID: website.ID, Domain: "www.advanced.example", Port: 443, SSL: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpdateConfig(website.ID, "nginx", map[string]any{"content": "server {}"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Operate(website.ID, "stop"); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := NewWebsiteService(root)
+	items, err := reloaded.ListDomains(website.ID)
+	if err != nil || len(items) != 1 || items[0].ID != domain.ID {
+		t.Fatalf("域名未持久化: %v %#v", err, items)
+	}
+	cfg, err := reloaded.GetConfig(website.ID, "nginx")
+	if err != nil || cfg["content"] != "server {}" {
+		t.Fatalf("配置未持久化: %v %#v", err, cfg)
+	}
+	loaded, err := reloaded.Get(website.ID)
+	if err != nil || loaded.Status != "stopped" {
+		t.Fatalf("状态未持久化: %v %#v", err, loaded)
+	}
+}
+
+func TestWebsiteServiceDomainValidation(t *testing.T) {
+	svc := NewWebsiteService(t.TempDir())
+	website, err := svc.Create(model.WebsiteCreateRequest{PrimaryDomain: "valid.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpsertDomain(model.WebsiteDomain{WebsiteID: website.ID, Domain: "bad..example"}); err == nil {
+		t.Fatal("应拒绝连续点域名")
+	}
+	if _, err := svc.UpsertDomain(model.WebsiteDomain{WebsiteID: website.ID, Domain: "other.example", Port: 70000}); err == nil {
+		t.Fatal("应拒绝越界端口")
+	}
+}

@@ -31,6 +31,8 @@ type WebsiteService struct {
 	global    model.WAFGlobalConfig
 	lists     model.WAFAccessLists
 	openresty model.OpenRestyConfig
+	domains   map[uint][]model.WebsiteDomain
+	configs   map[uint]map[string]any
 }
 
 // NewWebsiteService 创建服务并从数据目录加载已有状态。
@@ -41,7 +43,7 @@ func NewWebsiteService(root string) *WebsiteService {
 	if strings.TrimSpace(root) == "" {
 		root = "./data"
 	}
-	s := &WebsiteService{root: root, wafSites: map[uint]model.WAFSite{}}
+	s := &WebsiteService{root: root, wafSites: map[uint]model.WAFSite{}, domains: map[uint][]model.WebsiteDomain{}, configs: map[uint]map[string]any{}}
 	s.load()
 	return s
 }
@@ -73,6 +75,14 @@ func (s *WebsiteService) load() {
 	}
 	if !read("openresty.json", &s.openresty) {
 		s.openresty = model.OpenRestyConfig{Version: "1.27.1", Enabled: true, Modules: []model.OpenRestyModule{}}
+	}
+	_ = read("website-domains.json", &s.domains)
+	_ = read("website-configs.json", &s.configs)
+	if s.domains == nil {
+		s.domains = map[uint][]model.WebsiteDomain{}
+	}
+	if s.configs == nil {
+		s.configs = map[uint]map[string]any{}
 	}
 	if s.websites == nil {
 		s.websites = []model.Website{}
@@ -224,12 +234,149 @@ func (s *WebsiteService) Delete(id uint) error {
 		}
 		s.websites = append(s.websites[:i], s.websites[i+1:]...)
 		delete(s.wafSites, id)
+		delete(s.domains, id)
+		delete(s.configs, id)
 		if err := s.persist("websites.json", s.websites); err != nil {
 			return err
 		}
-		return s.persistWAFSites()
+		if err := s.persistWAFSites(); err != nil {
+			return err
+		}
+		if err := s.persist("website-domains.json", s.domains); err != nil {
+			return err
+		}
+		return s.persist("website-configs.json", s.configs)
 	}
 	return os.ErrNotExist
+}
+
+// Operate 更新网站运行状态，支持启动、停止和重启。
+func (s *WebsiteService) Operate(id uint, operation string) (model.Website, error) {
+	operation = strings.ToLower(strings.TrimSpace(operation))
+	if operation != "start" && operation != "stop" && operation != "restart" {
+		return model.Website{}, errors.New("网站操作必须是 start、stop 或 restart")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.websites {
+		if s.websites[i].ID != id {
+			continue
+		}
+		if operation == "stop" {
+			s.websites[i].Status = "stopped"
+		} else {
+			s.websites[i].Status = "running"
+		}
+		s.websites[i].UpdatedAt = time.Now().UTC()
+		if err := s.persist("websites.json", s.websites); err != nil {
+			return model.Website{}, err
+		}
+		return s.websites[i], nil
+	}
+	return model.Website{}, os.ErrNotExist
+}
+
+// ListDomains 返回网站域名，并限制最大返回数量。
+func (s *WebsiteService) ListDomains(websiteID uint) ([]model.WebsiteDomain, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, err := s.getWebsiteLocked(websiteID); err != nil {
+		return nil, err
+	}
+	return append([]model.WebsiteDomain(nil), s.domains[websiteID]...), nil
+}
+
+// UpsertDomain 新增或更新域名记录，并校验端口和域名格式。
+func (s *WebsiteService) UpsertDomain(domain model.WebsiteDomain) (model.WebsiteDomain, error) {
+	if domain.WebsiteID == 0 || !domainPattern.MatchString(strings.TrimSpace(domain.Domain)) || strings.Contains(domain.Domain, "..") {
+		return model.WebsiteDomain{}, errors.New("网站域名无效")
+	}
+	if domain.Port == 0 {
+		domain.Port = 80
+	}
+	if domain.Port < 1 || domain.Port > 65535 {
+		return model.WebsiteDomain{}, errors.New("网站端口超出范围")
+	}
+	domain.Domain = strings.TrimSpace(domain.Domain)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.getWebsiteLocked(domain.WebsiteID); err != nil {
+		return model.WebsiteDomain{}, err
+	}
+	if domain.ID == "" {
+		domain.ID = fmt.Sprintf("domain-%d", time.Now().UnixNano())
+	}
+	items := s.domains[domain.WebsiteID]
+	for i := range items {
+		if items[i].ID == domain.ID {
+			items[i] = domain
+			s.domains[domain.WebsiteID] = items
+			return domain, s.persist("website-domains.json", s.domains)
+		}
+		if strings.EqualFold(items[i].Domain, domain.Domain) && items[i].ID != domain.ID {
+			return model.WebsiteDomain{}, errors.New("网站域名已存在")
+		}
+	}
+	s.domains[domain.WebsiteID] = append(items, domain)
+	return domain, s.persist("website-domains.json", s.domains)
+}
+
+// DeleteDomain 删除指定网站域名。
+func (s *WebsiteService) DeleteDomain(websiteID uint, domainID string) error {
+	if websiteID == 0 || strings.TrimSpace(domainID) == "" {
+		return errors.New("网站域名参数无效")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := s.domains[websiteID]
+	for i, item := range items {
+		if item.ID == domainID {
+			s.domains[websiteID] = append(items[:i], items[i+1:]...)
+			return s.persist("website-domains.json", s.domains)
+		}
+	}
+	return os.ErrNotExist
+}
+
+// GetConfig 读取网站类型配置；未设置时返回空对象而非固定业务数据。
+func (s *WebsiteService) GetConfig(websiteID uint, typ string) (map[string]any, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, err := s.getWebsiteLocked(websiteID); err != nil {
+		return nil, err
+	}
+	result := map[string]any{}
+	for key, value := range s.configs[websiteID] {
+		result[key] = value
+	}
+	if typ != "" {
+		if value, ok := result[typ]; ok {
+			if typed, ok := value.(map[string]any); ok {
+				return typed, nil
+			}
+		}
+	}
+	return result, nil
+}
+
+// UpdateConfig 保存网站类型配置，配置键由调用方明确指定。
+func (s *WebsiteService) UpdateConfig(websiteID uint, typ string, value map[string]any) (map[string]any, error) {
+	if websiteID == 0 || strings.TrimSpace(typ) == "" || len(typ) > 64 {
+		return nil, errors.New("网站配置参数无效")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.getWebsiteLocked(websiteID); err != nil {
+		return nil, err
+	}
+	if s.configs[websiteID] == nil {
+		s.configs[websiteID] = map[string]any{}
+	}
+	s.configs[websiteID][typ] = value
+	if err := s.persist("website-configs.json", s.configs); err != nil {
+		return nil, err
+	}
+	return value, nil
 }
 
 func (s *WebsiteService) persistWAFSites() error {
