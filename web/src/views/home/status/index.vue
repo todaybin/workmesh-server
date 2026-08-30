@@ -28,7 +28,7 @@
                 <ComplexTable v-if="showCpuTop" :data="currentInfo.topCPUItems">
                     <el-table-column :min-width="120" show-overflow-tooltip :label="$t('menu.process')" prop="name" />
                     <el-table-column :min-width="60" :label="$t('monitor.percent')" prop="percent">
-                        <template #default="{ row }">{{ row.percent.toFixed(2) }}%</template>
+                        <template #default="{ row }">{{ formatNumber(row.percent) }}%</template>
                     </el-table-column>
                     <el-table-column :width="80" :label="$t('commons.table.operate')">
                         <template #default="{ row }">
@@ -129,7 +129,7 @@
                 <ComplexTable v-if="showCpuTop" :data="currentInfo.topCPUItems">
                     <el-table-column :min-width="120" show-overflow-tooltip :label="$t('menu.process')" prop="name" />
                     <el-table-column :min-width="60" :label="$t('monitor.percent')" prop="percent">
-                        <template #default="{ row }">{{ row.percent.toFixed(2) }}%</template>
+                        <template #default="{ row }">{{ formatNumber(row.percent) }}%</template>
                     </el-table-column>
                     <el-table-column :width="80" :label="$t('commons.table.operate')">
                         <template #default="{ row }">
@@ -223,7 +223,7 @@
                         </template>
                     </el-table-column>
                     <el-table-column :min-width="80" :label="$t('monitor.percent')" prop="percent">
-                        <template #default="{ row }">{{ row.percent.toFixed(2) }}%</template>
+                        <template #default="{ row }">{{ formatNumber(row.percent) }}%</template>
                     </el-table-column>
                     <el-table-column :width="80" :label="$t('commons.table.operate')">
                         <template #default="{ row }">
@@ -548,6 +548,9 @@ const chartsOption = ref({
 });
 
 const acceptParams = (current: Dashboard.CurrentInfo, base: Dashboard.BaseInfo): void => {
+    // 节点能力可能按平台缺省返回字段；先归一化，避免模板对 undefined 调用 toFixed/length。
+    current = normalizeDashboardInfo(current);
+    base = normalizeDashboardBase(base);
     normalizeDashboardAccelerators(current);
     currentInfo.value = current;
     baseInfo.value = base;
@@ -662,7 +665,8 @@ const goGPU = () => {
 };
 
 function formatNumber(val: number) {
-    return Number(val.toFixed(2));
+    const number = Number(val);
+    return Number.isFinite(number) ? Number(number.toFixed(2)) : 0;
 }
 
 const hasField = (value?: string) => {
@@ -677,9 +681,42 @@ const formatMetricPair = (used?: string, total?: string) => {
     return `${used || 'N/A'} / ${total || 'N/A'}`;
 };
 
-const formatDashboardTemperature = (value: string) => {
+const formatDashboardTemperature = (value?: string) => {
+    if (!value) return 'N/A';
     return value.replace(/\s*°?C\b/, ' °C');
 };
+
+const normalizeDashboardBase = (base?: Partial<Dashboard.BaseInfo>): Dashboard.BaseInfo => ({
+    ...baseInfo.value,
+    ...(base || {}),
+    cpuCores: Number(base?.cpuCores) || 0,
+    cpuLogicalCores: Number(base?.cpuLogicalCores) || 0,
+    cpuMhz: Number(base?.cpuMhz) || 0,
+    quickJump: Array.isArray(base?.quickJump) ? base.quickJump : [],
+});
+
+const normalizeDashboardInfo = (current?: Partial<Dashboard.CurrentInfo>): Dashboard.CurrentInfo => ({
+    ...currentInfo.value,
+    ...(current || {}),
+    load1: Number(current?.load1) || 0,
+    load5: Number(current?.load5) || 0,
+    load15: Number(current?.load15) || 0,
+    loadUsagePercent: Number(current?.loadUsagePercent) || 0,
+    cpuPercent: Array.isArray(current?.cpuPercent) ? current.cpuPercent : [],
+    cpuDetailedPercent: Array.isArray(current?.cpuDetailedPercent) ? current.cpuDetailedPercent : [],
+    diskData: Array.isArray(current?.diskData) ? current.diskData : [],
+    gpuData: Array.isArray(current?.gpuData) ? current.gpuData : [],
+    npuData: Array.isArray(current?.npuData) ? current.npuData : [],
+    xpuData: Array.isArray(current?.xpuData) ? current.xpuData : [],
+    topCPUItems: Array.isArray(current?.topCPUItems) ? current.topCPUItems : [],
+    topMemItems: Array.isArray(current?.topMemItems) ? current.topMemItems : [],
+    cpuUsedPercent: Number(current?.cpuUsedPercent) || 0,
+    cpuUsed: Number(current?.cpuUsed) || 0,
+    cpuTotal: Number(current?.cpuTotal) || 0,
+    memoryTotal: Number(current?.memoryTotal) || 0,
+    memoryUsed: Number(current?.memoryUsed) || 0,
+    memoryUsedPercent: Number(current?.memoryUsedPercent) || 0,
+});
 
 const metricPercentage = (value?: string) => {
     const matched = value?.match(/[0-9]+(?:\.[0-9]+)?/);

@@ -101,3 +101,26 @@ func TestSSLServiceRejectsInvalidCertificate(t *testing.T) {
 		t.Fatal("无效证书应被拒绝")
 	}
 }
+
+func TestWebsiteSecurityRenewsDueSelfSignedCertificate(t *testing.T) {
+	root := filepath.Join(".tmp", "website-security-renew-test")
+	_ = os.RemoveAll(root)
+	defer os.RemoveAll(root)
+	security := NewWebsiteSecurityService(root)
+	ca, err := security.CreateCA("renew-ca", "renew-ca", "CN", "WorkMesh", "", "", "", "RSA2048")
+	if err != nil {
+		t.Fatalf("创建 CA 失败: %v", err)
+	}
+	ssl, err := security.ObtainCA(ca.ID, 0, "renew.example.com", "RSA2048", "month", 1, true, "auto")
+	if err != nil {
+		t.Fatalf("签发证书失败: %v", err)
+	}
+	report := security.RenewDueCertificates(context.Background(), 90*24*time.Hour)
+	if report.Checked != 1 || report.Renewed != 1 || len(report.Failed) != 0 {
+		t.Fatalf("续期扫描结果异常: %+v", report)
+	}
+	renewed, err := security.GetSignedSSL(ssl.ID)
+	if err != nil || !renewed.ExpireDate.After(ssl.ExpireDate) {
+		t.Fatalf("证书未更新: %+v, %v", renewed, err)
+	}
+}

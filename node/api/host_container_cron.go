@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/todaybin/workmesh-server/node/model"
@@ -21,10 +22,42 @@ import (
 )
 
 var sharedCronjobs = service.NewCronjobService()
+var (
+	backgroundMu      sync.Mutex
+	backgroundStarted bool
+)
 
 // StartBackgroundTasks 启动节点级后台调度任务，调用方应在进程退出时取消 ctx。
 func StartBackgroundTasks(ctx context.Context) {
 	sharedCronjobs.Start(ctx)
+	backgroundMu.Lock()
+	if backgroundStarted {
+		backgroundMu.Unlock()
+		return
+	}
+	backgroundStarted = true
+	backgroundMu.Unlock()
+	// 证书扫描使用小时级周期，避免每个请求触发外部或昂贵的续期逻辑。
+	security := service.NewWebsiteSecurityService("")
+	go func() {
+		defer func() {
+			backgroundMu.Lock()
+			backgroundStarted = false
+			backgroundMu.Unlock()
+		}()
+		const interval = time.Hour
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		security.RenewDueCertificates(ctx, 30*24*time.Hour)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				security.RenewDueCertificates(ctx, 30*24*time.Hour)
+			}
+		}
+	}()
 }
 
 // RegisterHostContainerCronRoutes 注册主机、容器和计划任务接口。

@@ -9,6 +9,7 @@ package service
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -89,6 +90,13 @@ type WebsiteSecurityService struct {
 	acmeNext uint
 	caNext   uint
 	sslNext  uint
+}
+
+// CertificateRenewalReport 描述一次后台证书续期扫描的结果。
+type CertificateRenewalReport struct {
+	Checked int      `json:"checked"`
+	Renewed int      `json:"renewed"`
+	Failed  []string `json:"failed,omitempty"`
 }
 
 // NewWebsiteSecurityService 创建网站证书服务并加载已有状态。
@@ -480,6 +488,42 @@ func (s *WebsiteSecurityService) RenewCA(id uint) (WebsiteCASignedSSL, error) {
 		return WebsiteCASignedSSL{}, os.ErrNotExist
 	}
 	return s.ObtainCA(existing.CAID, existing.ID, existing.PrimaryDomain+","+existing.Domains, existing.KeyType, "year", 1, existing.AutoRenew, existing.Description)
+}
+
+// RenewDueCertificates 续期即将到期的本地自签证书。
+//
+// ACME 证书的云端签发需要账户授权和挑战环境，由显式 API 异步处理；后台扫描
+// 只处理本服务可安全完成的 self-signed 证书，避免在无凭据时伪造续期成功。
+func (s *WebsiteSecurityService) RenewDueCertificates(ctx context.Context, horizon time.Duration) CertificateRenewalReport {
+	if horizon <= 0 || horizon > 90*24*time.Hour {
+		horizon = 30 * 24 * time.Hour
+	}
+	deadline := time.Now().UTC().Add(horizon)
+	s.mu.RLock()
+	ids := make([]uint, 0)
+	for _, item := range s.ssls {
+		if item.AutoRenew && item.Type == "self-signed" && !item.ExpireDate.IsZero() && item.ExpireDate.Before(deadline) {
+			ids = append(ids, item.ID)
+		}
+	}
+	s.mu.RUnlock()
+	report := CertificateRenewalReport{Checked: len(ids)}
+	for _, id := range ids {
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				report.Failed = append(report.Failed, fmt.Sprintf("%d: %v", id, ctx.Err()))
+				continue
+			default:
+			}
+		}
+		if _, err := s.RenewCA(id); err != nil {
+			report.Failed = append(report.Failed, fmt.Sprintf("%d: %v", id, err))
+			continue
+		}
+		report.Renewed++
+	}
+	return report
 }
 
 // DownloadCA 返回包含 ca.crt 和 ca.key 的 ZIP 字节，调用方必须限制下载权限。

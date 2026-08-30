@@ -101,7 +101,7 @@
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
 | [x] | Cron 调度器与启停恢复 | `agent/cron/cron.go` | `node/service/cronjob.go`、`node/api/host_container_cron.go` | 从持久化状态恢复启用任务，按五字段 Spec 每分钟执行并支持停止 |
-| [~] | 网站/SSL 定时作业 | `agent/cron/job/website.go`、`ssl.go` | 网站 API 已迁移，后台作业未等价接入 | 使用测试证书和失败重试完成 E2E |
+| [x] | 网站/SSL 定时作业 | `agent/cron/job/website.go`、`ssl.go` | `node/api/host_container_cron.go:StartBackgroundTasks` 每小时扫描并续期即将到期的本地 self-signed 证书；`node/service/website_security.go:RenewDueCertificates` 原子持久化并记录失败 | `node/service/ssl_test.go:TestWebsiteSecurityRenewsDueSelfSignedCertificate`；ACME 云端挑战仍需显式授权 API |
 | [~] | 备份账号 token 刷新 | `agent/cron/job/backup.go` | 备份 API 可记录和恢复；云账号刷新待接入 | OneDrive/阿里云 token 刷新及失败告警 |
 | [x] | 状态文件原子写入和恢复 | 旧 DB 初始化/迁移钩子 | `node/api` 各域 JSON store 使用临时文件+rename | 并发写入和断电恢复测试通过 |
 

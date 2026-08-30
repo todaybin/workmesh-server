@@ -46,8 +46,8 @@
                                     <span>{{ $t(item.title, 2) }}</span>
                                     <div class="count">
                                         <el-tooltip
-                                            v-if="item.alias || item.detail.length > 20"
-                                            :content="item.detail"
+                                            v-if="item.alias || (item.detail || '').length > 20"
+                                            :content="item.detail || ''"
                                             placement="bottom"
                                         >
                                             <el-button
@@ -56,7 +56,7 @@
                                                 type="primary"
                                                 @click="quickJump(item)"
                                             >
-                                                {{ item.alias || item.detail.substring(0, 18) + '...' }}
+                                                {{ item.alias || (item.detail || '').substring(0, 18) + '...' }}
                                             </el-button>
                                         </el-tooltip>
                                         <el-button
@@ -66,7 +66,7 @@
                                             @click="quickJump(item)"
                                             v-else
                                         >
-                                            {{ item.detail }}
+                                            {{ item.detail || '-' }}
                                         </el-button>
                                     </div>
                                 </el-col>
