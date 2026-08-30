@@ -23,6 +23,15 @@ type coreResourceStore struct {
 var coreResources = coreResourceStore{items: map[string][]map[string]any{}}
 
 func registerCoreResourceRoutes(mux *http.ServeMux) {
+	for _, pattern := range []string{
+		"POST /api/v2/core/script",
+		"POST /api/v2/core/script/search",
+		"POST /api/v2/core/script/update",
+		"POST /api/v2/core/script/del",
+		"POST /api/v2/core/script/sync",
+	} {
+		mux.HandleFunc(pattern, coreResourceHandler)
+	}
 	for _, prefix := range []string{"/api/v2/core/commands/", "/api/v2/core/script/", "/api/v2/core/logs/", "/api/v2/core/groups/"} {
 		mux.HandleFunc(prefix, coreResourceHandler)
 	}
@@ -33,6 +42,9 @@ func isCoreResourceRoute(pattern string) bool {
 	path := pattern
 	if len(parts) == 2 {
 		path = parts[1]
+	}
+	if path == "/api/v2/core/script" {
+		return true
 	}
 	for _, prefix := range []string{"/api/v2/core/commands/", "/api/v2/core/script/", "/api/v2/core/logs/", "/api/v2/core/groups/"} {
 		if strings.HasPrefix(path, prefix) {
