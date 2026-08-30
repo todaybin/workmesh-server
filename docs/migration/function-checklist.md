@@ -49,6 +49,18 @@
 | 网站扩展元数据与批量操作 | `apps/workmesh-node/agent/app/api/v2/website.go`、`website_proxy.go`、`website_template.go` | `/websites/auths*`、`batch/*`、`templates/*`、`proxies*`、`exec/composer` | `node/api/website_extensions.go` | 统一 `GET/POST /api/v2/websites/{rest...}` | Session/Cookie、资源 ID 校验 | 本地模板、代理、认证、日志、数据库元数据 | `website-extensions.json`，列表最多 500 条 | `node/api/website_extensions_test.go` | `go test ./node/api -run WebsiteExtension` | 主次节点已部署并返回 200 | implemented | Composer 只校验文件，不执行任意命令 |
 | 后端国际化资源 | `apps/workmesh-node/agent/i18n/lang/*.yaml`、`agent/i18n/i18n.go` | 任务、日志、告警消息本地化入口 | `i18n/i18n.go`、`i18n/lang/*.yaml` | `i18n.Load`、`i18n.Message` | 进程内部调用 | 12 个 UTF-8 YAML 语言包 | Go embed，只读资源 | `i18n/i18n_test.go` | `go test ./i18n` | 二进制构建验证 | implemented | 复杂 YAML 结构由业务调用方解析 |
 
+## 2026-08-30 双节点部署与节点管理验收
+
+| 项目 | 主节点 | 次节点 | 验证结果 |
+| --- | --- | --- | --- |
+| 制品 | `61.184.12.165:/opt/workmesh-server` | `162.14.96.198:/opt/workmesh-server-secondary` | Linux amd64 ELF 已替换，旧版本保存在 `backups/release-*` |
+| 服务 | `workmesh-server.service` | `workmesh-server-secondary.service` | systemd active，端口 9999 |
+| 健康检查 | `/health` HTTP 200 | `/health` HTTP 200 | 通过 |
+| 就绪检查 | `/ready` HTTP 200 | `/ready` HTTP 200 | 通过 |
+| 前端资源 | `/` HTTP 200，JS `text/javascript` | `/` HTTP 200，JS `text/javascript` | 通过 |
+| 登录与节点新增 | 登录后新增 `secondary-gateway-162` | 当前节点列表可查询 | 主节点重启后节点仍存在，持久化通过 |
+| Gateway 注册 | `registration=pending`，Gateway 401 | `registration=pending`，Gateway 404 `WORKMESH_NODE_NOT_FOUND` | 真实 Gateway 凭据/登记缺失，禁止伪造为 registered |
+
 ## 已完成
 
 | 功能域 | 接口范围 | 真实行为 | 验证 |

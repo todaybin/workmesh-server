@@ -160,6 +160,13 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 - [x] 应用详情、服务状态和安装参数从 `apps.json` 真实记录派生；详情中的 params/compose 不再使用固定空数组。
 - [x] 安装删除检查返回应用及容器资源清单；应用版本查询按 catalog 记录过滤并限制在内存状态范围内。
 
+### 2026-08-30 双节点部署验收
+
+- [x] `61.184.12.165` 的 `workmesh-server.service` 已部署 Linux amd64 制品并验证 `/health`、`/ready`、首页和 JavaScript MIME。
+- [x] `162.14.96.198` 的 `workmesh-server-secondary.service` 已部署 Linux amd64 制品并验证 `/health`、`/ready`、首页和 JavaScript MIME。
+- [x] 主节点登录后可新增、查询、删除节点；新增 `secondary-gateway-162` 后重启主节点仍可查询，证明节点状态持久化。
+- [~] Gateway 注册仍需真实云端凭据和节点登记：主节点返回 HTTP 401，次节点返回 `WORKMESH_NODE_NOT_FOUND`；当前仅能显示 pending，不能伪造已注册。
+
 ### 2026-08-30 国际化资源完整性
 
 - [x] 服务端 12 个语言包已从旧 Agent 全量迁移至 `apps/workmesh-server/i18n/lang/*.yaml`，并替换原品牌标识。
