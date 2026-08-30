@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/todaybin/workmesh-server/config"
+	controlapi "github.com/todaybin/workmesh-server/control/api"
+	nodeapi "github.com/todaybin/workmesh-server/node/api"
 )
 
 func TestHTTPMuxServesJavaScriptAssetsWithModuleMIME(t *testing.T) {
@@ -136,6 +138,23 @@ func TestHTTPMuxProtectsNodeAPIsAndAllowsLogin(t *testing.T) {
 	mux.ServeHTTP(authorized, request)
 	if authorized.Code != http.StatusOK {
 		t.Fatalf("有效 Bearer 会话被拒绝: %d %s", authorized.Code, authorized.Body.String())
+	}
+}
+
+func TestSecurityWrapperProtectsControlAndLeavesHealthPublic(t *testing.T) {
+	mux, _ := httpMux(configForTest())
+	secured := controlapi.NewSecurityMiddleware(mux, controlapi.SecurityMiddlewareOptions{Authorize: nodeapi.AuthorizeControlRequest})
+
+	health := httptest.NewRecorder()
+	secured.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if health.Code != http.StatusOK {
+		t.Fatalf("健康检查不应依赖登录，状态码 = %d", health.Code)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/workmesh/gateway/status", nil)
+	blocked := httptest.NewRecorder()
+	secured.ServeHTTP(blocked, request)
+	if blocked.Code != http.StatusUnauthorized {
+		t.Fatalf("控制面状态查询应要求登录，状态码 = %d", blocked.Code)
 	}
 }
 

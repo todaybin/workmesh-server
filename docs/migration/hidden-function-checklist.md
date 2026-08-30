@@ -73,10 +73,10 @@
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [~] | Session/Cookie/Bearer/API Key 认证 | `core/middleware/session.go` | `control/service/core.go`、`node/api/core_handlers.go`；认证 HTTP 测试 | 所有需保护路由逐条验证未登录 401/403 |
-| [~] | CSRF 防护 | `core/middleware/csrf_protect.go` | 前端请求头与后端写接口校验仍需统一 | 增加 token 生成、轮换、失败审计和跨站测试 |
+| [x] | Session/Cookie/Bearer/API Key 认证 | `core/middleware/session.go` | `control/api/security_middleware.go`、`control/service/core.go`、`node/api/core_handlers.go`；认证 HTTP 测试 | 主进程已统一挂载，控制面与节点执行面均拒绝未授权请求 |
+| [x] | CSRF 防护 | `core/middleware/csrf_protect.go` | `control/api/security_middleware.go`；双提交 token、Origin、Sec-Fetch-Site 测试 | Cookie 会话写请求要求 `pcsrftoken` 与 `X-CSRF-Token`，跨站请求拒绝 |
 | [~] | Demo/只读模式限制 | `core/middleware/demo_handle.go` | 新服务暂以角色权限承接 | 覆盖旧白名单并验证所有写接口被拒绝 |
-| [~] | 域名绑定与密码过期 | `core/middleware/bind_domain.go`、`password_expired.go` | 设置接口已有字段，专用中间件待接入 | 绑定域名、过期密码和例外路由 E2E |
+| [x] | 域名绑定与密码过期 | `core/middleware/bind_domain.go`、`password_expired.go` | `control/api/security_middleware.go`；domains.json 与环境变量覆盖 | 绑定域名、密码过期 313、重置例外均有测试 |
 | [x] | 敏感字段脱敏与请求体上限 | 旧 controller/service 约束 | AI、Gateway、兼容入口均限制 2 MiB 并脱敏 | 安全扫描不得出现明文 secret |
 
 ## 国际化、错误和任务基础设施
