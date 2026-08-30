@@ -52,37 +52,63 @@ func isFileRoute(pattern string) bool {
 }
 
 type fileAdvancedRequest struct {
-	Path              string   `json:"path"`
-	Dst               string   `json:"dst"`
-	URL               string   `json:"url"`
-	Name              string   `json:"name"`
-	Token             string   `json:"token"`
-	ID                string   `json:"id"`
-	Code              string   `json:"code"`
-	Query             string   `json:"query"`
-	Paths             []string `json:"paths"`
-	Mode              int64    `json:"mode"`
-	User              string   `json:"user"`
-	Group             string   `json:"group"`
-	WithInit          bool     `json:"withInit"`
-	ContainSub        bool     `json:"containSub"`
-	MatchCase         bool     `json:"matchCase"`
-	WholeWord         bool     `json:"wholeWord"`
-	UseRegex          bool     `json:"useRegex"`
-	MaxScanFiles      int      `json:"maxScanFiles"`
-	MaxFileBytes      int64    `json:"maxFileBytes"`
-	MaxHitsPerFile    int      `json:"maxHitsPerFile"`
-	MaxTotalHits      int      `json:"maxTotalHits"`
-	IgnoreCertificate bool     `json:"ignoreCertificate"`
-	Page              int      `json:"page"`
-	PageSize          int      `json:"pageSize"`
-	UploadID          string   `json:"uploadID"`
-	ChunkIndex        int      `json:"chunkIndex"`
-	ChunkCount        int      `json:"chunkCount"`
-	Offset            int64    `json:"offset"`
-	FileSize          int64    `json:"fileSize"`
-	Overwrite         bool     `json:"overwrite"`
-	DeleteSource      bool     `json:"deleteSource"`
+	Path              string            `json:"path"`
+	Dst               string            `json:"dst"`
+	URL               string            `json:"url"`
+	Name              string            `json:"name"`
+	Token             string            `json:"token"`
+	ID                string            `json:"id"`
+	Code              string            `json:"code"`
+	Query             string            `json:"query"`
+	Paths             []string          `json:"paths"`
+	Mode              int64             `json:"mode"`
+	User              string            `json:"user"`
+	Group             string            `json:"group"`
+	WithInit          bool              `json:"withInit"`
+	ContainSub        bool              `json:"containSub"`
+	MatchCase         bool              `json:"matchCase"`
+	WholeWord         bool              `json:"wholeWord"`
+	UseRegex          bool              `json:"useRegex"`
+	MaxScanFiles      int               `json:"maxScanFiles"`
+	MaxFileBytes      int64             `json:"maxFileBytes"`
+	MaxHitsPerFile    int               `json:"maxHitsPerFile"`
+	MaxTotalHits      int               `json:"maxTotalHits"`
+	IgnoreCertificate bool              `json:"ignoreCertificate"`
+	Page              int               `json:"page"`
+	PageSize          int               `json:"pageSize"`
+	UploadID          string            `json:"uploadID"`
+	ChunkIndex        int               `json:"chunkIndex"`
+	ChunkCount        int               `json:"chunkCount"`
+	Offset            int64             `json:"offset"`
+	FileSize          int64             `json:"fileSize"`
+	Overwrite         bool              `json:"overwrite"`
+	DeleteSource      bool              `json:"deleteSource"`
+	OutputPath        string            `json:"outputPath"`
+	TaskID            string            `json:"taskID"`
+	Type              string            `json:"type"`
+	Extension         string            `json:"extension"`
+	OutputFormat      string            `json:"outputFormat"`
+	Files             []fileConvertItem `json:"files"`
+	Remark            string            `json:"remark"`
+}
+
+// fileConvertItem 描述单个媒体文件转换输入与目标格式。
+type fileConvertItem struct {
+	Path         string `json:"path"`
+	Type         string `json:"type"`
+	InputFile    string `json:"inputFile"`
+	Extension    string `json:"extension"`
+	OutputFormat string `json:"outputFormat"`
+}
+
+// fileConvertLog 与前端契约保持一致，记录异步转换结果。
+type fileConvertLog struct {
+	Date    string `json:"date"`
+	Type    string `json:"type"`
+	Log     string `json:"log"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	TaskID  string `json:"taskID,omitempty"`
 }
 
 // fileWgetProcess 保存远程下载任务状态；状态仅保留有限字段，避免无界内存增长。
@@ -146,11 +172,12 @@ type fileUploadItem struct {
 }
 
 type fileAuxState struct {
-	Favorites []fileFavorite    `json:"favorites"`
-	Recycle   []fileRecycleItem `json:"recycle"`
-	Uploads   []fileUploadItem  `json:"uploads"`
-	Remarks   map[string]string `json:"remarks,omitempty"`
-	History   []fileHistoryItem `json:"history,omitempty"`
+	Favorites   []fileFavorite    `json:"favorites"`
+	Recycle     []fileRecycleItem `json:"recycle"`
+	Uploads     []fileUploadItem  `json:"uploads"`
+	Remarks     map[string]string `json:"remarks,omitempty"`
+	History     []fileHistoryItem `json:"history,omitempty"`
+	ConvertLogs []fileConvertLog  `json:"convertLogs,omitempty"`
 }
 
 type fileHistoryItem struct {
@@ -181,7 +208,7 @@ func loadFileAuxLocked() {
 		return
 	}
 	fileAux.loaded, fileAux.path = true, path
-	fileAux.data = fileAuxState{Favorites: []fileFavorite{}, Recycle: []fileRecycleItem{}, Uploads: []fileUploadItem{}, Remarks: map[string]string{}, History: []fileHistoryItem{}}
+	fileAux.data = fileAuxState{Favorites: []fileFavorite{}, Recycle: []fileRecycleItem{}, Uploads: []fileUploadItem{}, Remarks: map[string]string{}, History: []fileHistoryItem{}, ConvertLogs: []fileConvertLog{}}
 	if raw, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(raw, &fileAux.data)
 	}
@@ -199,6 +226,9 @@ func loadFileAuxLocked() {
 	}
 	if fileAux.data.History == nil {
 		fileAux.data.History = []fileHistoryItem{}
+	}
+	if fileAux.data.ConvertLogs == nil {
+		fileAux.data.ConvertLogs = []fileConvertLog{}
 	}
 }
 
@@ -1006,29 +1036,109 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 			fileError(w, http.StatusServiceUnavailable, errors.New("未配置媒体转换器，请设置 WORKMESH_MEDIA_CONVERTER"))
 			return
 		}
-		input, err := cleanFilePath(req.Path)
-		if err != nil || strings.TrimSpace(req.Dst) == "" {
-			if err == nil {
-				err = errors.New("path 和 dst 不能为空")
-			}
-			fileError(w, http.StatusBadRequest, err)
+		if _, err := exec.LookPath(converter); err != nil {
+			fileError(w, http.StatusServiceUnavailable, fmt.Errorf("媒体转换器不可执行: %w", err))
 			return
 		}
-		output, err := cleanFilePath(req.Dst)
+		items := append([]fileConvertItem(nil), req.Files...)
+		if len(items) == 0 {
+			if req.Path == "" || req.Dst == "" {
+				fileError(w, http.StatusBadRequest, errors.New("files 或 path/dst 不能为空"))
+				return
+			}
+			items = []fileConvertItem{{Path: filepath.Dir(req.Path), InputFile: filepath.Base(req.Path), OutputFormat: strings.TrimPrefix(filepath.Ext(req.Dst), "."), Type: req.Type}}
+		}
+		outputRoot := req.OutputPath
+		if outputRoot == "" && req.Dst != "" {
+			outputRoot = filepath.Dir(req.Dst)
+		}
+		outputRoot, err := cleanFilePath(outputRoot)
 		if err != nil {
 			fileError(w, http.StatusBadRequest, err)
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
-		defer cancel()
-		if result := exec.CommandContext(ctx, converter, input, output).Run(); result != nil {
-			fileError(w, http.StatusBadGateway, fmt.Errorf("媒体转换失败: %w", result))
+		if err := os.MkdirAll(outputRoot, 0o750); err != nil {
+			fileError(w, 500, err)
 			return
 		}
-		if req.DeleteSource {
-			_ = os.Remove(input)
+		taskID := strings.TrimSpace(req.TaskID)
+		if taskID == "" {
+			taskID = idToken()
 		}
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": output, "converted": true}})
+		valid := make([]fileConvertItem, 0, len(items))
+		for _, item := range items {
+			if strings.TrimSpace(item.InputFile) == "" || filepath.Base(item.InputFile) != item.InputFile || strings.ContainsAny(item.InputFile, `/\\`) {
+				fileError(w, 400, errors.New("inputFile 无效"))
+				return
+			}
+			base, e := cleanFilePath(filepath.Join(item.Path, item.InputFile))
+			if e != nil {
+				fileError(w, 400, e)
+				return
+			}
+			if st, e := os.Stat(base); e != nil || !st.Mode().IsRegular() {
+				if e == nil {
+					e = errors.New("输入文件不是普通文件")
+				}
+				fileError(w, 404, e)
+				return
+			}
+			if strings.TrimSpace(item.OutputFormat) == "" {
+				fileError(w, 400, errors.New("outputFormat 不能为空"))
+				return
+			}
+			valid = append(valid, item)
+		}
+		for _, item := range valid {
+			input := filepath.Join(item.Path, item.InputFile)
+			name := strings.TrimSuffix(filepath.Base(item.InputFile), filepath.Ext(item.InputFile)) + "." + strings.TrimPrefix(item.OutputFormat, ".")
+			output := filepath.Join(outputRoot, name)
+			appendConvertLog(fileConvertLog{Date: time.Now().Format("2006-01-02 15:04:05"), Type: item.Type, Log: fmt.Sprintf("%s -> %s", input, output), Status: "RUNNING", Message: "QUEUED", TaskID: taskID})
+			go runMediaConversion(converter, input, output, item.Type, taskID, req.DeleteSource)
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"taskID": taskID, "status": "queued", "total": len(valid)}})
+	case "convert/log":
+		v, err := requestMap(r)
+		if err != nil {
+			domainError(w, 400, "INVALID_JSON", err.Error())
+			return
+		}
+		page, size := intValue(v, "page"), intValue(v, "pageSize")
+		if page < 1 {
+			page = 1
+		}
+		if size < 1 || size > 200 {
+			size = 50
+		}
+		status, typ, taskID := strings.ToLower(valueString(v, "status")), strings.ToLower(valueString(v, "type")), valueString(v, "taskID")
+		fileAux.Lock()
+		loadFileAuxLocked()
+		all := append([]fileConvertLog(nil), fileAux.data.ConvertLogs...)
+		fileAux.Unlock()
+		filtered := all[:0]
+		for _, item := range all {
+			if status != "" && strings.ToLower(item.Status) != status {
+				continue
+			}
+			if typ != "" && strings.ToLower(item.Type) != typ {
+				continue
+			}
+			if taskID != "" && item.TaskID != taskID {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		all = filtered
+		total := len(all)
+		start := (page - 1) * size
+		if start > total {
+			start = total
+		}
+		end := start + size
+		if end > total {
+			end = total
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": all[start:end], "total": total, "page": page, "pageSize": size}})
 	default:
 		if operationPath == "read" {
 			// 继续复用 read 分页逻辑，路径参数 type 仅用于客户端展示。
@@ -1505,4 +1615,51 @@ func handleChunkDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, info.Size()))
 	w.WriteHeader(http.StatusPartialContent)
 	_, _ = io.CopyN(w, f, end-start+1)
+}
+
+func appendConvertLog(item fileConvertLog) {
+	fileAux.Lock()
+	loadFileAuxLocked()
+	fileAux.data.ConvertLogs = append(fileAux.data.ConvertLogs, item)
+	if len(fileAux.data.ConvertLogs) > 2000 {
+		fileAux.data.ConvertLogs = fileAux.data.ConvertLogs[len(fileAux.data.ConvertLogs)-2000:]
+	}
+	_ = saveFileAuxLocked()
+	fileAux.Unlock()
+}
+
+// runMediaConversion 在受控超时内执行外部转换器，并记录可查询的成功/失败状态。
+func runMediaConversion(converter, input, output, typ, taskID string, deleteSource bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	ext := filepath.Ext(output)
+	tmp, err := os.CreateTemp(filepath.Dir(output), ".workmesh-convert-*"+ext)
+	if err == nil {
+		tmpPath := tmp.Name()
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		cmd := exec.CommandContext(ctx, converter, input, tmpPath)
+		combined, runErr := cmd.CombinedOutput()
+		if runErr == nil {
+			if st, statErr := os.Stat(tmpPath); statErr == nil && st.Size() > 0 {
+				err = os.Rename(tmpPath, output)
+			} else {
+				err = errors.New("转换器未生成有效输出文件")
+			}
+		}
+		if runErr != nil {
+			err = fmt.Errorf("转换器执行失败: %w (%s)", runErr, strings.TrimSpace(string(combined)))
+		}
+		if err == nil && deleteSource {
+			_ = os.Remove(input)
+		}
+		status, message := "SUCCESS", "SUCCESS"
+		if err != nil {
+			status, message = "FAILED", err.Error()
+			_ = os.Remove(tmpPath)
+		}
+		appendConvertLog(fileConvertLog{Date: time.Now().Format("2006-01-02 15:04:05"), Type: typ, Log: fmt.Sprintf("%s -> %s", input, output), Status: status, Message: message, TaskID: taskID})
+		return
+	}
+	appendConvertLog(fileConvertLog{Date: time.Now().Format("2006-01-02 15:04:05"), Type: typ, Log: fmt.Sprintf("%s -> %s", input, output), Status: "FAILED", Message: err.Error(), TaskID: taskID})
 }

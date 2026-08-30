@@ -13,7 +13,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func TestChunkUploadAndDownload(t *testing.T) {
@@ -94,6 +96,53 @@ func TestFileHistoryAndAdvancedOperations(t *testing.T) {
 	}
 	if rr := post("/api/v2/files/depth/size", map[string]any{"path": root}); rr.Code != 200 {
 		t.Fatalf("depth=%d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestConvertAndConvertLogPersistence(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	root := t.TempDir()
+	input := filepath.Join(root, "input.txt")
+	outputDir := filepath.Join(root, "out")
+	if err := os.WriteFile(input, []byte("convert-me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	converter := filepath.Join(root, "converter")
+	if runtime.GOOS == "windows" {
+		converter += ".cmd"
+		if err := os.WriteFile(converter, []byte("@echo off\r\ncopy /Y %1 %2 >nul\r\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := os.WriteFile(converter, []byte("#!/bin/sh\ncp \"$1\" \"$2\"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("WORKMESH_MEDIA_CONVERTER", converter)
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+	payload := map[string]any{"files": []map[string]any{{"path": root, "inputFile": "input.txt", "outputFormat": "out", "type": "text"}}, "outputPath": outputDir, "taskID": "convert-test"}
+	b, _ := json.Marshal(payload)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/files/convert", bytes.NewReader(b)))
+	if res.Code != 200 {
+		t.Fatalf("convert=%d %s", res.Code, res.Body.String())
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(outputDir, "input.out")); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got, err := os.ReadFile(filepath.Join(outputDir, "input.out")); err != nil || string(got) != "convert-me" {
+		t.Fatalf("output=%q err=%v", got, err)
+	}
+	logBody := bytes.NewBufferString(`{"taskID":"convert-test","page":1,"pageSize":20}`)
+	logs := httptest.NewRecorder()
+	mux.ServeHTTP(logs, httptest.NewRequest(http.MethodPost, "/api/v2/files/convert/log", logBody))
+	if logs.Code != 200 || !bytes.Contains(logs.Body.Bytes(), []byte(`"SUCCESS"`)) {
+		t.Fatalf("convert log=%d %s", logs.Code, logs.Body.String())
 	}
 }
 
@@ -288,5 +337,39 @@ func TestFileReadTypeMountAndUserGroup(t *testing.T) {
 		if res.Code != http.StatusOK {
 			t.Fatalf("%s=%d %s", endpoint, res.Code, res.Body.String())
 		}
+	}
+}
+
+func TestFileConvertLogPersistence(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	t.Setenv("WORKMESH_MEDIA_CONVERTER", "")
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+
+	// 未配置转换器时必须返回明确错误，不能伪造转换成功。
+	body, _ := json.Marshal(map[string]any{"path": filepath.Join(t.TempDir(), "in.mp4"), "dst": filepath.Join(t.TempDir(), "out.mp4")})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/files/convert", bytes.NewReader(body)))
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("convert without converter status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	// 日志通过与转换任务相同的持久化文件保存，接口分页查询可立即读取。
+	appendConvertLog(fileConvertLog{Date: time.Now().Format("2006-01-02 15:04:05"), Type: "video", Log: "in.mp4 -> out.mp4", Status: "SUCCESS", Message: "SUCCESS", TaskID: "task-test"})
+	query, _ := json.Marshal(map[string]any{"page": 1, "pageSize": 20, "taskID": "task-test"})
+	res = httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/files/convert/log", bytes.NewReader(query)))
+	if res.Code != http.StatusOK || !bytes.Contains(res.Body.Bytes(), []byte(`"taskID":"task-test"`)) {
+		t.Fatalf("convert log status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	// 重新加载状态文件后日志仍可查询，验证服务重启场景的持久化行为。
+	fileAux.Lock()
+	fileAux.loaded = false
+	fileAux.Unlock()
+	res = httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/files/convert/log", bytes.NewReader(query)))
+	if res.Code != http.StatusOK || !bytes.Contains(res.Body.Bytes(), []byte(`"taskID":"task-test"`)) {
+		t.Fatalf("convert log reload status=%d body=%s", res.Code, res.Body.String())
 	}
 }
