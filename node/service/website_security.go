@@ -426,6 +426,11 @@ func (s *WebsiteSecurityService) ObtainCA(caID, renewID uint, domains, keyType, 
 	}
 	now := time.Now().UTC()
 	notAfter := now.AddDate(years, 0, 0)
+	if strings.EqualFold(strings.TrimSpace(unit), "day") {
+		notAfter = now.AddDate(0, 0, years)
+	} else if strings.EqualFold(strings.TrimSpace(unit), "month") {
+		notAfter = now.AddDate(0, years, 0)
+	}
 	leaf := &x509.Certificate{SerialNumber: big.NewInt(now.UnixNano()), Subject: pkix.Name{CommonName: parts[0]}, DNSNames: filterDNS(parts), NotBefore: now.Add(-time.Minute), NotAfter: notAfter, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, leaf, rootCert, public, rootKey)
 	if err != nil {
