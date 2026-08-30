@@ -62,6 +62,22 @@ func handleContainerLogStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stream.event("ready", map[string]any{"follow": follow})
+	// 长时间没有日志时仍发送心跳，确保反向代理不会回收 SSE；请求取消会同时终止该协程。
+	heartbeatDone := make(chan struct{})
+	defer close(heartbeatDone)
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				stream.event("heartbeat", map[string]any{"timestamp": time.Now().UTC()})
+			case <-heartbeatDone:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	err = command.Wait()
 	if ctx.Err() != nil {
 		stream.event("close", map[string]any{"reason": ctx.Err().Error()})
