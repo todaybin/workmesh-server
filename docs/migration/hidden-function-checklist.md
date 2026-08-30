@@ -159,3 +159,9 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 
 - [x] 应用详情、服务状态和安装参数从 `apps.json` 真实记录派生；详情中的 params/compose 不再使用固定空数组。
 - [x] 安装删除检查返回应用及容器资源清单；应用版本查询按 catalog 记录过滤并限制在内存状态范围内。
+
+### 2026-08-30 国际化资源完整性
+
+- [x] 服务端 12 个语言包已从旧 Agent 全量迁移至 `apps/workmesh-server/i18n/lang/*.yaml`，并替换原品牌标识。
+- [x] `apps/workmesh-server/i18n/i18n.go` 提供嵌入式资源加载、未知语言回退中文和标量消息查询；`go test ./i18n` 已通过。
+- [x] 前端 `web/src/lang/modules/*.ts` 保留 12 个语言模块；`npm.cmd run type-check` 与 `npm.cmd run build:pro` 已通过。

@@ -41,6 +41,14 @@
 
 非路由的初始化、后台作业、中间件、国际化、日志、任务和协议升级能力见 [`hidden-function-checklist.md`](./hidden-function-checklist.md)，两份清单必须同步维护。
 
+## 2026-08-30 网站扩展与后端语言包批次
+
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ACME 账户与自签 CA 生命周期 | `apps/workmesh-node/agent/app/api/v2/website_acme_account.go`、`website_ssl.go` | `/websites/acme/*`、`/websites/ca/*` | `node/service/website_security.go`、`node/api/website_cert_routes.go` | `POST /api/v2/websites/acme*`、`POST/GET /api/v2/websites/ca*` | Session/Cookie、Bearer、节点时间戳 | 本地 ACME/CA/签发证书元数据 | `website-acme.json`、`website-ca.json`、`website-ca-ssls.json`，原子替换 | `node/api/website_cert_routes_test.go` | `go test ./node/api -run WebsiteCertificate` | 主次节点 `/health` `/ready` 已验证 | implemented | 外部 ACME DNS 提供商需显式配置后启用 |
+| 网站扩展元数据与批量操作 | `apps/workmesh-node/agent/app/api/v2/website.go`、`website_proxy.go`、`website_template.go` | `/websites/auths*`、`batch/*`、`templates/*`、`proxies*`、`exec/composer` | `node/api/website_extensions.go` | 统一 `GET/POST /api/v2/websites/{rest...}` | Session/Cookie、资源 ID 校验 | 本地模板、代理、认证、日志、数据库元数据 | `website-extensions.json`，列表最多 500 条 | `node/api/website_extensions_test.go` | `go test ./node/api -run WebsiteExtension` | 主次节点已部署并返回 200 | implemented | Composer 只校验文件，不执行任意命令 |
+| 后端国际化资源 | `apps/workmesh-node/agent/i18n/lang/*.yaml`、`agent/i18n/i18n.go` | 任务、日志、告警消息本地化入口 | `i18n/i18n.go`、`i18n/lang/*.yaml` | `i18n.Load`、`i18n.Message` | 进程内部调用 | 12 个 UTF-8 YAML 语言包 | Go embed，只读资源 | `i18n/i18n_test.go` | `go test ./i18n` | 二进制构建验证 | implemented | 复杂 YAML 结构由业务调用方解析 |
+
 ## 已完成
 
 | 功能域 | 接口范围 | 真实行为 | 验证 |
