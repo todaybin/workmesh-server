@@ -65,3 +65,11 @@
 - 次节点使用本地 `admin/admin` 会话和真实 Gateway 账号完成一次绑定：HTTP 200、`bound=true`、`nodeId=secondary-gateway-162`。
 - 重启次节点后再次查询仍为 `configured=true / registration=registered`，确认绑定快照持久化；未复制主节点身份或密钥。
 - 前端路由守卫、绑定页和设置页现会识别本地会话失效并跳转本地登录页，不再显示误导性的 Gateway 绑定错误。
+
+## 2026-08-31 绑定页线上修复
+
+- 发布提交：`affaa32`（全局处理 `LOCAL_AUTH_REQUIRED`、绑定请求携带 `gatewayUrl`、SPA 入口禁用缓存）。
+- 主节点 `61.184.12.165:9999` 首页和 `/settings/bind` 均返回 HTTP 200，入口响应头为 `Cache-Control: no-store, max-age=0`。
+- 入口 JavaScript 返回 `text/javascript`，线上入口哈希为 `index-BpgO3KEO.js`，已不再引用旧构建资源。
+- 使用本地登录会话后，通过 `POST /api/v2/workmesh/gateway/login` 完成真实 Gateway 账号绑定，响应 `code=200`、`bound=true`；随后状态查询为 `configured=true`、`registration=registered`、`gatewayUrl=https://work.zoomtk.com`。
+- 未携带本地 Session 直接访问绑定接口仍返回 `401 / LOCAL_AUTH_REQUIRED`，这是绑定接口的安全前置条件；前端现在会自动清理失效状态并跳转本地登录页。
