@@ -27,6 +27,28 @@ func TestParseOpenRestyVersion(t *testing.T) {
 	}
 }
 
+func TestContainerImageVersion(t *testing.T) {
+	if got := containerImageVersion("registry.example/openresty:1.21.4.3"); got != "1.21.4.3" {
+		t.Fatalf("unexpected image version %q", got)
+	}
+	if got := containerImageVersion("registry.example/openresty@sha256:abc"); got != "sha256:abc" {
+		t.Fatalf("unexpected digest version %q", got)
+	}
+}
+
+func TestParseOpenRestyContainerList(t *testing.T) {
+	status, ok := parseOpenRestyContainerList("database\tpostgres:18\tUp 1 hour\nweb-openresty\topenresty:1.25.3.1\tUp 2 hours\n")
+	if !ok || !status.IsExist || !status.IsActive || status.Status != "Running" {
+		t.Fatalf("container status not detected: %#v", status)
+	}
+	if status.Version != "1.25.3.1" || status.Binary != "docker://web-openresty" {
+		t.Fatalf("unexpected container metadata: %#v", status)
+	}
+	if _, ok := parseOpenRestyContainerList("database\tpostgres:18\tUp 1 hour\n"); ok {
+		t.Fatal("unrelated container must not be detected as OpenResty")
+	}
+}
+
 func TestWebsiteServicePersistsWebsiteAndWAF(t *testing.T) {
 	root := t.TempDir()
 	svc := NewWebsiteService(root)

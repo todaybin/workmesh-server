@@ -614,7 +614,11 @@ func handleAppPost(w http.ResponseWriter, s *appStore, path string, body map[str
 			probe.IsExist, probe.IsActive, probe.Status = true, item.Status == "running", item.Status
 			probe.Version = item.Version
 		}
-		data := map[string]any{"name": id, "version": probe.Version, "isExist": probe.IsExist, "isActive": probe.IsActive, "status": probe.Status, "app": probe.App, "appInstallId": item.ID, "containerName": item.Config["containerName"]}
+		containerName := item.Config["containerName"]
+		if containerName == nil && strings.HasPrefix(probe.Binary, "docker://") {
+			containerName = strings.TrimPrefix(probe.Binary, "docker://")
+		}
+		data := map[string]any{"name": id, "version": probe.Version, "isExist": probe.IsExist, "isActive": probe.IsActive, "status": probe.Status, "app": probe.App, "appInstallId": item.ID, "containerName": containerName, "httpPort": 80, "httpsPort": 443, "websiteDir": "/www/wwwroot"}
 		if probe.Error != "" {
 			data["error"] = probe.Error
 		}

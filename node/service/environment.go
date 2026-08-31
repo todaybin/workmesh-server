@@ -75,6 +75,13 @@ func ProbeApplication(ctx context.Context, key, name string) ApplicationStatus {
 		}
 	}
 	if !status.IsExist {
+		// OpenResty 常以独立容器运行，宿主机命名空间可能看不到容器内的 nginx 二进制。
+		// 通过固定参数读取运行中容器清单，避免将容器化安装误报为未安装。
+		if key == "openresty" || key == "nginx" {
+			if container, ok := probeOpenRestyContainer(ctx); ok {
+				return container
+			}
+		}
 		status.Error = fmt.Sprintf("未找到 %s 可执行文件", key)
 		return status
 	}
@@ -119,8 +126,8 @@ func lookupApplicationBinary(name, key string, explicit bool) (string, error) {
 		return "", os.ErrNotExist
 	}
 	candidates := map[string][]string{
-		"openresty": {"/usr/local/openresty/nginx/sbin/nginx", "/usr/local/openresty/bin/openresty", "/usr/sbin/nginx"},
-		"nginx":     {"/usr/local/openresty/nginx/sbin/nginx", "/usr/local/openresty/bin/openresty", "/usr/sbin/nginx"},
+		"openresty": {"/usr/local/openresty/nginx/sbin/nginx", "/usr/local/openresty/bin/openresty", "/www/server/openresty/nginx/sbin/nginx", "/www/server/openresty/bin/openresty", "/www/server/nginx/sbin/nginx", "/usr/local/nginx/sbin/nginx", "/opt/openresty/nginx/sbin/nginx", "/opt/openresty/bin/openresty", "/usr/sbin/nginx"},
+		"nginx":     {"/usr/local/openresty/nginx/sbin/nginx", "/usr/local/openresty/bin/openresty", "/www/server/openresty/nginx/sbin/nginx", "/www/server/openresty/bin/openresty", "/www/server/nginx/sbin/nginx", "/usr/local/nginx/sbin/nginx", "/opt/openresty/nginx/sbin/nginx", "/opt/openresty/bin/openresty", "/usr/sbin/nginx"},
 		"mysql":     {"/usr/sbin/mysqld", "/usr/libexec/mysqld", "/usr/sbin/mariadbd", "/usr/libexec/mariadbd"},
 		"mariadb":   {"/usr/sbin/mariadbd", "/usr/libexec/mariadbd"},
 		"postgres":  {"/usr/lib/postgresql/bin/postgres", "/usr/lib/postgresql/16/bin/postgres", "/usr/lib/postgresql/15/bin/postgres"},
@@ -150,6 +157,53 @@ var applicationDefinitions = map[string]applicationDefinition{
 	"postgres":   {binaries: []string{"postgres", "pg_ctl"}, versionArg: "--version", port: 5432},
 	"postgresql": {binaries: []string{"postgres", "pg_ctl"}, versionArg: "--version", port: 5432},
 	"redis":      {binaries: []string{"redis-server"}, versionArg: "--version", port: 6379},
+}
+
+// probeOpenRestyContainer 识别运行中的 OpenResty/Nginx 容器。
+// 只读取 docker ps 的固定输出，不接受请求参数，不执行容器内命令。
+func probeOpenRestyContainer(ctx context.Context) (ApplicationStatus, bool) {
+	binary := dockerBinary()
+	if binary == "" {
+		return ApplicationStatus{}, false
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(probeCtx, binary, "ps", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}").Output()
+	if err != nil {
+		return ApplicationStatus{}, false
+	}
+	return parseOpenRestyContainerList(string(out))
+}
+
+func parseOpenRestyContainerList(output string) (ApplicationStatus, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.SplitN(strings.TrimSpace(line), "\t", 3)
+		if len(fields) < 2 {
+			continue
+		}
+		name, image := strings.TrimSpace(fields[0]), strings.TrimSpace(fields[1])
+		joined := strings.ToLower(name + " " + image)
+		if !strings.Contains(joined, "openresty") && !strings.Contains(joined, "nginx") {
+			continue
+		}
+		version := containerImageVersion(image)
+		return ApplicationStatus{
+			Name: name, App: "openresty", Version: version, IsExist: true, IsActive: true,
+			Status: "Running", Binary: "docker://" + name,
+		}, true
+	}
+	return ApplicationStatus{}, false
+}
+
+func containerImageVersion(image string) string {
+	image = strings.TrimSpace(image)
+	if at := strings.LastIndex(image, "@"); at >= 0 {
+		return image[at+1:]
+	}
+	if colon := strings.LastIndex(image, ":"); colon >= 0 && colon+1 < len(image) {
+		return image[colon+1:]
+	}
+	return ""
 }
 
 func parseVersionText(output string) string {

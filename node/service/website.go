@@ -845,6 +845,13 @@ func (s *WebsiteService) ProbeOpenResty(ctx context.Context) OpenRestyStatus {
 		}
 	}
 	if bin == "" {
+		if container, ok := probeOpenRestyContainer(ctx); ok {
+			return OpenRestyStatus{
+				Available: true, ConfigValid: true, Enabled: container.IsActive,
+				Version: container.Version, Binary: container.Binary,
+				DefaultHTTPS: cfg.DefaultHTTPS, Modules: append([]model.OpenRestyModule(nil), cfg.Modules...),
+			}
+		}
 		status.Error = "OpenResty binary not found"
 		return status
 	}
