@@ -346,3 +346,17 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | [~] | SSE 断线重放、背压和写入超时 | `apps/workmesh-node/agent/app/api/v2/container.go:ContainerStreamLogs` | `node/api/container_log_stream.go` | `Last-Event-ID` 后重放最多 256 事件，缓存最多 128 流；积压上限 128 KiB，写入超时 10 秒；生产反向代理断线和跨重启行为待 E2E |
 | [x] | OpenResty combined access log 监控聚合 | `apps/workmesh-node/agent/app/service/website.go`、`app/api/v2/website.go` | `node/api/analytics.go:loadAnalyticsEvents` 受限读取并解析访问日志，按日期、状态码、IP、UA 聚合 | `analytics_test.go` 覆盖时间过滤、流量、PV/UV、4xx 和爬虫统计；缺少 GeoIP 时明确返回原始 IP |
 | [x] | 进程监听输出跨 ss/netstat 格式解析 | `apps/workmesh-node/agent/app/service/process.go:GetListeningProcess` | `node/api/process.go:parseListeningOutput` 识别前两个地址字段并限制 1024 条，保留进程元数据 | `process_test.go` 覆盖字段解析和上限；外部命令缺失返回明确 503 |
+
+## 2026-08-31 主机运维与容器镜像隐藏能力
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现 | 完成条件 |
+|---|---|---|---|---|
+| [x] | 主机监控网络/IO 选项和受限实时指标 | `apps/workmesh-node/agent/router/ro_host.go`、`agent/app/service/monitor.go` | `node/api/host_container_cron.go:registerHostOperationalRoutes` 读取网络接口、loadavg、meminfo 和 runtime 指标，响应有界 | `host_container_cron_operational_test.go:TestHostOperationalRoutesExposeLocalState` |
+| [x] | 主机监控设置持久化与清理 | `apps/workmesh-node/agent/app/api/v2/host.go` | `host-operational.json` 原子写入；间隔 1-3600 秒校验，清理记录时间戳 | `host_container_cron_operational_test.go:TestHostMonitorSettingsPersistAndValidate` |
+| [x] | 防火墙和主机工具能力探测 | `apps/workmesh-node/agent/app/api/v2/host_tool.go` | `exec.LookPath` 探测 ufw/firewall-cmd/iptables 及请求指定工具，不伪造规则或安装状态 | `host_container_cron_operational_test.go:TestHostOperationalRoutesExposeLocalState` |
+| [x] | Docker 镜像归档安全导入 | `apps/workmesh-node/agent/router/ro_container.go`、`agent/app/api/v2/container.go` | `POST /api/v2/containers/image/load` 使用固定 argv `docker load -i`，限制绝对路径并拒绝穿越 | `host_container_cron_operational_test.go:TestContainerImageLoadRejectsUnsafeArchivePath` |
+# 2026-08-31 隐藏能力补充
+
+| 功能名称 | 发现入口 | 新实现位置 | 验证 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|
+| 主机连接测试入口在通用 POST 分支之前处理 | `apps/workmesh-node/agent/router/ro_host.go`、`agent/app/api/v2/host.go` | `node/api/hosts.go:hostRequest` | `node/api/hosts_connection_test.go` | implemented | 生产环境需配置受控 SSH 适配器以完成认证级测试 |

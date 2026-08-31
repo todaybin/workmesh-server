@@ -4,9 +4,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -50,6 +52,21 @@ func isHostRoute(pattern string) bool {
 
 func hostRequest(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v2/hosts"), "/")
+	// 连接测试必须在通用 POST 主机变更之前处理，避免被误判为未知写操作。
+	if r.Method == http.MethodPost && (path == "test/byinfo" || path == "test/byid") {
+		host, err := hostForConnectionTest(r, path)
+		if err != nil {
+			wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "INVALID_HOST_TEST"}, "message": err.Error()})
+			return
+		}
+		connected, latency, probeErr := probeHost(host.Address, host.Port)
+		result := map[string]any{"connected": connected, "latency": latency, "address": host.Address, "port": host.Port}
+		if probeErr != nil {
+			result["error"] = probeErr.Error()
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": result})
+		return
+	}
 	if r.Method == http.MethodPost {
 		handleHostMutation(w, r, path)
 		return
@@ -82,6 +99,65 @@ func hostRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "HOST_OPERATION_UNSUPPORTED"}, "message": "主机操作需要专用驱动授权"})
 	}
+}
+
+// hostForConnectionTest 解析连接测试参数；byid 只读取本地已保存记录，不回传凭据。
+func hostForConnectionTest(r *http.Request, path string) (hostRecord, error) {
+	if path == "test/byid" {
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			return hostRecord{}, fmt.Errorf("读取主机测试请求失败: %w", err)
+		}
+		var input struct {
+			ID string `json:"id"`
+		}
+		if len(strings.TrimSpace(string(body))) == 0 || json.Unmarshal(body, &input) != nil || strings.TrimSpace(input.ID) == "" {
+			return hostRecord{}, fmt.Errorf("主机 ID 不能为空")
+		}
+		for _, item := range loadHosts() {
+			if item.ID == strings.TrimSpace(input.ID) {
+				if item.Address == "" || item.Port < 1 || item.Port > 65535 {
+					return hostRecord{}, fmt.Errorf("主机地址或端口无效")
+				}
+				return item, nil
+			}
+		}
+		return hostRecord{}, fmt.Errorf("主机不存在: %s", input.ID)
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		return hostRecord{}, fmt.Errorf("读取主机测试请求失败: %w", err)
+	}
+	var input struct {
+		Address string `json:"address"`
+		Addr    string `json:"addr"`
+		Port    int    `json:"port"`
+	}
+	if len(strings.TrimSpace(string(body))) == 0 || json.Unmarshal(body, &input) != nil {
+		return hostRecord{}, fmt.Errorf("主机测试参数无效")
+	}
+	address := strings.TrimSpace(input.Address)
+	if address == "" {
+		address = strings.TrimSpace(input.Addr)
+	}
+	if address == "" || input.Port < 1 || input.Port > 65535 {
+		return hostRecord{}, fmt.Errorf("主机地址或端口无效")
+	}
+	return hostRecord{Address: address, Port: input.Port}, nil
+}
+
+// probeHost 使用短超时探测 TCP 端口，避免连接测试阻塞 HTTP 工作线程。
+func probeHost(address string, port int) (bool, int64, error) {
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(address, fmt.Sprintf("%d", port)))
+	latency := time.Since(started).Milliseconds()
+	if err != nil {
+		return false, latency, fmt.Errorf("连接 %s:%d 失败: %w", address, port, err)
+	}
+	_ = conn.Close()
+	return true, latency, nil
 }
 
 func hostsPath() string {
