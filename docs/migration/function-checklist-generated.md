@@ -1119,9 +1119,10 @@
 | implemented | POST | `/api/v2/xpack/waf/sites` | apps/workmesh-server/node/api/website.go | unknown | external | present | - |
 | implemented | POST | `/api/v2/xpack/waf/test` | apps/workmesh-server/node/api/website.go | unknown | unknown | present | - |
 
+> 2026-08-31：容器化 OpenResty 探测已补齐。`POST /api/v2/apps/installed/check` 与 `GET /api/v2/openresty/status` 现可识别 Docker 中的 OpenResty/Nginx，并返回容器名、版本及运行状态；主节点已完成线上验证。
+
 ## 国际化完整性批次
 
 | 功能 | 来源 | 新实现 | 覆盖 | 状态 |
 | --- | --- | --- | --- | --- |
 | Core/Agent 后端语言包与前端语言入口 | `apps/workmesh-node/core/i18n`、`apps/workmesh-node/agent/i18n`、旧 frontend | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 12 种语言；后端每种 1037 键；前端键结构和菜单入口通过 `i18n-scan.mjs` | implemented |
-

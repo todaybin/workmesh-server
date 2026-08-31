@@ -367,3 +367,5 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | 功能名称 | 发现入口 | 新实现位置 | 验证 | 当前状态 | 剩余缺口 |
 |---|---|---|---|---|---|
 | 主机连接测试入口在通用 POST 分支之前处理 | `apps/workmesh-node/agent/router/ro_host.go`、`agent/app/api/v2/host.go` | `node/api/hosts.go:hostRequest` | `node/api/hosts_connection_test.go` | implemented | 生产环境需配置受控 SSH 适配器以完成认证级测试 |
+
+| [x] | 容器化 OpenResty 运行时识别 | `apps/workmesh-node/agent/app/service/nginx.go`、`app/api/v2/app_install.go` | `node/service/environment.go:probeOpenRestyContainer`、`node/service/website.go:ProbeOpenResty`；固定参数读取 Docker 运行容器并解析镜像版本和容器名 | 主节点 `WorkMesh-openresty-0WEK` 已验证 `isExist=true`、`status=Running`；未运行容器明确返回未安装/停止 |

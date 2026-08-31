@@ -73,3 +73,11 @@
 - 入口 JavaScript 返回 `text/javascript`，线上入口哈希为 `index-BpgO3KEO.js`，已不再引用旧构建资源。
 - 使用本地登录会话后，通过 `POST /api/v2/workmesh/gateway/login` 完成真实 Gateway 账号绑定，响应 `code=200`、`bound=true`；随后状态查询为 `configured=true`、`registration=registered`、`gatewayUrl=https://work.zoomtk.com`。
 - 未携带本地 Session 直接访问绑定接口仍返回 `401 / LOCAL_AUTH_REQUIRED`，这是绑定接口的安全前置条件；前端现在会自动清理失效状态并跳转本地登录页。
+
+## OpenResty 容器探测修复
+
+- 主节点 OpenResty 实际运行在 Docker 容器 `WorkMesh-openresty-0WEK`（镜像版本 `1.21.4.3-3-3-focal`），宿主机无 `nginx` 命令。
+- 发布提交：`d9ae240`（容器化 OpenResty 探测）。
+- `POST /api/v2/apps/installed/check` 返回 `isExist=true`、`isActive=true`、`status=Running`、`containerName=WorkMesh-openresty-0WEK`、`httpPort=80`、`httpsPort=443`。
+- `GET /api/v2/openresty/status` 返回 `available=true`、`configValid=true`、`binary=docker://WorkMesh-openresty-0WEK`。
+- 网站管理页不再显示“未检测到 OpenResty，请进入应用商店点击安装”。
