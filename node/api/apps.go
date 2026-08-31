@@ -687,25 +687,51 @@ func handleAppPost(w http.ResponseWriter, s *appStore, path string, body map[str
 func handleAppOperation(w http.ResponseWriter, s *appStore, body map[string]any) {
 	id := appValue(body, "installId", "appInstallId", "id")
 	operation := strings.ToLower(appValue(body, "operate", "operation"))
+	if id == "" {
+		runtimeErr(w, http.StatusBadRequest, "应用安装标识不能为空")
+		return
+	}
+	if operation == "" {
+		runtimeErr(w, http.StatusBadRequest, "应用操作不能为空")
+		return
+	}
 	s.mu.Lock()
 	index, item := findApp(s.state.Apps, id)
-	if index >= 0 {
-		switch operation {
-		case "stop", "停止":
-			item.Status = "stopped"
-		case "start", "启动", "restart", "重启":
-			item.Status = "running"
-		case "uninstall", "delete", "卸载":
-			s.state.Apps = append(s.state.Apps[:index], s.state.Apps[index+1:]...)
-		}
-		item.UpdatedAt = time.Now().UTC()
-		if operation != "uninstall" && operation != "delete" && operation != "卸载" {
-			s.state.Apps[index] = item
-		}
+	if index < 0 {
+		s.mu.Unlock()
+		runtimeErr(w, http.StatusNotFound, "应用不存在: "+id)
+		return
 	}
-	_ = s.saveLocked()
+	remove := false
+	switch operation {
+	case "stop", "停止":
+		item.Status = "stopped"
+	case "start", "启动", "restart", "重启":
+		item.Status = "running"
+	case "uninstall", "delete", "卸载":
+		remove = true
+	default:
+		s.mu.Unlock()
+		runtimeErr(w, http.StatusBadRequest, "不支持的应用操作: "+operation)
+		return
+	}
+	item.UpdatedAt = time.Now().UTC()
+	if remove {
+		s.state.Apps = append(s.state.Apps[:index], s.state.Apps[index+1:]...)
+	} else {
+		s.state.Apps[index] = item
+	}
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		runtimeErr(w, http.StatusInternalServerError, "保存应用状态失败: "+err.Error())
+		return
+	}
 	s.mu.Unlock()
-	appOK(w, map[string]any{"id": id, "operate": operation, "status": item.Status, "accepted": true})
+	result := map[string]any{"id": id, "operate": operation, "status": item.Status, "accepted": true}
+	if remove {
+		result["status"] = "uninstalled"
+	}
+	appOK(w, result)
 }
 
 func handleAppUpdate(w http.ResponseWriter, s *appStore, body map[string]any) {

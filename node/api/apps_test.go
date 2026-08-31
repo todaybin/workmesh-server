@@ -89,6 +89,22 @@ func TestAppOperationsAndCatalog(t *testing.T) {
 	}
 }
 
+func TestAppOperationValidatesTargetAndOperation(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	missing := httptest.NewRecorder()
+	mux.ServeHTTP(missing, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/op", strings.NewReader(`{"installId":"missing","operate":"stop"}`)))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing app status=%d body=%s", missing.Code, missing.Body.String())
+	}
+	invalid := httptest.NewRecorder()
+	mux.ServeHTTP(invalid, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/op", strings.NewReader(`{"installId":"missing","operate":"explode"}`)))
+	if invalid.Code != http.StatusNotFound {
+		t.Fatalf("target validation should precede operation validation: %d", invalid.Code)
+	}
+}
+
 func TestAppDerivedDetailsAndDeleteCheck(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
