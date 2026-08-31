@@ -181,15 +181,61 @@ func handleProcessListening(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "LISTENING_COMMAND_UNAVAILABLE"}, "message": "ss 和 netstat 均不可用"})
 		return
 	}
-	lines := strings.Split(string(output), "\n")
-	items := make([]map[string]any, 0)
+	items := parseListeningOutput(string(output))
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": items})
+}
+
+// parseListeningOutput 将 ss/netstat 输出转换为有界 DTO，避免把系统命令原始文本直接暴露给前端。
+func parseListeningOutput(output string) []map[string]any {
+	lines := strings.Split(output, "\n")
+	items := make([]map[string]any, 0, minInt(len(lines), 1024))
 	for _, line := range lines[1:] {
+		if len(items) >= 1024 {
+			break
+		}
 		fields := strings.Fields(line)
-		if len(fields) >= 5 {
-			items = append(items, map[string]any{"protocol": fields[0], "localAddress": fields[3], "remoteAddress": fields[4]})
+		if len(fields) < 4 {
+			continue
+		}
+		addresses := make([]string, 0, 2)
+		addressIndexes := make([]int, 0, 2)
+		for index := 1; index < len(fields) && len(addresses) < 2; index++ {
+			// ss/netstat 的队列长度是纯数字，地址字段通常包含冒号；跳过状态和队列列。
+			if !strings.Contains(fields[index], ":") || isNumericToken(fields[index]) {
+				continue
+			}
+			addresses = append(addresses, fields[index])
+			addressIndexes = append(addressIndexes, index)
+		}
+		if len(addresses) < 2 {
+			continue
+		}
+		item := map[string]any{"protocol": fields[0], "localAddress": addresses[0], "remoteAddress": addresses[1]}
+		if len(fields) > addressIndexes[1]+1 {
+			item["process"] = strings.TrimSpace(strings.Join(fields[addressIndexes[1]+1:], " "))
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func isNumericToken(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, ch := range value {
+		if ch < '0' || ch > '9' {
+			return false
 		}
 	}
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": items})
+	return true
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 func processError(w http.ResponseWriter, status int, err error) {
 	wmhttp.JSON(w, status, map[string]any{"code": "ERR", "message": err.Error()})

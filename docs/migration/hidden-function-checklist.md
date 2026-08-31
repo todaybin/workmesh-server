@@ -16,6 +16,12 @@
 | --- | --- | --- | --- | --- |
 | [x] | 快速跳转数组与应用启动器显示状态持久化 | `apps/workmesh-node/agent/app/service/dashboard.go:ChangeQuick`、`ChangeShow`、`ListLauncherOption` | `node/api/dashboard.go:handleDashboardMutation` 将配置写入 `domains.json`，`dashboardQuickJumps` 在请求和重启后恢复，启动器选项保留隐藏项并返回 `isShow` | 至少一个快速入口可见、最多四个可见；非法 key/status/JSON 拒绝；持久化重载测试通过 |
 
+## 2026-08-31 网站监控访问日志采集
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | Nginx/OpenResty combined access.log 增量统计 | `apps/workmesh-node/agent/app/service/website_monitor.go:collectWebsiteLog`、`Stat`、`QPS`、`Rank` | `node/api/analytics.go:loadAnalyticsEvents`、`analyticsDaily`、`analyticsRank`；路径可配置且单次限制 8 MiB/50000 条 | 无日志返回真实空结果；请求时间范围、状态码、流量、UV、排行均由日志计算；样例日志测试通过 |
+
 ## 2026-08-30 核心认证与执行入口
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
@@ -338,3 +344,5 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | [~] | 容器 `docker exec -it` 终端 | `apps/workmesh-node/agent/app/api/v2/terminal.go:WsContainerTerminal` | `node/api/terminal_stream.go` | 真实 PTY、输入输出、关闭码和闲置超时；需生产 Docker daemon/容器冒烟及信号联调 |
 | [~] | SSH `-tt` 终端与远端窗口调整 | `apps/workmesh-node/agent/app/api/v2/terminal.go:WsHostSSH`、`utils/terminal/ws_session.go` | `node/api/terminal_stream.go` | 使用 BatchMode 与 10 秒连接超时，凭据仅来自 SSH 配置/Agent；远端 WindowChange 需 SSH 库或代理，未伪造成功 |
 | [~] | SSE 断线重放、背压和写入超时 | `apps/workmesh-node/agent/app/api/v2/container.go:ContainerStreamLogs` | `node/api/container_log_stream.go` | `Last-Event-ID` 后重放最多 256 事件，缓存最多 128 流；积压上限 128 KiB，写入超时 10 秒；生产反向代理断线和跨重启行为待 E2E |
+| [x] | OpenResty combined access log 监控聚合 | `apps/workmesh-node/agent/app/service/website.go`、`app/api/v2/website.go` | `node/api/analytics.go:loadAnalyticsEvents` 受限读取并解析访问日志，按日期、状态码、IP、UA 聚合 | `analytics_test.go` 覆盖时间过滤、流量、PV/UV、4xx 和爬虫统计；缺少 GeoIP 时明确返回原始 IP |
+| [x] | 进程监听输出跨 ss/netstat 格式解析 | `apps/workmesh-node/agent/app/service/process.go:GetListeningProcess` | `node/api/process.go:parseListeningOutput` 识别前两个地址字段并限制 1024 条，保留进程元数据 | `process_test.go` 覆盖字段解析和上限；外部命令缺失返回明确 503 |
