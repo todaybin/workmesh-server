@@ -6,6 +6,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -89,6 +90,77 @@ func TestBackupBucketsUsesConfiguredProviderEndpoint(t *testing.T) {
 	mux.ServeHTTP(buckets, httptest.NewRequest(http.MethodPost, "/api/v2/backups/buckets", strings.NewReader(`{"type":"s3","name":"provider"}`)))
 	if buckets.Code != http.StatusOK || !strings.Contains(buckets.Body.String(), `"primary"`) || !strings.Contains(buckets.Body.String(), `"archive"`) {
 		t.Fatalf("provider buckets=%d %s", buckets.Code, buckets.Body.String())
+	}
+}
+
+func TestBackupCloudUploadAndDeleteUseProvider(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	var uploaded, deleted bool
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/upload":
+			if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer token" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if err := r.ParseMultipartForm(8 << 20); err != nil || r.FormValue("path") != "snapshot.txt" {
+				http.Error(w, "invalid upload", http.StatusBadRequest)
+				return
+			}
+			file, _, err := r.FormFile("file")
+			if err != nil {
+				http.Error(w, "missing file", http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+			body, _ := io.ReadAll(file)
+			uploaded = string(body) == "cloud-content"
+		case "/delete":
+			var body struct {
+				Path string `json:"path"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			deleted = r.Method == http.MethodPost && body.Path == "snapshot.txt"
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+	mux := http.NewServeMux()
+	registerBackupAlertLogSettingsRoutes(mux)
+	vars := `{"upload_url":"` + provider.URL + `/upload","delete_url":"` + provider.URL + `/delete","access_token":"token"}`
+	create := httptest.NewRecorder()
+	mux.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/v2/backups", strings.NewReader(`{"name":"cloud","type":"s3","vars":`+strconv.Quote(vars)+`}`)))
+	if create.Code != http.StatusOK {
+		t.Fatalf("account=%d %s", create.Code, create.Body.String())
+	}
+	var account struct {
+		Data backupAccount `json:"data"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &account); err != nil || account.Data.ID == "" {
+		t.Fatalf("account response=%s err=%v", create.Body.String(), err)
+	}
+	source := filepath.Join(dataDir, "snapshot.txt")
+	if err := os.WriteFile(source, []byte("cloud-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"name":"snapshot","source":` + strconv.Quote(source) + `,"downloadAccountID":` + strconv.Quote(account.Data.ID) + `}`
+	record := httptest.NewRecorder()
+	mux.ServeHTTP(record, httptest.NewRequest(http.MethodPost, "/api/v2/backups/backup", strings.NewReader(payload)))
+	if record.Code != http.StatusOK || !uploaded {
+		t.Fatalf("backup=%d uploaded=%v body=%s", record.Code, uploaded, record.Body.String())
+	}
+	var created struct {
+		Data backupItem `json:"data"`
+	}
+	if err := json.Unmarshal(record.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	remove := httptest.NewRecorder()
+	mux.ServeHTTP(remove, httptest.NewRequest(http.MethodPost, "/api/v2/backups/record/del", strings.NewReader(`{"id":`+strconv.Quote(created.Data.ID)+`}`)))
+	if remove.Code != http.StatusOK || !deleted {
+		t.Fatalf("delete=%d deleted=%v body=%s", remove.Code, deleted, remove.Body.String())
 	}
 }
 

@@ -148,7 +148,8 @@
 | [x] | 记录大小、下载路径和受控文件清单 | `handleBackupRecordSize`、`handleBackupRecordDownload`、`handleBackupFiles` | 记录源文件复制后大小与路径断言 |
 | [x] | 本地文件上传、恢复和上传后恢复 | `handleBackupUpload`、`handleBackupRecover` | `TestBackupUploadAndConnectionChecks`、`TestBackupAccountAndRecordLifecycle` |
 | [x] | 备份连接检查和本地 Bucket 查询 | `handleBackupConnCheck`、`handleBackupBuckets` | 本地目录真实读取；未配置云端时返回 `BACKUP_PROVIDER_UNAVAILABLE`，不伪造空列表 |
-| [~] | 云端 OAuth token 刷新和远端 Bucket 操作 | `handleBackupRefreshToken`、备份提供商服务 | 配置 `vars.refresh_url` 时执行标准 OAuth refresh_token 请求并持久化新令牌；各云厂商 Bucket SDK 仍需按凭据接入 |
+| [x] | 云端 OAuth token 刷新和远端 Bucket 操作 | `handleBackupRefreshTokenV2`、`handleBackupBucketsV2`、`node/service/backup_provider.go` | 显式端点执行 OAuth refresh_token、Bucket 查询、multipart 上传和 JSON 删除；Bearer/API Key 脱敏、15 秒/30 分钟超时、3 次有限重试；账号 Vars 原子持久化 | `node/service/backup_provider_test.go`、`node/api/functional_domains_test.go:TestBackupCloudUploadAndDeleteUseProvider`；未配置端点返回明确 503 |
+| [x] | SSL 自动续期失败重试与状态报告 | `apps/workmesh-node/agent/cron/job/website.go`、`ssl.go` | `node/service/website_security.go:RenewDueCertificates` 对到期 self-signed 证书执行最多 3 次指数退避，记录 `Retries` 和失败上下文；无 ACME 凭据不伪造成功 | `node/service/ssl_test.go:TestWebsiteSecurityRenewRetriesAndReportsFailure` |
 
 ### 2026-08-30 隐藏路由批次
 

@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -65,6 +66,7 @@ type backupItem struct {
 	AccountType       string    `json:"accountType,omitempty"`
 	AccountName       string    `json:"accountName,omitempty"`
 	DownloadAccountID string    `json:"downloadAccountID,omitempty"`
+	SourceAccountIDs  string    `json:"sourceAccountIDs,omitempty"`
 	CronjobID         string    `json:"cronjobID,omitempty"`
 	TaskID            string    `json:"taskID,omitempty"`
 	Size              int64     `json:"size"`
@@ -88,6 +90,21 @@ type backupAccount struct {
 	RememberAuth bool      `json:"rememberAuth"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+// configuredBackupProvider 从账号配置构造云端 Provider；所有云端写操作必须经过此入口。
+func configuredBackupProvider(account backupAccount) (*service.HTTPBackupProvider, map[string]any, error) {
+	vars := map[string]any{}
+	if strings.TrimSpace(account.Vars) != "" {
+		if err := json.Unmarshal([]byte(account.Vars), &vars); err != nil {
+			return nil, nil, fmt.Errorf("备份账号 Vars 无效: %w", err)
+		}
+	}
+	provider, err := service.NewHTTPBackupProvider(account.Type, vars, account.AccessKey, account.Credential)
+	if err != nil {
+		return nil, vars, err
+	}
+	return provider, vars, nil
 }
 
 type alertItem struct {
@@ -332,10 +349,10 @@ func registerBackupRoutes(mux *http.ServeMux, s *domainStore) {
 	mux.HandleFunc("POST /api/v2/backups/recover", func(w http.ResponseWriter, r *http.Request) { handleBackupRecover(w, r, s, false) })
 	mux.HandleFunc("POST /api/v2/backups/recover/byupload", func(w http.ResponseWriter, r *http.Request) { handleBackupRecover(w, r, s, true) })
 	mux.HandleFunc("POST /api/v2/backups/upload", func(w http.ResponseWriter, r *http.Request) { handleBackupUpload(w, r, s) })
-	mux.HandleFunc("POST /api/v2/backups/buckets", func(w http.ResponseWriter, r *http.Request) { handleBackupBuckets(w, r, s) })
-	mux.HandleFunc("POST /api/v2/backups/conn/check", func(w http.ResponseWriter, r *http.Request) { handleBackupConnCheck(w, r, s) })
-	mux.HandleFunc("POST /api/v2/backups/refresh/token", func(w http.ResponseWriter, r *http.Request) { handleBackupRefreshToken(w, r, s) })
-	mux.HandleFunc("POST /api/v2/core/backups/refresh/token", func(w http.ResponseWriter, r *http.Request) { handleBackupRefreshToken(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/buckets", func(w http.ResponseWriter, r *http.Request) { handleBackupBucketsV2(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/conn/check", func(w http.ResponseWriter, r *http.Request) { handleBackupConnCheckV2(w, r, s) })
+	mux.HandleFunc("POST /api/v2/backups/refresh/token", func(w http.ResponseWriter, r *http.Request) { handleBackupRefreshTokenV2(w, r, s) })
+	mux.HandleFunc("POST /api/v2/core/backups/refresh/token", func(w http.ResponseWriter, r *http.Request) { handleBackupRefreshTokenV2(w, r, s) })
 }
 
 func backupDataDir() string {
@@ -561,7 +578,7 @@ func handleBackupCreateRecord(w http.ResponseWriter, r *http.Request, s *domainS
 		name = "backup-" + time.Now().UTC().Format("20060102-150405")
 	}
 	source := valueString(v, "source", "path", "filePath")
-	item := backupItem{ID: idToken(), Type: valueString(v, "type"), Name: name, DetailName: valueString(v, "detailName"), Status: "completed", Description: valueString(v, "description"), TaskID: valueString(v, "taskID", "taskId"), CronjobID: valueID(v, "cronjobID", "cronJobID"), DownloadAccountID: valueID(v, "downloadAccountID"), CreatedAt: time.Now().UTC()}
+	item := backupItem{ID: idToken(), Type: valueString(v, "type"), Name: name, DetailName: valueString(v, "detailName"), Status: "completed", Description: valueString(v, "description"), TaskID: valueString(v, "taskID", "taskId"), CronjobID: valueID(v, "cronjobID", "cronJobID"), DownloadAccountID: valueID(v, "downloadAccountID", "downloadAccountId"), SourceAccountIDs: strings.Join(valueIDs(v, "sourceAccountIDs", "sourceAccountIds", "accountIDs", "accountIds"), ","), CreatedAt: time.Now().UTC()}
 	if source != "" {
 		info, statErr := os.Stat(source)
 		if statErr != nil {
@@ -582,8 +599,22 @@ func handleBackupCreateRecord(w http.ResponseWriter, r *http.Request, s *domainS
 			domainError(w, 500, "BACKUP_COPY", err.Error())
 			return
 		}
-		item.Path, item.FileDir, item.FileName = target, filepath.Dir(target), filepath.Base(target)
+		item.Path, item.FileDir = target, filepath.Dir(target)
+		// 远端备份对象沿用源文件名，避免用户显示名称（例如“snapshot”）丢失扩展名。
+		item.FileName = filepath.Base(source)
 		item.Size = backupPathSize(target)
+	}
+	if source != "" {
+		if err := uploadBackupRemote(r.Context(), s, &item, v); err != nil {
+			item.Status = "failed"
+			item.Message = err.Error()
+			s.mu.Lock()
+			s.state.Backups = append(s.state.Backups, item)
+			_ = s.saveLocked()
+			s.mu.Unlock()
+			domainError(w, http.StatusBadGateway, "BACKUP_PROVIDER_UPLOAD", err.Error())
+			return
+		}
 	}
 	s.mu.Lock()
 	s.state.Backups = append(s.state.Backups, item)
@@ -594,6 +625,50 @@ func handleBackupCreateRecord(w http.ResponseWriter, r *http.Request, s *domainS
 		return
 	}
 	success(w, item)
+}
+
+// uploadBackupRemote 将本地快照上传到账号声明的云端端点；未声明写端点时保持本地备份模式。
+func uploadBackupRemote(ctx context.Context, s *domainStore, item *backupItem, values map[string]any) error {
+	if item == nil || item.Path == "" {
+		return nil
+	}
+	ids := valueIDs(values, "sourceAccountIDs", "sourceAccountIds", "accountIDs", "accountIds")
+	if len(ids) == 0 {
+		if id := valueID(values, "downloadAccountID", "downloadAccountId"); id != "" {
+			ids = []string{id}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	s.mu.RLock()
+	accounts := append([]backupAccount(nil), s.state.BackupAccounts...)
+	s.mu.RUnlock()
+	for _, id := range ids {
+		account := findBackupAccount(accounts, id, "")
+		if account == nil {
+			return fmt.Errorf("云备份账号 %s 不存在", id)
+		}
+		vars := map[string]any{}
+		if strings.TrimSpace(account.Vars) != "" {
+			if err := json.Unmarshal([]byte(account.Vars), &vars); err != nil {
+				return fmt.Errorf("云备份账号 %s Vars 无效: %w", account.Name, err)
+			}
+		}
+		if valueString(vars, "upload_url", "upload_endpoint") == "" {
+			continue
+		}
+		provider, _, err := configuredBackupProvider(*account)
+		if err != nil {
+			return fmt.Errorf("初始化云备份账号 %s 失败: %w", account.Name, err)
+		}
+		target := filepath.Join(account.BackupPath, item.FileName)
+		if err := provider.Upload(ctx, item.Path, target); err != nil {
+			return fmt.Errorf("上传到云备份账号 %s 失败: %w", account.Name, err)
+		}
+		item.AccountType, item.AccountName = account.Type, account.Name
+	}
+	return nil
 }
 
 func handleBackupRecordSearch(w http.ResponseWriter, r *http.Request, s *domainStore, mode string) {
@@ -671,9 +746,9 @@ func handleBackupRecordDelete(w http.ResponseWriter, r *http.Request, s *domainS
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	kept := s.state.Backups[:0]
 	removed := 0
+	removedItems := make([]backupItem, 0)
 	for _, item := range s.state.Backups {
 		found := false
 		for _, id := range ids {
@@ -684,6 +759,7 @@ func handleBackupRecordDelete(w http.ResponseWriter, r *http.Request, s *domainS
 		}
 		if found {
 			removed++
+			removedItems = append(removedItems, item)
 			if isWithin(item.Path, backupDataDir()) {
 				_ = os.RemoveAll(item.Path)
 			}
@@ -692,34 +768,88 @@ func handleBackupRecordDelete(w http.ResponseWriter, r *http.Request, s *domainS
 		kept = append(kept, item)
 	}
 	if removed == 0 {
+		s.mu.Unlock()
 		domainError(w, 404, "NOT_FOUND", "备份记录不存在")
 		return
 	}
 	s.state.Backups = kept
 	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
 		domainError(w, 500, "STATE_SAVE", err.Error())
+		return
+	}
+	accounts := append([]backupAccount(nil), s.state.BackupAccounts...)
+	s.mu.Unlock()
+	if err := deleteBackupRemote(r.Context(), accounts, removedItems); err != nil {
+		domainError(w, http.StatusBadGateway, "BACKUP_PROVIDER_DELETE", err.Error())
 		return
 	}
 	success(w, map[string]any{"deleted": removed})
 }
 
-func valueIDs(v map[string]any, key string) []string {
+func valueIDs(v map[string]any, keys ...string) []string {
 	var out []string
-	switch values := v[key].(type) {
-	case []any:
-		for _, value := range values {
-			out = append(out, valueID(map[string]any{"id": value}, "id"))
+	for _, key := range keys {
+		values, exists := v[key]
+		if !exists {
+			continue
 		}
-	case []string:
-		out = append(out, values...)
-	case string:
-		for _, value := range strings.Split(values, ",") {
-			if strings.TrimSpace(value) != "" {
-				out = append(out, strings.TrimSpace(value))
+		switch values := values.(type) {
+		case []any:
+			for _, value := range values {
+				out = append(out, valueID(map[string]any{"id": value}, "id"))
+			}
+		case []string:
+			out = append(out, values...)
+		case string:
+			for _, value := range strings.Split(values, ",") {
+				if strings.TrimSpace(value) != "" {
+					out = append(out, strings.TrimSpace(value))
+				}
 			}
 		}
 	}
 	return out
+}
+
+// deleteBackupRemote 删除记录关联的云端对象；未声明删除端点时不执行远端副作用。
+func deleteBackupRemote(ctx context.Context, accounts []backupAccount, records []backupItem) error {
+	for _, record := range records {
+		if record.Path == "" {
+			continue
+		}
+		ids := valueIDs(map[string]any{"ids": record.SourceAccountIDs}, "ids")
+		if len(ids) == 0 {
+			ids = []string{record.DownloadAccountID}
+		}
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+			account := findBackupAccount(accounts, id, "")
+			if account == nil {
+				return fmt.Errorf("云备份账号 %s 不存在", id)
+			}
+			vars := map[string]any{}
+			if strings.TrimSpace(account.Vars) != "" {
+				if err := json.Unmarshal([]byte(account.Vars), &vars); err != nil {
+					return fmt.Errorf("云备份账号 %s Vars 无效: %w", account.Name, err)
+				}
+			}
+			if valueString(vars, "delete_url", "delete_endpoint") == "" {
+				continue
+			}
+			provider, _, err := configuredBackupProvider(*account)
+			if err != nil {
+				return fmt.Errorf("初始化云备份账号 %s 失败: %w", account.Name, err)
+			}
+			target := filepath.Join(account.BackupPath, record.FileName)
+			if err := provider.Delete(ctx, target); err != nil {
+				return fmt.Errorf("删除云备份账号 %s 对象失败: %w", account.Name, err)
+			}
+		}
+	}
+	return nil
 }
 
 func handleBackupRecordDescription(w http.ResponseWriter, r *http.Request, s *domainStore) {
@@ -977,6 +1107,136 @@ func handleBackupBuckets(w http.ResponseWriter, r *http.Request, s *domainStore)
 	success(w, items)
 }
 
+// handleBackupBucketsV2 通过统一 Provider 获取云端 Bucket，失败时返回明确错误。
+func handleBackupBucketsV2(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+		return
+	}
+	typ := strings.ToLower(valueString(v, "type"))
+	if typ == "local" || typ == "" {
+		handleBackupBuckets(w, r, s)
+		return
+	}
+	id, name := valueID(v, "id", "accountId"), valueString(v, "name", "accountName")
+	s.mu.RLock()
+	account := findBackupAccount(s.state.BackupAccounts, id, name)
+	if account == nil {
+		s.mu.RUnlock()
+		if id == "" && name == "" {
+			domainError(w, http.StatusServiceUnavailable, "BACKUP_PROVIDER_UNAVAILABLE", "备份账号未配置 Bucket 查询端点")
+			return
+		}
+		domainError(w, http.StatusNotFound, "NOT_FOUND", "备份账号不存在")
+		return
+	}
+	accountCopy := *account
+	s.mu.RUnlock()
+	provider, _, err := configuredBackupProvider(accountCopy)
+	if err != nil {
+		domainError(w, http.StatusServiceUnavailable, "BACKUP_PROVIDER_UNAVAILABLE", err.Error())
+		return
+	}
+	buckets, err := provider.ListBuckets(r.Context())
+	if err != nil {
+		domainError(w, http.StatusBadGateway, "BACKUP_PROVIDER_FAILED", err.Error())
+		return
+	}
+	items := make([]map[string]any, 0, len(buckets))
+	for _, bucket := range buckets {
+		item := map[string]any{"name": bucket.Name, "type": typ}
+		if bucket.Region != "" {
+			item["region"] = bucket.Region
+		}
+		items = append(items, item)
+	}
+	success(w, items)
+}
+
+// handleBackupRefreshTokenV2 通过统一 Provider 刷新 OAuth，并原子保存新令牌。
+func handleBackupRefreshTokenV2(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+		return
+	}
+	id, name := valueID(v, "id", "accountId"), valueString(v, "name")
+	s.mu.Lock()
+	index := -1
+	for i := range s.state.BackupAccounts {
+		if (id != "" && s.state.BackupAccounts[i].ID == id) || (name != "" && strings.EqualFold(s.state.BackupAccounts[i].Name, name)) {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		s.mu.Unlock()
+		domainError(w, http.StatusNotFound, "NOT_FOUND", "备份账号不存在")
+		return
+	}
+	account := s.state.BackupAccounts[index]
+	provider, vars, providerErr := configuredBackupProvider(account)
+	refreshToken := valueString(v, "refreshToken", "token")
+	if refreshToken == "" {
+		refreshToken = valueString(vars, "refresh_token")
+	}
+	if providerErr != nil || refreshToken == "" {
+		s.mu.Unlock()
+		if providerErr != nil {
+			domainError(w, http.StatusServiceUnavailable, "TOKEN_REFRESH_UNAVAILABLE", providerErr.Error())
+		} else {
+			domainError(w, http.StatusServiceUnavailable, "TOKEN_REFRESH_UNAVAILABLE", "缺少 OAuth refresh_token")
+		}
+		return
+	}
+	s.mu.Unlock()
+	result, err := provider.RefreshToken(r.Context(), refreshToken)
+	if err != nil {
+		domainError(w, http.StatusBadGateway, "TOKEN_REFRESH_FAILED", err.Error())
+		return
+	}
+	vars["access_token"] = result.AccessToken
+	if result.RefreshToken != "" {
+		vars["refresh_token"] = result.RefreshToken
+	}
+	if result.TokenType != "" {
+		vars["token_type"] = result.TokenType
+	}
+	if result.ExpiresIn > 0 {
+		vars["expires_in"] = result.ExpiresIn
+	}
+	vars["refresh_status"], vars["refresh_time"] = "success", time.Now().UTC().Format(time.RFC3339)
+	encoded, marshalErr := json.Marshal(vars)
+	if marshalErr != nil {
+		domainError(w, http.StatusInternalServerError, "STATE_SAVE", marshalErr.Error())
+		return
+	}
+	s.mu.Lock()
+	index = -1
+	for i := range s.state.BackupAccounts {
+		if s.state.BackupAccounts[i].ID == account.ID {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		s.mu.Unlock()
+		domainError(w, http.StatusNotFound, "NOT_FOUND", "备份账号已被删除")
+		return
+	}
+	s.state.BackupAccounts[index].Vars = string(encoded)
+	s.state.BackupAccounts[index].UpdatedAt = time.Now().UTC()
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		domainError(w, http.StatusInternalServerError, "STATE_SAVE", err.Error())
+		return
+	}
+	updated := s.state.BackupAccounts[index].ID
+	s.mu.Unlock()
+	success(w, map[string]any{"updated": true, "id": updated, "status": "success"})
+}
+
 // normalizeBuckets 将常见云厂商列表响应转换为统一 DTO；不接受无限制嵌套结构。
 func normalizeBuckets(payload any, typ string) []map[string]any {
 	var raw []any
@@ -1017,6 +1277,36 @@ func normalizeBuckets(payload any, typ string) []map[string]any {
 		items = append(items, item)
 	}
 	return items
+}
+
+// handleBackupConnCheckV2 对云端账号执行真实 HTTP 连通性检查，本地账号保留目录检查。
+func handleBackupConnCheckV2(w http.ResponseWriter, r *http.Request, s *domainStore) {
+	v, err := requestMap(r)
+	if err != nil {
+		domainError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+		return
+	}
+	item := backupRequestAccount(v)
+	if item.Type == "local" {
+		path := item.BackupPath
+		if path == "" {
+			path = backupDataDir()
+		}
+		err := os.MkdirAll(path, 0o750)
+		success(w, map[string]any{"isOk": err == nil, "msg": errorMessage(err), "token": ""})
+		return
+	}
+	if item.Type == "" {
+		domainError(w, http.StatusBadRequest, "INVALID_ACCOUNT", "备份类型不能为空")
+		return
+	}
+	provider, _, providerErr := configuredBackupProvider(item)
+	if providerErr != nil {
+		success(w, map[string]any{"isOk": false, "msg": providerErr.Error(), "token": ""})
+		return
+	}
+	checkErr := provider.Check(r.Context())
+	success(w, map[string]any{"isOk": checkErr == nil, "msg": errorMessage(checkErr), "token": ""})
 }
 
 func handleBackupConnCheck(w http.ResponseWriter, r *http.Request, s *domainStore) {

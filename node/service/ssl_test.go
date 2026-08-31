@@ -124,3 +124,12 @@ func TestWebsiteSecurityRenewsDueSelfSignedCertificate(t *testing.T) {
 		t.Fatalf("证书未更新: %+v, %v", renewed, err)
 	}
 }
+
+func TestWebsiteSecurityRenewRetriesAndReportsFailure(t *testing.T) {
+	security := NewWebsiteSecurityService(t.TempDir())
+	security.ssls = []WebsiteCASignedSSL{{ID: 99, CAID: 404, Type: "self-signed", AutoRenew: true, ExpireDate: time.Now().Add(24 * time.Hour)}}
+	report := security.RenewDueCertificates(context.Background(), 30*24*time.Hour)
+	if report.Checked != 1 || report.Renewed != 0 || report.Retries != 2 || len(report.Failed) != 1 {
+		t.Fatalf("续期失败重试统计异常: %+v", report)
+	}
+}

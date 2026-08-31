@@ -96,6 +96,7 @@ type WebsiteSecurityService struct {
 type CertificateRenewalReport struct {
 	Checked int      `json:"checked"`
 	Renewed int      `json:"renewed"`
+	Retries int      `json:"retries,omitempty"`
 	Failed  []string `json:"failed,omitempty"`
 }
 
@@ -495,6 +496,9 @@ func (s *WebsiteSecurityService) RenewCA(id uint) (WebsiteCASignedSSL, error) {
 // ACME 证书的云端签发需要账户授权和挑战环境，由显式 API 异步处理；后台扫描
 // 只处理本服务可安全完成的 self-signed 证书，避免在无凭据时伪造续期成功。
 func (s *WebsiteSecurityService) RenewDueCertificates(ctx context.Context, horizon time.Duration) CertificateRenewalReport {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if horizon <= 0 || horizon > 90*24*time.Hour {
 		horizon = 30 * 24 * time.Hour
 	}
@@ -517,8 +521,27 @@ func (s *WebsiteSecurityService) RenewDueCertificates(ctx context.Context, horiz
 			default:
 			}
 		}
-		if _, err := s.RenewCA(id); err != nil {
-			report.Failed = append(report.Failed, fmt.Sprintf("%d: %v", id, err))
+		var renewErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			if attempt > 0 {
+				report.Retries++
+				renewErr = nil
+				select {
+				case <-ctx.Done():
+					renewErr = ctx.Err()
+				case <-time.After(time.Duration(1<<uint(attempt-1)) * 100 * time.Millisecond):
+				}
+				if renewErr != nil {
+					break
+				}
+			}
+			_, renewErr = s.RenewCA(id)
+			if renewErr == nil {
+				break
+			}
+		}
+		if renewErr != nil {
+			report.Failed = append(report.Failed, fmt.Sprintf("%d: %v", id, renewErr))
 			continue
 		}
 		report.Renewed++
