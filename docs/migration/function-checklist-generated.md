@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-31T01:07:02.053Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-31T02:00:52.094Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -188,7 +188,7 @@
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/api/v2/core/auth/captcha` | apps/workmesh-server/node/api/legacy_routes.go | public | memory | missing | - |
-| implemented | GET | `/api/v2/core/auth/current` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | - |
+| implemented | GET | `/api/v2/core/auth/current` | apps/workmesh-server/node/api/router.go | required | unknown | present | - |
 | implemented | GET | `/api/v2/core/auth/passkey/list` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | GET | `/api/v2/core/auth/setting` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | - |
 | implemented | GET | `/api/v2/core/auth/welcome` | apps/workmesh-server/node/api/legacy_routes.go | public | memory | missing | - |
@@ -196,8 +196,8 @@
 | implemented | POST | `/api/v2/core/auth/api/update` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/auth/current/update` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/auth/expired/reset` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
-| implemented | POST | `/api/v2/core/auth/login` | apps/workmesh-server/node/api/legacy_routes.go | public | memory | missing | - |
-| implemented | POST | `/api/v2/core/auth/logout` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | - |
+| implemented | POST | `/api/v2/core/auth/login` | apps/workmesh-server/node/api/router.go | public | memory | present | - |
+| implemented | POST | `/api/v2/core/auth/logout` | apps/workmesh-server/node/api/router.go | required | unknown | present | - |
 | implemented | POST | `/api/v2/core/auth/mfa` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/auth/mfa/bind` | apps/workmesh-server/node/api/core_handlers.go | required | memory | present | - |
 | implemented | POST | `/api/v2/core/auth/mfa/close` | apps/workmesh-server/node/api/core_handlers.go | required | external | present | - |
@@ -377,17 +377,17 @@
 
 | 状态 | 方法 | 路径 | 新实现 | 认证 | 持久化 | 测试 | 缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| implemented | GET | `/api/v2/dashboard/app/launcher` | apps/workmesh-server/node/api/legacy_routes.go | required | external | missing | - |
+| implemented | GET | `/api/v2/dashboard/app/launcher` | apps/workmesh-server/node/api/router.go | required | unknown | present | - |
 | implemented | GET | `/api/v2/dashboard/base/:ioOption/:netOption` | apps/workmesh-server/node/api/host_container_cron.go | required | external | missing | - |
-| implemented | GET | `/api/v2/dashboard/base/os` | apps/workmesh-server/node/api/legacy_routes.go | required | external | missing | - |
+| implemented | GET | `/api/v2/dashboard/base/os` | apps/workmesh-server/node/api/router.go | required | unknown | present | - |
 | implemented | GET | `/api/v2/dashboard/current/:ioOption/:netOption` | apps/workmesh-server/node/api/host_container_cron.go | required | external | missing | - |
-| implemented | GET | `/api/v2/dashboard/current/node` | apps/workmesh-server/node/api/legacy_routes.go | required | external | missing | - |
-| implemented | GET | `/api/v2/dashboard/current/top/cpu` | apps/workmesh-server/node/api/legacy_routes.go | required | external | missing | - |
-| implemented | GET | `/api/v2/dashboard/current/top/mem` | apps/workmesh-server/node/api/legacy_routes.go | required | external | missing | - |
-| implemented | GET | `/api/v2/dashboard/quick/option` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/dashboard/app/launcher/option` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/dashboard/app/launcher/show` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | - |
-| implemented | POST | `/api/v2/dashboard/quick/change` | apps/workmesh-server/node/api/legacy_routes.go | required | memory | missing | - |
+| implemented | GET | `/api/v2/dashboard/current/node` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |
+| implemented | GET | `/api/v2/dashboard/current/top/cpu` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |
+| implemented | GET | `/api/v2/dashboard/current/top/mem` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |
+| implemented | GET | `/api/v2/dashboard/quick/option` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |
+| implemented | POST | `/api/v2/dashboard/app/launcher/option` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |
+| implemented | POST | `/api/v2/dashboard/app/launcher/show` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |
+| implemented | POST | `/api/v2/dashboard/quick/change` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |
 | implemented | POST | `/api/v2/dashboard/system/restart/:operation` | apps/workmesh-server/node/api/host_container_cron.go | unknown | memory | missing | - |
 
 ## databases
@@ -1124,3 +1124,4 @@
 | 功能 | 来源 | 新实现 | 覆盖 | 状态 |
 | --- | --- | --- | --- | --- |
 | Core/Agent 后端语言包与前端语言入口 | `apps/workmesh-node/core/i18n`、`apps/workmesh-node/agent/i18n`、旧 frontend | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 12 种语言；后端每种 1037 键；前端键结构和菜单入口通过 `i18n-scan.mjs` | implemented |
+
