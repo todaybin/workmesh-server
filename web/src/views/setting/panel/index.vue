@@ -217,6 +217,7 @@
 
 <script lang="ts" setup>
 import { ref, reactive, computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElForm, ElMessageBox } from 'element-plus';
 import { getSettingInfo, updateSetting, getSystemAvailable, getAgentSettingInfo } from '@/api/modules/setting';
 import { useGlobalStore } from '@/composables/useGlobalStore';
@@ -256,6 +257,7 @@ const {
     watermark,
     watermarkShow,
 } = useGlobalStore();
+const router = useRouter();
 
 const loading = ref(false);
 const gatewayStatus = reactive<WorkMeshGatewayStatus>({
@@ -442,6 +444,13 @@ const bindGateway = async () => {
         MsgSuccess('Gateway 账号绑定成功');
         window.location.reload();
     } catch (error: any) {
+        if (error?.response?.status === 401 || error?.response?.data?.details?.errCode === 'LOCAL_AUTH_REQUIRED') {
+            MsgError('本地登录会话已失效，请重新登录');
+            globalStore.setLogStatus(false);
+            globalStore.clearAuthInfo();
+            await router.replace({ name: 'login' });
+            return;
+        }
         MsgError(error?.message || 'Gateway 账号绑定失败');
     } finally {
         gatewayBinding.value = false;

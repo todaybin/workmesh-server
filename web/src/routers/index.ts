@@ -18,6 +18,10 @@ const clearLoginStatus = () => {
     globalStore.clearAuthInfo();
 };
 
+// 服务重启后本地会话可能失效；识别统一错误码，避免把用户误导到 Gateway 绑定页。
+const isLocalAuthRequired = (error: any) =>
+    error?.response?.status === 401 || error?.response?.data?.details?.errCode === 'LOCAL_AUTH_REQUIRED';
+
 router.beforeEach(async (to, from) => {
     const { entrance, isLogin } = useGlobalStore();
     NProgress.start();
@@ -44,7 +48,12 @@ router.beforeEach(async (to, from) => {
             const gatewayStatus = await getWorkMeshGatewayStatus();
             bindingRequired = gatewayStatus.data.bindingRequired !== false;
             gatewayConfigured = !bindingRequired || !!gatewayStatus.data.configured;
-        } catch {
+        } catch (error) {
+            if (isLocalAuthRequired(error)) {
+                clearLoginStatus();
+                NProgress.done();
+                return { name: 'login' };
+            }
             gatewayConfigured = false;
         }
     }

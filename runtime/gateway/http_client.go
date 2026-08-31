@@ -75,6 +75,8 @@ func (c *HTTPClient) Login(ctx context.Context, request LoginRequest) (Authoriza
 func (c *HTTPClient) Register(ctx context.Context, request RegisterRequest) (Authorization, error) {
 	var response struct {
 		BindingID   string   `json:"bindingId"`
+		NodeID      string   `json:"nodeId"`
+		ID          string   `json:"id"`
 		AccessToken string   `json:"token"`
 		ExpiresAt   string   `json:"expiresAt"`
 		Refreshable bool     `json:"refreshable"`
@@ -82,6 +84,7 @@ func (c *HTTPClient) Register(ctx context.Context, request RegisterRequest) (Aut
 		Item        struct {
 			BindingID string `json:"bindingId"`
 			NodeID    string `json:"nodeId"`
+			ID        string `json:"id"`
 		} `json:"item"`
 	}
 	c.NodeID = strings.TrimSpace(request.NodeID)
@@ -95,6 +98,16 @@ func (c *HTTPClient) Register(ctx context.Context, request RegisterRequest) (Aut
 	}
 	if response.BindingID == "" {
 		response.BindingID = response.Item.NodeID
+	}
+	if response.BindingID == "" {
+		// 第三方网关节点视图使用 item.id 承载稳定 runner_key。
+		response.BindingID = response.Item.ID
+	}
+	if response.BindingID == "" {
+		response.BindingID = response.NodeID
+	}
+	if response.BindingID == "" {
+		response.BindingID = response.ID
 	}
 	if response.BindingID == "" {
 		return Authorization{}, errors.New("Gateway 注册响应缺少绑定标识")

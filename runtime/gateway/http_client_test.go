@@ -119,3 +119,22 @@ func TestHTTPClientRegisterMapsItemAndRefreshToken(t *testing.T) {
 		t.Fatalf("刷新响应映射失败: %+v, %v", refreshed, err)
 	}
 }
+
+func TestHTTPClientRegisterAcceptsNodeViewID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/workmesh/node/register" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"item": map[string]any{"id": "node-view-id"}}})
+	}))
+	defer server.Close()
+	client := NewHTTPClient(server.URL, "gateway-test", "secret")
+	auth, err := client.Register(context.Background(), RegisterRequest{NodeID: "node-test"})
+	if err != nil {
+		t.Fatalf("注册应接受节点视图 id: %v", err)
+	}
+	if auth.BindingID != "node-view-id" {
+		t.Fatalf("绑定标识不匹配: %q", auth.BindingID)
+	}
+}

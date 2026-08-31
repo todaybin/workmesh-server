@@ -42,6 +42,9 @@ const gatewayURL = ref('https://work.zoomtk.com');
 const form = reactive({ username: '', password: '' });
 const registerURL = computed(() => `${gatewayURL.value.replace(/\/$/, '')}/login/register`);
 
+const isLocalAuthRequired = (error: any) =>
+    error?.response?.status === 401 || error?.response?.data?.details?.errCode === 'LOCAL_AUTH_REQUIRED';
+
 const bindGateway = async () => {
     if (!form.username.trim() || !form.password) {
         ElMessage.error('请输入 Gateway 用户名和密码');
@@ -54,6 +57,11 @@ const bindGateway = async () => {
         ElMessage.success('Gateway 账号绑定成功');
         await router.replace({ name: 'home' });
     } catch (error: any) {
+        if (isLocalAuthRequired(error)) {
+            ElMessage.error('本地登录会话已失效，请重新登录');
+            await router.replace({ name: 'login' });
+            return;
+        }
         ElMessage.error(error?.message || 'Gateway 账号绑定失败');
     } finally {
         loading.value = false;
@@ -65,7 +73,11 @@ onMounted(async () => {
         const status = await getWorkMeshGatewayStatus();
         gatewayURL.value = status.data.gatewayUrl || gatewayURL.value;
         if (status.data.configured) await router.replace({ name: 'home' });
-    } catch {
+    } catch (error: any) {
+        if (isLocalAuthRequired(error)) {
+            await router.replace({ name: 'login' });
+            return;
+        }
         // 页面仍可显示默认 Gateway 地址并允许用户重试。
     }
 });

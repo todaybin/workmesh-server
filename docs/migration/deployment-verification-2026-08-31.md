@@ -56,3 +56,12 @@
 ## 验证命令
 
 部署和冒烟命令均通过 `node scripts/with-dev-env.mjs -- ...` 包装器执行。远端替换脚本在每台节点执行摘要校验、备份、systemd 重启和本机健康检查；失败路径会恢复二进制、前端目录并重新启动原单元。
+
+## Gateway 绑定修复复验
+
+- 后端修复制品 SHA256：`0a8da4dff0f3fe76bf3194dea278bf8102eb7b8ef9a0827b919c25871c31fc1e`。
+- 修复第三方 Gateway 节点注册响应使用 `data.item.id` 时无法识别绑定标识的问题；该字段作为稳定节点绑定 ID 保存。
+- 主节点已有绑定保持 `configured=true / registration=registered`。
+- 次节点使用本地 `admin/admin` 会话和真实 Gateway 账号完成一次绑定：HTTP 200、`bound=true`、`nodeId=secondary-gateway-162`。
+- 重启次节点后再次查询仍为 `configured=true / registration=registered`，确认绑定快照持久化；未复制主节点身份或密钥。
+- 前端路由守卫、绑定页和设置页现会识别本地会话失效并跳转本地登录页，不再显示误导性的 Gateway 绑定错误。
