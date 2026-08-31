@@ -5,6 +5,8 @@
 
 871 条路由契约作为 WorkMesh Server 的兼容基线保留。冻结的是公开契约，不是业务实现：
 
+本项目不废弃这 871 条契约，也不以“冻结”作为停止迁移的理由。后续版本继续在原方法和路径上补齐真实业务；只有完成调用方迁移、发布至少一个完整版本并取得删除审批后，才允许对单条接口走废弃流程。当前任何 `partial`、`compatibility` 或 `pending` 都视为迁移任务，不能作为最终交付状态。
+
 - 方法、路径参数、鉴权方式、成功/错误 envelope 和分页字段保持向后兼容。
 - 每条路由必须继续替换真实业务实现，禁止用 `MIGRATION_PENDING`、固定空数组或兼容处理器冒充完成。
 - 新能力优先在同一路径上向前兼容扩展；确需改变语义时，新增 `/api/v3` 或明确版本参数，并保留旧路径一个完整迁移周期。
@@ -24,4 +26,3 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/route-s
 node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/implementation-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json --out .tmp/implementation-status.json --markdown apps/workmesh-server/docs/migration/function-checklist-generated.md
 node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "Set-Location apps/workmesh-server/web; npm.cmd run type-check; npm.cmd run build:pro"
 ```
-
