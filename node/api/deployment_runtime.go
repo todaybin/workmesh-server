@@ -293,8 +293,9 @@ func processStop(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"pid": req.PID, "stopped": true}})
 }
 
-func processListening(w http.ResponseWriter, _ *http.Request) {
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": []any{}, "total": 0}})
+// processListening 保留内部调用入口，统一复用真实进程监听查询实现。
+func processListening(w http.ResponseWriter, r *http.Request) {
+	handleProcessListening(w, r)
 }
 
 func decodeLimited(r *http.Request, target any) error {

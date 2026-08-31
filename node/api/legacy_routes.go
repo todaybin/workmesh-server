@@ -21,6 +21,9 @@ type routeRegistrar interface {
 type legacyFilterMux struct{ mux *http.ServeMux }
 
 func (m legacyFilterMux) HandleFunc(pattern string, handler http.HandlerFunc) {
+	if isExplicitCoreAuthRoute(pattern) || isDashboardRoute(pattern) {
+		return
+	}
 	if isBackupAlertLogSettingsRoute(pattern) || isWebsiteFunctionalRoute(pattern) || isAnalyticsRoute(pattern) || isContainerRoute(pattern) || isHostRoute(pattern) || isAIExecutionRoute(pattern) || isCoreResourceRoute(pattern) || isCoreCommandRoute(pattern) || isFileRoute(pattern) || isDatabaseRoute(pattern) || isDeploymentProcessRoute(pattern) || isRuntimeToolboxRoute(pattern) || isAppRoute(pattern) || isSitesRoute(pattern) {
 		return
 	}
@@ -35,6 +38,31 @@ func (m legacyFilterMux) HandleFunc(pattern string, handler http.HandlerFunc) {
 	}
 	defer func() { _ = recover() }()
 	registerFallbackRoute(m.mux, normalizeServeMuxPattern(pattern))
+}
+
+// isExplicitCoreAuthRoute 判断已由核心认证处理器显式注册的路径，避免兼容层重复注册。
+func isExplicitCoreAuthRoute(pattern string) bool {
+	return pattern == "POST /api/v2/core/auth/login" || pattern == "POST /api/v2/core/auth/logout" || pattern == "GET /api/v2/core/auth/current"
+}
+
+// isDashboardRoute 判断仪表盘专用路径，统一交给真实指标处理器。
+func isDashboardRoute(pattern string) bool {
+	for _, route := range []string{
+		"GET /api/v2/dashboard/app/launcher",
+		"GET /api/v2/dashboard/base/os",
+		"GET /api/v2/dashboard/current/node",
+		"GET /api/v2/dashboard/current/top/cpu",
+		"GET /api/v2/dashboard/current/top/mem",
+		"GET /api/v2/dashboard/quick/option",
+		"POST /api/v2/dashboard/app/launcher/option",
+		"POST /api/v2/dashboard/app/launcher/show",
+		"POST /api/v2/dashboard/quick/change",
+	} {
+		if pattern == route {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeServeMuxPattern 将旧 Gin 风格 :id/*path 转换为 Go ServeMux 通配符。
