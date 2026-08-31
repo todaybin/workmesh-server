@@ -6,7 +6,9 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,14 +23,15 @@ func NewDockerService() DockerService { return DockerService{commands: CommandSe
 
 // Status 返回 Docker daemon 的版本信息。
 func (s DockerService) Status(ctx context.Context) (model.CommandResult, error) {
-	return s.commands.Execute(ctx, model.CommandRequest{Program: "docker", Args: []string{"version", "--format", "{{json .}}"}})
+	return s.commands.Execute(ctx, model.CommandRequest{Program: dockerBinaryOrName(), Args: []string{"version", "--format", "{{json .}}"}})
 }
 
 // StatusInfo 探测 Docker CLI 和 daemon，返回稳定的前端状态契约。
 // 探测使用短超时，daemon 不可用时仍返回 200 和明确的 false 状态，避免前端把命令结果误当 DTO。
 func (s DockerService) StatusInfo(ctx context.Context) (model.DockerStatus, error) {
 	status := model.DockerStatus{}
-	if _, err := exec.LookPath("docker"); err != nil {
+	binary := dockerBinary()
+	if binary == "" {
 		status.Error = "docker CLI 未安装"
 		return status, nil
 	}
@@ -36,7 +39,7 @@ func (s DockerService) StatusInfo(ctx context.Context) (model.DockerStatus, erro
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	result, err := s.commands.Execute(probeCtx, model.CommandRequest{
-		Program: "docker",
+		Program: binary,
 		Args:    []string{"version", "--format", "{{json .}}"},
 		Timeout: 10 * time.Second,
 	})
@@ -57,7 +60,7 @@ func (s DockerService) StatusInfo(ctx context.Context) (model.DockerStatus, erro
 
 // List 返回容器列表文本，保留 Docker CLI 原始字段避免迁移期间丢失信息。
 func (s DockerService) List(ctx context.Context) (model.CommandResult, error) {
-	return s.commands.Execute(ctx, model.CommandRequest{Program: "docker", Args: []string{"ps", "-a", "--no-trunc"}})
+	return s.commands.Execute(ctx, model.CommandRequest{Program: dockerBinaryOrName(), Args: []string{"ps", "-a", "--no-trunc"}})
 }
 
 // Operate 执行白名单中的容器生命周期操作。
@@ -73,5 +76,28 @@ func (s DockerService) Operate(ctx context.Context, req model.DockerOperationReq
 	if operation == "remove" {
 		operation = "rm"
 	}
-	return s.commands.Execute(ctx, model.CommandRequest{Program: "docker", Args: []string{operation, req.Container}})
+	return s.commands.Execute(ctx, model.CommandRequest{Program: dockerBinaryOrName(), Args: []string{operation, req.Container}})
+}
+
+// dockerBinary 在服务管理器精简 PATH 时补查 Docker 的标准安装位置。
+func dockerBinary() string {
+	if value, err := exec.LookPath("docker"); err == nil {
+		return value
+	}
+	for _, candidate := range []string{"/usr/bin/docker", "/usr/local/bin/docker", "/snap/bin/docker", filepath.Join(os.Getenv("ProgramFiles"), "Docker", "Docker", "resources", "bin", "docker.exe")} {
+		if candidate == "" {
+			continue
+		}
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func dockerBinaryOrName() string {
+	if value := dockerBinary(); value != "" {
+		return value
+	}
+	return "docker"
 }
