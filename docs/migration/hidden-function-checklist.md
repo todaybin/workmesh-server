@@ -10,6 +10,12 @@
 | 媒体文件转换任务 | `apps/workmesh-node/agent/app/service/file.go:Convert` | `node/api/files_routes.go` | implemented | 通过受控 `WORKMESH_MEDIA_CONVERTER` 执行并设置 5 分钟超时；输出原子替换，日志持久化并支持分页筛选 |
 <!-- Copyright (c) 2026 WorkMesh contributors -->
 
+## 2026-08-31 首页配置状态持久化
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | 快速跳转数组与应用启动器显示状态持久化 | `apps/workmesh-node/agent/app/service/dashboard.go:ChangeQuick`、`ChangeShow`、`ListLauncherOption` | `node/api/dashboard.go:handleDashboardMutation` 将配置写入 `domains.json`，`dashboardQuickJumps` 在请求和重启后恢复，启动器选项保留隐藏项并返回 `isShow` | 至少一个快速入口可见、最多四个可见；非法 key/status/JSON 拒绝；持久化重载测试通过 |
+
 ## 2026-08-30 核心认证与执行入口
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
