@@ -57,7 +57,7 @@ type runtimeStore struct {
 func getRuntimeStore() *runtimeStore {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	path := filepath.Join(dir, "runtime.json")
 	runtimeStoreMu.Lock()

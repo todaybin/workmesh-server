@@ -40,7 +40,7 @@ type CronjobService struct {
 func NewCronjobService() *CronjobService {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	path := filepath.Join(dir, "cronjobs.json")
 	// 测试进程使用带 PID 的临时状态文件，避免上一次异常退出留下的任务

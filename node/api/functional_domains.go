@@ -133,7 +133,7 @@ var functionalStoreInstance *domainStore
 func getDomainStore() *domainStore {
 	dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dataDir == "" {
-		dataDir = ".workmesh-data"
+		dataDir = "./data"
 	}
 	path := filepath.Join(dataDir, "domains.json")
 	functionalStoreMu.Lock()
@@ -358,7 +358,7 @@ func registerBackupRoutes(mux *http.ServeMux, s *domainStore) {
 func backupDataDir() string {
 	root := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if root == "" {
-		root = ".workmesh-data"
+		root = "./data"
 	}
 	return filepath.Join(root, "backups")
 }
@@ -1940,7 +1940,7 @@ func logDataDir() string {
 	if dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR")); dir != "" {
 		return dir
 	}
-	return ".workmesh-data"
+	return "./data"
 }
 
 // listSystemLogFiles 枚举配置目录和 Linux 主机日志目录中的日志文件。
@@ -2111,7 +2111,7 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 		case "/api/v2/settings/basedir":
 			dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 			if dir == "" {
-				dir = ".workmesh-data"
+				dir = "./data"
 			}
 			success(w, map[string]any{"baseDir": dir, "path": dir})
 		case "/api/v2/settings/website/dir":

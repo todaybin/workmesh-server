@@ -106,7 +106,7 @@ func NewWebsiteSecurityService(root string) *WebsiteSecurityService {
 		root = strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	}
 	if root == "" {
-		root = ".workmesh-data"
+		root = "./data"
 	}
 	s := &WebsiteSecurityService{root: root}
 	s.load()

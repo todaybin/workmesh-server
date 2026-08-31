@@ -163,7 +163,7 @@ func probeHost(address string, port int) (bool, int64, error) {
 func hostsPath() string {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	return filepath.Join(dir, "hosts.json")
 }

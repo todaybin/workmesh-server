@@ -22,7 +22,6 @@ func Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/core/auth/logout", handleCoreLogout)
 	mux.HandleFunc("GET /api/v2/core/auth/current", handleCoreCurrent)
 	mux.HandleFunc("GET /api/v2/dashboard/app/launcher", handleDashboardLauncher)
-	mux.HandleFunc("GET /api/v2/dashboard/base/os", handleDashboardOS)
 	mux.HandleFunc("GET /api/v2/dashboard/current/node", handleDashboardNode)
 	mux.HandleFunc("GET /api/v2/dashboard/current/top/cpu", handleDashboardTopCPU)
 	mux.HandleFunc("GET /api/v2/dashboard/current/top/mem", handleDashboardTopMem)

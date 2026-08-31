@@ -35,7 +35,7 @@ func registerFallbackRoute(mux *http.ServeMux, pattern string) {
 func (s *fallbackStore) loadLocked() {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	path := filepath.Join(dir, "fallback-state.json")
 	if s.loaded && s.path == path {

@@ -34,7 +34,7 @@ var databaseOperationMu sync.Mutex
 func appendDatabaseOperation(op databaseOperation) error {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	path := filepath.Join(dir, "database-operations.json")
 	databaseOperationMu.Lock()

@@ -67,6 +67,8 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	commands := service.CommandService{}
 	docker := service.NewDockerService()
 	cronjobs := sharedCronjobs
+	// 仪表盘基础系统信息与主机资源采集同属节点运维路由组，单独注册该入口可供模块级挂载使用。
+	mux.HandleFunc("GET /api/v2/dashboard/base/os", handleDashboardOS)
 
 	mux.HandleFunc("POST /api/v2/system/command", func(w http.ResponseWriter, r *http.Request) {
 		if token := os.Getenv("WORKMESH_COMMAND_TOKEN"); token == "" || r.Header.Get("X-WorkMesh-Token") != token {
@@ -416,7 +418,7 @@ var hostOperationalMu sync.Mutex
 func hostOperationalStatePath() string {
 	root := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if root == "" {
-		root = ".workmesh-data"
+		root = "./data"
 	}
 	return filepath.Join(root, "host-operational.json")
 }

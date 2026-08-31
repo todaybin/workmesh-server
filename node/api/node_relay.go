@@ -84,7 +84,7 @@ func NewNodeRelay(next http.Handler, options RelayOptions) *NodeRelay {
 		options.Timeout = defaultRelayTimeout
 	}
 	if options.DataDir == "" {
-		options.DataDir = ".workmesh-data"
+		options.DataDir = "./data"
 	}
 	if options.HTTP == nil {
 		options.HTTP = &http.Client{Timeout: options.Timeout}

@@ -59,7 +59,7 @@ type DatabaseAdminStore struct {
 func NewDatabaseAdminStore() *DatabaseAdminStore {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	s := &DatabaseAdminStore{nextUser: 1, nextGrant: 1, users: map[int64]DatabaseUser{}, grants: map[int64]DatabaseGrant{}, variables: map[string]DatabaseVariable{}, configs: map[string]string{}, path: filepath.Join(dir, "database-admin.json")}
 	if b, err := os.ReadFile(s.path); err == nil {

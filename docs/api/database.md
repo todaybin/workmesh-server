@@ -3,7 +3,7 @@
 
 # 数据库资源管理（首批）
 
-数据库资源以节点本地仓储登记，数据持久化到 `WORKMESH_DATA_DIR/databases.json`（未设置时为 `.workmesh-data`），敏感密码不落库、不回显。接口保留旧 `/api/v2/databases/db/*` 路径：
+数据库资源以节点本地仓储登记，数据持久化到 `WORKMESH_DATA_DIR/databases.json`（未设置时为 `./data`），敏感密码不落库、不回显。接口保留 `/api/v2/databases/db/*` 路径：
 
 - `POST /api/v2/databases/db`：校验类型、主机、端口并登记资源。
 - `POST /api/v2/databases/db/check`：检查连接参数格式（不执行破坏性连接）。

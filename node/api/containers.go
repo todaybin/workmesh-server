@@ -121,7 +121,7 @@ var containerStoreInstance *containerStore
 func getContainerStore() *containerStore {
 	root := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if root == "" {
-		root = ".workmesh-data"
+		root = "./data"
 	}
 	path := filepath.Join(root, "containers.json")
 	containerStoreMu.Lock()
@@ -248,7 +248,7 @@ func composeFilePath(req composeRequest) string {
 	}
 	root := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if root == "" {
-		root = ".workmesh-data"
+		root = "./data"
 	}
 	return filepath.Join(root, "docker", "compose", name, "docker-compose.yml")
 }
@@ -1139,7 +1139,7 @@ func daemonJSONPath() string {
 	}
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	return filepath.Join(dir, "docker-daemon.json")
 }

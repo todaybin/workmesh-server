@@ -37,7 +37,7 @@ type DatabaseRepository struct {
 func NewDatabaseRepository() *DatabaseRepository {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	r := &DatabaseRepository{next: 1, items: make(map[int64]Database), path: filepath.Join(dir, "databases.json")}
 	if b, err := os.ReadFile(r.path); err == nil {

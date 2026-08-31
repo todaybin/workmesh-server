@@ -42,7 +42,7 @@ func getScriptStore() *scriptLibraryStore {
 	scriptStoreOnce.Do(func() {
 		dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 		if dir == "" {
-			dir = ".workmesh-data"
+			dir = "./data"
 		}
 		scriptStore = &scriptLibraryStore{path: filepath.Join(dir, "scripts.json")}
 		if b, e := os.ReadFile(scriptStore.path); e == nil {

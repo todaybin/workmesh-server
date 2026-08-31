@@ -129,7 +129,7 @@ func RegisterRoleRoutesWithManager(mux *http.ServeMux, manager *role.Manager, au
 func newRoleController(manager *role.Manager) *RoleController {
 	dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dataDir == "" {
-		dataDir = ".workmesh-data"
+		dataDir = "./data"
 	}
 	c := &RoleController{manager: manager, nodes: make(map[string]nodeListItem), nodesPath: filepath.Join(dataDir, "nodes.json")}
 	state := manager.State(nil)

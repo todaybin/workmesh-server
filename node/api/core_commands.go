@@ -44,7 +44,7 @@ var commandStoreInstance *commandStore
 func getCommandStore() *commandStore {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	path := filepath.Join(dir, "commands.json")
 	commandStoreMu.Lock()

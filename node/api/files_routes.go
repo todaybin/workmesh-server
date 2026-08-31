@@ -216,7 +216,7 @@ var fileAux struct {
 func fileAuxPath() string {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	return filepath.Join(dir, "files.json")
 }
@@ -317,7 +317,7 @@ var fileShareState struct {
 func fileShareFile() string {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	return filepath.Join(dir, "file-shares.json")
 }
@@ -1480,7 +1480,7 @@ func unzipPath(source, destination string) error {
 func fileChunkDir() string {
 	root := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if root == "" {
-		root = ".workmesh-data"
+		root = "./data"
 	}
 	return filepath.Join(root, "chunks")
 }

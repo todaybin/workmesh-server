@@ -115,7 +115,7 @@ func getTaskProvider() *taskruntime.TaskProvider {
 func getAIState() *executionState {
 	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dir == "" {
-		dir = ".workmesh-data"
+		dir = "./data"
 	}
 	path := filepath.Join(dir, "ai.json")
 	aiStateInit.Lock()

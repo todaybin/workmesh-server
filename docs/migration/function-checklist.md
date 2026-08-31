@@ -1,5 +1,10 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
+## 2026-08-31 运行数据目录统一
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 多功能域共享运行数据根目录 | `apps/workmesh-node/core/init`、`agent/init` 及各 service 初始化 | 所有登录、网关绑定、主机、容器、数据库、文件、任务和网站接口 | `config/config.go` 与各模块 `WORKMESH_DATA_DIR` 回退逻辑 | 不新增 HTTP 路由；统一默认目录为 `./data` | 沿用各功能域原鉴权 | 本地配置和功能域状态文件 | 显式目录优先；未配置时全部写入 `./data`，文件使用原子 rename | `go test ./...` 覆盖各模块重启加载测试 | `node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='off'; Set-Location apps/workmesh-server; go test ./..."` | 待主次节点验证数据目录权限和重启恢复 | implemented | 既有部署若使用 `.workmesh-data`，需按部署手册迁移一次历史文件 |
+
 ## 2026-08-31 主机连接测试真实探测
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -258,7 +263,7 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AI 提供商目录与账户分页 | `apps/workmesh-node/agent/app/provider/catalog.go`、`agent/app/service/agents.go` | `GET /api/v2/ai/accounts/providers`、`POST /api/v2/ai/accounts`、`POST /api/v2/ai/accounts/update`、`POST /api/v2/ai/accounts/search`、`POST /api/v2/ai/accounts/counts`、`POST /api/v2/ai/accounts/delete` | `node/api/ai_execution.go:aiProviders`、`handleAccountRoute` | 同左 | 上层 Session/Bearer；账户写入需节点权限 | 内置提供商元数据和请求体 | `.workmesh-data/ai.json` 原子 rename | `node/api/ai_execution_test.go:TestAIAccountModelsAndValidation` | `go test ./node/api -run AIAccount` | 待下一批制品部署 | implemented | 真实 Gateway 账户同步待凭据接入 |
+| AI 提供商目录与账户分页 | `apps/workmesh-node/agent/app/provider/catalog.go`、`agent/app/service/agents.go` | `GET /api/v2/ai/accounts/providers`、`POST /api/v2/ai/accounts`、`POST /api/v2/ai/accounts/update`、`POST /api/v2/ai/accounts/search`、`POST /api/v2/ai/accounts/counts`、`POST /api/v2/ai/accounts/delete` | `node/api/ai_execution.go:aiProviders`、`handleAccountRoute` | 同左 | 上层 Session/Bearer；账户写入需节点权限 | 内置提供商元数据和请求体 | `WORKMESH_DATA_DIR/ai.json`（未设置时 `./data/ai.json`）原子 rename | `node/api/ai_execution_test.go:TestAIAccountModelsAndValidation` | `go test ./node/api -run AIAccount` | 待下一批制品部署 | implemented | 真实 Gateway 账户同步待凭据接入 |
 | 账户模型管理与远程发现 | `apps/workmesh-node/agent/app/service/agents.go:1201-1345` | `POST /api/v2/ai/accounts/models`、`models/create`、`models/update`、`models/delete`、`models/discover`、`verify` | `node/api/ai_execution.go:handleAccountRoute`、`discoverAIModels` | 同左 | Session/Bearer；API Key 仅用于上游请求且响应脱敏 | 账户持久化模型或上游 `/models` JSON | `ai.json` 原子 rename；HTTP 8 秒超时 | `node/api/ai_execution_test.go:TestAIAccountModelsAndValidation`、`TestAIAccountModelDiscoveryAndSandboxPersistence` | `go test ./node/api -run 'AIAccount|AI.*Discovery'` | 待下一批制品部署 | 不同厂商专用鉴权协议需按 provider 扩展 |
 | GPU 能力探测 | `apps/workmesh-node/agent/api/v2/monitor.go` | `GET /api/v2/ai/gpu/load`、`GET /api/v2/ai/gpu/options`、`POST /api/v2/ai/gpu/search` | `node/api/ai_execution.go:detectGPU` | 同左 | Session/Bearer | `nvidia-smi` 设备信息和 Go 运行时内存 | 无状态采集 | `node/api/ai_execution_test.go`（CPU 降级路径） | `go test ./node/api -run AI` | 待下一批制品部署 | AMD/NPU/XPU 驱动适配待补充 |
 | CubeSandbox 生命周期与状态 | `apps/workmesh-node/agent/router/ro_cubesandbox.go`、`agent/app/api/v2/workmesh_task.go` | `GET /api/v2/cubesandbox/health`、`GET /api/v2/cubesandbox/status`、`POST /api/v2/cubesandbox/start`、`stop`、`reconcile` | `node/api/ai_execution.go:sandboxHandler` | 同左 | Session/Bearer；启动受 KVM 能力限制 | `/dev/kvm` 能力探测与实例状态 | `ai.json` Sandboxes 数组原子 rename | `node/api/ai_execution_test.go:TestAIAccountModelDiscoveryAndSandboxPersistence` | `go test ./node/api -run Sandbox` | 待下一批制品部署 | MicroVM 实际进程编排和镜像校验待接入 |

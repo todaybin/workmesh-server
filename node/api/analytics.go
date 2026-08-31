@@ -176,7 +176,7 @@ func loadAnalyticsEvents(query map[string]any) ([]analyticsEvent, string, error)
 	} else {
 		dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 		if dataDir == "" {
-			dataDir = ".workmesh-data"
+			dataDir = "./data"
 		}
 		paths = append(paths, filepath.Join(dataDir, "logs", "access.log"), "/var/log/nginx/access.log", "/var/log/openresty/access.log")
 	}

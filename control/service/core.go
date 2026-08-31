@@ -73,7 +73,7 @@ type CoreService struct {
 func NewCoreService() *CoreService {
 	dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dataDir == "" {
-		dataDir = ".workmesh-data"
+		dataDir = "./data"
 	}
 	// 首次启动可通过环境变量注入管理员凭据；未配置时使用本地开发默认值，生产环境应显式覆盖。
 	adminName := strings.TrimSpace(os.Getenv("WORKMESH_ADMIN_USERNAME"))

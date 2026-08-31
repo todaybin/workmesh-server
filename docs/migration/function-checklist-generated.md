@@ -3,7 +3,7 @@
 
 # WorkMesh 功能迁移逐路由清单
 
-基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-31T02:00:52.094Z。
+基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-31T02:48:59.216Z。
 共 871 条接口：implemented 871。
 
 状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。
@@ -322,7 +322,7 @@
 | implemented | POST | `/api/v2/containers/network` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/containers/network/del` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/containers/network/search` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
-| implemented | POST | `/api/v2/containers/operate` | apps/workmesh-server/node/api/containers.go | unknown | database | missing | - |
+| implemented | POST | `/api/v2/containers/operate` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/containers/prune` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/containers/rename` | apps/workmesh-server/node/api/containers.go | unknown | memory | missing | - |
 | implemented | POST | `/api/v2/containers/repo` | apps/workmesh-server/node/api/containers.go | required | memory | missing | - |
@@ -379,9 +379,9 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | implemented | GET | `/api/v2/dashboard/app/launcher` | apps/workmesh-server/node/api/router.go | required | unknown | present | - |
 | implemented | GET | `/api/v2/dashboard/base/:ioOption/:netOption` | apps/workmesh-server/node/api/host_container_cron.go | required | external | missing | - |
-| implemented | GET | `/api/v2/dashboard/base/os` | apps/workmesh-server/node/api/router.go | required | unknown | present | - |
+| implemented | GET | `/api/v2/dashboard/base/os` | apps/workmesh-server/node/api/host_container_cron.go | required | memory | missing | - |
 | implemented | GET | `/api/v2/dashboard/current/:ioOption/:netOption` | apps/workmesh-server/node/api/host_container_cron.go | required | external | missing | - |
-| implemented | GET | `/api/v2/dashboard/current/node` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |
+| implemented | GET | `/api/v2/dashboard/current/node` | apps/workmesh-server/node/api/router.go | required | unknown | present | - |
 | implemented | GET | `/api/v2/dashboard/current/top/cpu` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |
 | implemented | GET | `/api/v2/dashboard/current/top/mem` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |
 | implemented | GET | `/api/v2/dashboard/quick/option` | apps/workmesh-server/node/api/router.go | unknown | unknown | present | - |

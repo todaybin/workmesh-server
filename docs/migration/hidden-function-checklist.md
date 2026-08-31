@@ -1,5 +1,12 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
+## 2026-08-31 运行数据目录与模块化路由挂载
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
+| --- | --- | --- | --- | --- |
+| [x] | 所有功能域共享同一运行数据根目录 | `apps/workmesh-node/core/init`、`agent/init` 及各 service 初始化 | `config/config.go` 与认证、网关、主机、容器、数据库、文件、任务、网站模块统一读取 `WORKMESH_DATA_DIR`，默认 `./data` | 源码无其他回退目录；模块重载测试和全量测试通过 |
+| [x] | 仪表盘系统信息可随主机路由组独立挂载 | `apps/workmesh-node/agent/router/ro_dashboard.go` | `node/api/host_container_cron.go:RegisterHostContainerCronRoutes` 注册 `GET /api/v2/dashboard/base/os`，总路由不重复注册 | 模块级路由测试返回 200，统一服务启动无重复路由 panic |
+
 ## 2026-08-31 别名与文件系统隐藏能力
 
 | 隐藏能力 | 发现位置 | 实现位置 | 状态 | 说明 |
