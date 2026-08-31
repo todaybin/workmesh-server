@@ -126,6 +126,9 @@ func TestHTTPMuxFallsBackToSPAForFrontendRoutes(t *testing.T) {
 		if !strings.Contains(recorder.Body.String(), "id=app") {
 			t.Fatalf("前端路由 %s 未返回 index.html: %s", path, recorder.Body.String())
 		}
+		if cache := recorder.Header().Get("Cache-Control"); cache != "no-store, max-age=0" {
+			t.Fatalf("前端入口必须禁止缓存，实际为 %q", cache)
+		}
 	}
 }
 

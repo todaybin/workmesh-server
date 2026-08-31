@@ -7,7 +7,7 @@ export const loginApi = (params: Login.ReqLoginForm) => {
     return http.post<Login.ResLogin>(`/core/auth/login`, params);
 };
 
-export const gatewayLoginApi = (params: { username: string; password: string }) => {
+export const gatewayLoginApi = (params: { username: string; password: string; gatewayUrl: string }) => {
     return http.post<{ bound: boolean; account: string; nodeId: string; status: string }>(
         `/workmesh/gateway/login`,
         params,

@@ -52,7 +52,11 @@ const bindGateway = async () => {
     }
     loading.value = true;
     try {
-        await gatewayLoginApi({ username: form.username.trim(), password: form.password });
+        await gatewayLoginApi({
+            username: form.username.trim(),
+            password: form.password,
+            gatewayUrl: gatewayURL.value,
+        });
         clearWorkMeshGatewayStatusCache();
         ElMessage.success('Gateway 账号绑定成功');
         await router.replace({ name: 'home' });

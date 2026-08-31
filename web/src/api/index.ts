@@ -126,6 +126,20 @@ class RequestHttp {
             async (error: AxiosError) => {
                 const { response } = error;
 
+                // 服务重启或会话过期后，任意接口都可能返回本地鉴权错误。
+                // 在全局拦截器清理持久化状态，避免页面继续以失效会话请求绑定接口。
+                const localAuthRequired =
+                    response?.status === 401 ||
+                    (response?.data as any)?.details?.errCode === 'LOCAL_AUTH_REQUIRED';
+                if (localAuthRequired && !String(response?.config?.url || '').includes('/core/auth/login')) {
+                    const globalStore = GlobalStore();
+                    globalStore.setLogStatus(false);
+                    globalStore.clearAuthInfo();
+                    if (router.currentRoute.value.name !== 'login' && router.currentRoute.value.name !== 'entrance') {
+                        await router.replace({ name: 'login' });
+                    }
+                }
+
                 if (error.message.indexOf('timeout') !== -1) MsgError(i18n.global.t('commons.msg.requestTimeout'));
                 if (response) {
                     switch (response.status) {

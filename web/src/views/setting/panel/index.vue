@@ -438,7 +438,10 @@ const bindGateway = async () => {
     }
     gatewayBinding.value = true;
     try {
-        await gatewayLoginApi(gatewayLoginForm);
+        await gatewayLoginApi({
+            ...gatewayLoginForm,
+            gatewayUrl: gatewayStatus.gatewayUrl || 'https://work.zoomtk.com',
+        });
         clearWorkMeshGatewayStatusCache();
         gatewayLoginForm.password = '';
         MsgSuccess('Gateway 账号绑定成功');

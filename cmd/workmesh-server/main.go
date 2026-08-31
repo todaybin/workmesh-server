@@ -91,6 +91,12 @@ func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) 
 	// 静态资源必须在 API 兼容层之前命中文件系统，否则浏览器会收到 JSON 错误响应并拒绝执行模块脚本。
 	staticRoot := filepath.Join("web", "dist")
 	staticFiles := http.StripPrefix("/", http.FileServer(http.Dir(staticRoot)))
+	serveIndex := func(w http.ResponseWriter, r *http.Request, index string) {
+		// SPA 入口不是哈希资源；禁止缓存可避免部署新版本后继续加载旧 chunk。
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		http.ServeFile(w, r, index)
+	}
 	mux.HandleFunc("GET /assets/{filepath...}", func(w http.ResponseWriter, r *http.Request) {
 		staticFiles.ServeHTTP(w, r)
 	})
@@ -179,7 +185,7 @@ func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) 
 				return
 			}
 		}
-		http.ServeFile(w, r, index)
+		serveIndex(w, r, index)
 	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
