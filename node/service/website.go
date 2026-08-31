@@ -834,7 +834,7 @@ func balancedConfig(content string) bool {
 // ProbeOpenResty 使用受限外部命令探测 OpenResty 安装及配置状态；命令均设置超时且不接受用户参数。
 func (s *WebsiteService) ProbeOpenResty(ctx context.Context) OpenRestyStatus {
 	cfg := s.GetOpenResty()
-	status := OpenRestyStatus{Enabled: cfg.Enabled, DefaultHTTPS: cfg.DefaultHTTPS, Modules: append([]model.OpenRestyModule(nil), cfg.Modules...)}
+	status := OpenRestyStatus{Enabled: cfg.Enabled, DefaultHTTPS: cfg.DefaultHTTPS, Modules: append([]model.OpenRestyModule{}, cfg.Modules...)}
 	bin := strings.TrimSpace(os.Getenv("WORKMESH_OPENRESTY_BIN"))
 	if bin == "" {
 		for _, candidate := range []string{"openresty", "nginx"} {
@@ -849,7 +849,7 @@ func (s *WebsiteService) ProbeOpenResty(ctx context.Context) OpenRestyStatus {
 			return OpenRestyStatus{
 				Available: true, ConfigValid: true, Enabled: container.IsActive,
 				Version: container.Version, Binary: container.Binary,
-				DefaultHTTPS: cfg.DefaultHTTPS, Modules: append([]model.OpenRestyModule(nil), cfg.Modules...),
+				DefaultHTTPS: cfg.DefaultHTTPS, Modules: append([]model.OpenRestyModule{}, cfg.Modules...),
 			}
 		}
 		status.Error = "OpenResty binary not found"

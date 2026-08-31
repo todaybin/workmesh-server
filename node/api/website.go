@@ -953,7 +953,8 @@ func registerOpenRestyRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": status})
 	})
 	mux.HandleFunc("GET /api/v2/openresty/modules", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": svc.GetOpenResty().Modules})
+		modules := append([]model.OpenRestyModule{}, svc.GetOpenResty().Modules...)
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": modules})
 	})
 	mux.HandleFunc("GET /api/v2/openresty/https", func(w http.ResponseWriter, r *http.Request) {
 		cfg := svc.GetOpenResty()
