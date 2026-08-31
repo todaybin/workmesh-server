@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -64,10 +65,11 @@ func ProbeApplication(ctx context.Context, key, name string) ApplicationStatus {
 		return status
 	}
 	for _, candidate := range definition.binaries {
-		if configured := strings.TrimSpace(os.Getenv(definition.env)); definition.env != "" && configured != "" {
+		configured := strings.TrimSpace(os.Getenv(definition.env))
+		if definition.env != "" && configured != "" {
 			candidate = configured
 		}
-		if path, err := exec.LookPath(candidate); err == nil {
+		if path, err := lookupApplicationBinary(candidate, key, configured != ""); err == nil {
 			status.IsExist, status.Binary = true, path
 			break
 		}
@@ -106,6 +108,31 @@ func ProbeApplication(ctx context.Context, key, name string) ApplicationStatus {
 	status.IsActive = true
 	status.Status = "Running"
 	return status
+}
+
+// lookupApplicationBinary 同时支持服务管理器常见的精简 PATH 和应用专属安装目录。
+func lookupApplicationBinary(name, key string, explicit bool) (string, error) {
+	if path, err := exec.LookPath(name); err == nil {
+		return path, nil
+	}
+	if explicit {
+		return "", os.ErrNotExist
+	}
+	candidates := map[string][]string{
+		"openresty": {"/usr/local/openresty/nginx/sbin/nginx", "/usr/local/openresty/bin/openresty", "/usr/sbin/nginx"},
+		"nginx":     {"/usr/local/openresty/nginx/sbin/nginx", "/usr/local/openresty/bin/openresty", "/usr/sbin/nginx"},
+		"mysql":     {"/usr/sbin/mysqld", "/usr/libexec/mysqld", "/usr/sbin/mariadbd", "/usr/libexec/mariadbd"},
+		"mariadb":   {"/usr/sbin/mariadbd", "/usr/libexec/mariadbd"},
+		"postgres":  {"/usr/lib/postgresql/bin/postgres", "/usr/lib/postgresql/16/bin/postgres", "/usr/lib/postgresql/15/bin/postgres"},
+		"postgresql": {"/usr/lib/postgresql/bin/postgres", "/usr/lib/postgresql/16/bin/postgres", "/usr/lib/postgresql/15/bin/postgres"},
+		"redis":     {"/usr/bin/redis-server", "/usr/local/bin/redis-server"},
+	}
+	for _, path := range candidates[key] {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return filepath.Clean(path), nil
+		}
+	}
+	return "", os.ErrNotExist
 }
 
 type applicationDefinition struct {

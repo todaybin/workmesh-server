@@ -838,7 +838,7 @@ func (s *WebsiteService) ProbeOpenResty(ctx context.Context) OpenRestyStatus {
 	bin := strings.TrimSpace(os.Getenv("WORKMESH_OPENRESTY_BIN"))
 	if bin == "" {
 		for _, candidate := range []string{"openresty", "nginx"} {
-			if found, err := exec.LookPath(candidate); err == nil {
+			if found, err := lookupApplicationBinary(candidate, "openresty", false); err == nil {
 				bin = found
 				break
 			}
