@@ -43,6 +43,8 @@
 | 功能名称 | 旧源码入口 | 新源码入口 | 数据来源 | 测试 | 状态 | 剩余缺口 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 主机网络与挂载点采集 | `apps/workmesh-node/agent/api/v2/dashboard.go` | `node/api/dashboard.go:dashboardNetwork`、`dashboardDisks` | `/proc/net/dev`、`/proc/mounts` | `node/api/dashboard_test.go` | implemented | 非 Linux 环境无内核接口时返回 supported=false；硬件加速器需驱动适配 |
+| CPU、内存、交换区与块设备 I/O 采集 | `apps/workmesh-node/agent/api/v2/dashboard.go`、`agent/app/service/system.go` | `node/api/dashboard.go:dashboardCPUInfo`、`dashboardIO`、`dashboardCurrent` | `/proc/stat`、`/proc/meminfo`、`/proc/diskstats` | `node/api/dashboard_test.go` | implemented | Linux 提供累计 CPU/内存/I/O 指标；无 procfs 平台返回稳定零值和非空数组，避免前端 NaN |
+| 挂载点容量与系统识别信息 | `apps/workmesh-node/agent/app/service/system.go` | `node/api/dashboard.go:handleDashboardOS`、`handleDashboardBase` | `node/api/dashboard_disk_unix.go`、`dashboard_disk_windows.go`、`/etc/os-release`、`net.Interfaces` | `node/api/dashboard_test.go` | implemented | Unix 使用 statfs，Windows 明确标记容量 unavailable；硬件加速器待驱动适配 |
 
 本清单覆盖旧 `apps/workmesh-node/core` 与 `agent` 中不一定表现为 HTTP 路由的能力。当前路由清单为 871 条（包含 helper 注册、公共备份账号空路径和去品牌化静态入口）；本文件用于防止初始化钩子、后台作业、中间件和协议升级能力在迁移时遗漏。
 

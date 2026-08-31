@@ -1,5 +1,10 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
+## 2026-08-31 首页快速入口持久化
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 快速跳转和应用启动器配置 | `apps/workmesh-node/agent/app/service/dashboard.go:ChangeQuick`、`ChangeShow`、`ListLauncherOption` | `POST /api/v2/dashboard/quick/change`、`POST /api/v2/dashboard/app/launcher/show`、`POST /api/v2/dashboard/app/launcher/option`、`GET /api/v2/dashboard/quick/option` | `node/api/dashboard.go:handleDashboardMutation`、`dashboardQuickJumps`、`handleDashboardLauncherOption` | 同左 | 全局节点 Session/Bearer/API Key；写请求受 CSRF 中间件保护 | 请求中的快速入口数组、启动器 key/status | `WORKMESH_DATA_DIR/domains.json.settings`，原子临时文件 rename；读取后重启可恢复 | `node/api/dashboard_test.go:TestDashboardQuickJumpChangePersistsAndFiltersLauncher`、`TestDashboardLauncherOptionIncludesHiddenState`、`TestDashboardQuickJumpChangeRejectsInvalidVisibleCount` | `node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='off'; Set-Location apps/workmesh-server; go test ./node/api -run Dashboard"` | 待主次节点页面联调 | implemented | 应用目录接入真实安装记录后可扩展启动器详情；当前配置和过滤行为已完整持久化 |
+
 ## 2026-08-31 全局安全中间件
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -199,6 +204,11 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 仪表盘主机资源采集 | `apps/workmesh-node/agent/api/v2/dashboard.go` | `/api/v2/dashboard/base/*`、`/api/v2/dashboard/current/*` | `apps/workmesh-server/node/api/dashboard.go` | `GET /api/v2/dashboard/base/{ioOption}/{netOption}`、`GET /api/v2/dashboard/current/{ioOption}/{netOption}` | 节点会话鉴权（由上层中间件执行） | `/proc/loadavg`、`/proc/meminfo`、`/proc/net/dev`、`/proc/mounts`、运行时信息 | 无状态实时采集 | `node/api/dashboard_test.go` | `go test ./node/api -run Dashboard` | 待下一批制品部署 | implemented | Windows 无 `/proc` 时返回 supported=false，GPU/NPU/XPU 需驱动适配 |
+
+## 2026-08-31 仪表盘真实指标补齐
+| 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CPU、内存、交换区、磁盘、块设备 I/O 与主机识别信息 | `apps/workmesh-node/agent/api/v2/dashboard.go`、`agent/app/service/system.go` | `/api/v2/dashboard/base/*`、`/api/v2/dashboard/current/*`、`/api/v2/dashboard/base/os` | `node/api/dashboard.go`、`node/api/dashboard_disk_unix.go`、`node/api/dashboard_disk_windows.go` | `GET /api/v2/dashboard/base/{ioOption}/{netOption}`、`GET /api/v2/dashboard/current/{ioOption}/{netOption}`、`GET /api/v2/dashboard/base/os` | 节点会话鉴权（健康及登录预检除外） | Linux `/proc/stat`、`/proc/meminfo`、`/proc/diskstats`、`/proc/net/dev`、`/proc/mounts`、`statfs`、`/etc/os-release`；Windows 无 procfs 时返回可用字段和明确降级 | 无状态实时采集，短单次读取，不写入项目数据 | `node/api/dashboard_test.go` | `node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='off'; Set-Location apps/workmesh-server; go test -count=1 ./node/api -run Dashboard"` | 本地 Windows/Linux 编译与单元测试；生产节点需真实挂载点和容器环境验收 | implemented | GPU/NPU/XPU 仍需对应驱动适配；Windows 磁盘容量需接入 GetDiskFreeSpaceEx |
 
 ## 2026-08-31 容器仓库、模板与 Compose 管理
 
