@@ -6,6 +6,7 @@ package api
 import (
 	"bytes"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -32,6 +33,25 @@ func TestCoreLoginAndSession(t *testing.T) {
 	mux.ServeHTTP(response, request)
 	if response.status != http.StatusOK {
 		t.Fatalf("登录状态码错误: %d", response.status)
+	}
+}
+
+func TestRegisterIncludesExplicitDashboardRoutes(t *testing.T) {
+	mux := http.NewServeMux()
+	Register(mux)
+	for _, path := range []string{
+		"/api/v2/dashboard/base/os",
+		"/api/v2/dashboard/current/node",
+		"/api/v2/dashboard/current/top/cpu",
+		"/api/v2/dashboard/current/top/mem",
+		"/api/v2/dashboard/quick/option",
+		"/api/v2/dashboard/app/launcher",
+	} {
+		response := newRecorder()
+		mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.status != http.StatusOK {
+			t.Fatalf("仪表盘路由 %s 未返回成功状态: %d", path, response.status)
+		}
 	}
 }
 
