@@ -6,12 +6,104 @@ package api
 import (
 	"bufio"
 	"encoding/binary"
+	"encoding/json"
+	"io"
 	"net"
+	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 )
+
+func TestTerminalDimensionsValidation(t *testing.T) {
+	cases := []struct {
+		query string
+		ok    bool
+	}{
+		{query: "", ok: true},
+		{query: "?cols=120&rows=45", ok: true},
+		{query: "?cols=0&rows=40", ok: false},
+		{query: "?cols=501&rows=40", ok: false},
+		{query: "?cols=80&rows=-1", ok: false},
+		{query: "?cols=abc&rows=40", ok: false},
+	}
+	for _, tc := range cases {
+		r := httptest.NewRequest(http.MethodGet, "/api/v2/hosts/terminal/local"+tc.query, nil)
+		cols, rows, err := terminalDimensions(r)
+		if tc.ok {
+			if err != nil || cols < 1 || rows < 1 {
+				t.Fatalf("合法终端尺寸解析失败 query=%q cols=%d rows=%d err=%v", tc.query, cols, rows, err)
+			}
+		} else if err == nil {
+			t.Fatalf("非法终端尺寸未被拒绝 query=%q", tc.query)
+		}
+	}
+}
+
+func TestTerminalCommandUsesInteractiveTTYFlags(t *testing.T) {
+	containerReq := httptest.NewRequest(http.MethodGet, "/api/v2/hosts/terminal/container?containerid=web&command=sh", nil)
+	containerCmd, err := terminalCommand(containerReq)
+	if err != nil {
+		t.Fatalf("构造容器终端命令失败: %v", err)
+	}
+	if !reflect.DeepEqual(containerCmd.Args[1:4], []string{"exec", "-i", "-t"}) {
+		t.Fatalf("容器终端未启用交互 TTY: %v", containerCmd.Args)
+	}
+	sshReq := httptest.NewRequest(http.MethodGet, "/api/v2/hosts/terminal/ssh?host=example.com&user=demo", nil)
+	sshCmd, err := terminalCommand(sshReq)
+	if err != nil {
+		t.Fatalf("构造 SSH 终端命令失败: %v", err)
+	}
+	if len(sshCmd.Args) < 2 || sshCmd.Args[1] != "-tt" {
+		t.Fatalf("SSH 终端未请求远端 PTY: %v", sshCmd.Args)
+	}
+}
+
+func TestTerminalResizeCallbackAndBounds(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	ws := &streamWebSocket{conn: server, read: bufio.NewReader(server), idleTimeout: time.Second}
+	called := make(chan [2]int, 1)
+	payload, _ := json.Marshal(terminalClientMessage{Type: "resize", Cols: 120, Rows: 45})
+	if err := handleTerminalInputWithResize(ws, io.Discard, payload, func(cols, rows int) error {
+		called <- [2]int{cols, rows}
+		return nil
+	}); err != nil {
+		t.Fatalf("合法 resize 不应失败: %v", err)
+	}
+	select {
+	case dims := <-called:
+		if dims != [2]int{120, 45} {
+			t.Fatalf("resize 尺寸错误: %v", dims)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resize 回调未执行")
+	}
+
+	badPayload, _ := json.Marshal(terminalClientMessage{Type: "resize", Cols: 0, Rows: 45})
+	if err := handleTerminalInputWithResize(ws, io.Discard, badPayload, func(int, int) error { return nil }); err == nil {
+		t.Fatal("非法 resize 应返回错误")
+	}
+}
+
+func TestTerminalSessionStartsAndReportsResizeCapability(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows CI 不执行跨平台 PTY 启动回归；Unix 部署通过同一 API 使用真实 PTY")
+	}
+	cmd := exec.Command("cmd.exe", "/C", "exit", "0")
+	session, err := startTerminalSession(cmd, 80, 40)
+	if err != nil {
+		t.Fatalf("Windows 管道回退启动失败: %v", err)
+	}
+	session.Close()
+	if err := session.resizeFn(100, 30); err == nil {
+		t.Fatal("Windows 管道回退不应伪造 resize 成功")
+	}
+}
 
 func TestContainerLogArgsValidateInput(t *testing.T) {
 	request := httptest.NewRequest("GET", "/api/v2/containers/search/log?container=web&tail=200&follow=true&timestamp=true", nil)

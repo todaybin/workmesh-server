@@ -322,3 +322,11 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 |---|---|---|---|---|
 | [x] | 透传请求绕过目标本地 Session 的受信上下文 | `apps/workmesh-node/core/init/router/proxy.go`、`agent/utils/nodeclient/client.go` | `node/api/node_relay.go:IsForwardedRequestVerified` 注入进程内上下文；`cmd/workmesh-server/main.go:authenticateNodeAPI` 仅信任该上下文；外层 `control/api/security_middleware.go` 将透传交由 NodeRelay 验签 | `node/api/node_relay_test.go:TestNodeRelayForwardsSignedOperateNodeRequest`、`control/api/security_middleware_test.go:TestSecurityMiddlewareAllowsSignedRelayToReachNodeRelay` |
 | [x] | 空请求体透传防御与大小限制 | `apps/workmesh-node/agent/utils/nodeclient/client.go` | `node/api/node_relay.go:forward/serveForwarded` 对 nil Body 使用 `http.NoBody`，请求/响应均限制 8 MiB | 节点透传测试覆盖请求体读取和超限错误 |
+## 2026-08-31 终端 PTY 与 SSE 流式补齐
+
+| 状态 | 隐藏能力 | 旧源码证据 | 新实现 | 验收说明 |
+|---|---|---|---|---|
+| [x] | Unix 本地终端真实 PTY、输入输出和 resize | `apps/workmesh-node/core/utils/terminal/local_cmd.go`、`ws_local_session.go` | `node/api/terminal_pty.go`、`terminal_stream.go` | 使用 `creack/pty.StartWithSize` 与 `pty.Setsize`，尺寸 1-500，断开杀进程并释放 PTY；`stream_protocol_test.go` 覆盖边界和回调 |
+| [~] | 容器 `docker exec -it` 终端 | `apps/workmesh-node/agent/app/api/v2/terminal.go:WsContainerTerminal` | `node/api/terminal_stream.go` | 真实 PTY、输入输出、关闭码和闲置超时；需生产 Docker daemon/容器冒烟及信号联调 |
+| [~] | SSH `-tt` 终端与远端窗口调整 | `apps/workmesh-node/agent/app/api/v2/terminal.go:WsHostSSH`、`utils/terminal/ws_session.go` | `node/api/terminal_stream.go` | 使用 BatchMode 与 10 秒连接超时，凭据仅来自 SSH 配置/Agent；远端 WindowChange 需 SSH 库或代理，未伪造成功 |
+| [~] | SSE 断线重放、背压和写入超时 | `apps/workmesh-node/agent/app/api/v2/container.go:ContainerStreamLogs` | `node/api/container_log_stream.go` | `Last-Event-ID` 后重放最多 256 事件，缓存最多 128 流；积压上限 128 KiB，写入超时 10 秒；生产反向代理断线和跨重启行为待 E2E |

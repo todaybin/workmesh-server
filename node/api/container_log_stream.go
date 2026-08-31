@@ -25,6 +25,13 @@ import (
 
 const maxContainerLogTail = 10000
 
+const (
+	maxContainerSSEPending   = 128 << 10
+	maxContainerSSEReplay    = 256
+	maxContainerSSEStreams   = 128
+	containerSSEWriteTimeout = 10 * time.Second
+)
+
 // containerLogCommand 允许测试注入受控的 Docker 进程构造器；生产环境始终执行 docker 二进制。
 var containerLogCommand = func(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "docker", args...)
@@ -61,12 +68,17 @@ func handleContainerLogStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resumeID := parseLastEventID(r.Header.Get("Last-Event-ID"))
-	stream := &containerSSEWriter{writer: w, flusher: flusher, onError: cancel, nextID: resumeID}
+	stream := newContainerSSEWriter(w, flusher, cancel, strings.Join(args, "\x00"), resumeID)
+	stream.setDeadline = http.NewResponseController(w).SetWriteDeadline
 	command := containerLogCommand(ctx, args...)
 	command.Stdout = stream
 	command.Stderr = stream
 	if err := command.Start(); err != nil {
 		stream.event("error", map[string]any{"message": fmt.Sprintf("启动 Docker 日志流失败: %v", err)})
+		return
+	}
+	// 先重放有界历史，再发送 ready，客户端可用 Last-Event-ID 补齐断线期间的数据。
+	if err := stream.replay(resumeID); err != nil {
 		return
 	}
 	if err := stream.event("ready", map[string]any{"follow": follow, "resumeFrom": resumeID}); err != nil {
@@ -184,13 +196,92 @@ func validComposeLogPath(value string) bool {
 }
 
 type containerSSEWriter struct {
-	mu      sync.Mutex
-	writer  io.Writer
-	flusher http.Flusher
-	onError func()
-	pending []byte
+	mu          sync.Mutex
+	writer      io.Writer
+	flusher     http.Flusher
+	onError     func()
+	setDeadline func(time.Time) error
+	pending     []byte
+	replayKey   string
 	// nextID 按连接单调递增；断线重连通过 Last-Event-ID 继续编号，便于客户端去重。
 	nextID int64
+}
+
+type containerSSEEvent struct {
+	id   int64
+	name string
+	data []byte
+}
+
+type containerSSEReplayBuffer struct {
+	events []containerSSEEvent
+}
+
+var containerSSEReplay = struct {
+	sync.Mutex
+	items map[string]*containerSSEReplayBuffer
+}{items: make(map[string]*containerSSEReplayBuffer)}
+
+func newContainerSSEWriter(w io.Writer, flusher http.Flusher, onError func(), key string, resumeID int64) *containerSSEWriter {
+	if resumeID < 0 {
+		resumeID = 0
+	}
+	s := &containerSSEWriter{writer: w, flusher: flusher, onError: onError, replayKey: key, nextID: resumeID}
+	if key == "" {
+		return s
+	}
+	containerSSEReplay.Lock()
+	if history := containerSSEReplay.items[key]; history != nil && len(history.events) > 0 {
+		latest := history.events[len(history.events)-1].id
+		if latest > s.nextID {
+			s.nextID = latest
+		}
+	}
+	containerSSEReplay.Unlock()
+	return s
+}
+
+func (s *containerSSEWriter) rememberLocked(event containerSSEEvent) {
+	if s.replayKey == "" {
+		return
+	}
+	data := append([]byte(nil), event.data...)
+	containerSSEReplay.Lock()
+	history := containerSSEReplay.items[s.replayKey]
+	if history == nil {
+		if len(containerSSEReplay.items) >= maxContainerSSEStreams {
+			for key := range containerSSEReplay.items {
+				delete(containerSSEReplay.items, key)
+				break
+			}
+		}
+		history = &containerSSEReplayBuffer{}
+		containerSSEReplay.items[s.replayKey] = history
+	}
+	history.events = append(history.events, containerSSEEvent{id: event.id, name: event.name, data: data})
+	if len(history.events) > maxContainerSSEReplay {
+		history.events = history.events[len(history.events)-maxContainerSSEReplay:]
+	}
+	containerSSEReplay.Unlock()
+}
+
+func (s *containerSSEWriter) writeLocked(format string, args ...any) error {
+	if s.setDeadline != nil {
+		if err := s.setDeadline(time.Now().Add(containerSSEWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			if s.onError != nil {
+				s.onError()
+			}
+			return fmt.Errorf("SSE 写入超时设置失败: %w", err)
+		}
+	}
+	_, err := fmt.Fprintf(s.writer, format, args...)
+	if s.setDeadline != nil {
+		_ = s.setDeadline(time.Time{})
+	}
+	if err != nil && s.onError != nil {
+		s.onError()
+	}
+	return err
 }
 
 func parseLastEventID(value string) int64 {
@@ -209,6 +300,12 @@ func (s *containerSSEWriter) Write(payload []byte) (int, error) {
 	originalLen := len(payload)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(payload) > maxContainerSSEPending || len(s.pending)+len(payload) > maxContainerSSEPending {
+		if s.onError != nil {
+			s.onError()
+		}
+		return 0, errors.New("SSE 输出积压超过 128KiB 限制")
+	}
 	s.pending = append(s.pending, payload...)
 	for {
 		index := bytes.IndexByte(s.pending, '\n')
@@ -236,13 +333,14 @@ func (s *containerSSEWriter) Write(payload []byte) (int, error) {
 
 func (s *containerSSEWriter) writeDataLineLocked(line []byte) error {
 	s.nextID++
-	if _, err := fmt.Fprintf(s.writer, "id: %d\ndata: %s\n\n", s.nextID, strings.ReplaceAll(string(line), "\r", "")); err != nil {
-		if s.onError != nil {
-			s.onError()
-		}
+	clean := []byte(strings.ReplaceAll(string(line), "\r", ""))
+	if err := s.writeLocked("id: %d\ndata: %s\n\n", s.nextID, clean); err != nil {
 		return err
 	}
-	s.flusher.Flush()
+	s.rememberLocked(containerSSEEvent{id: s.nextID, data: clean})
+	if s.flusher != nil {
+		s.flusher.Flush()
+	}
 	return nil
 }
 
@@ -269,12 +367,48 @@ func (s *containerSSEWriter) event(name string, value any) error {
 		}
 	}
 	s.nextID++
-	if _, err := fmt.Fprintf(s.writer, "id: %d\nevent: %s\ndata: %s\n\n", s.nextID, name, payload); err != nil {
-		if s.onError != nil {
-			s.onError()
-		}
+	if err := s.writeLocked("id: %d\nevent: %s\ndata: %s\n\n", s.nextID, name, payload); err != nil {
 		return err
 	}
-	s.flusher.Flush()
+	s.rememberLocked(containerSSEEvent{id: s.nextID, name: name, data: payload})
+	if s.flusher != nil {
+		s.flusher.Flush()
+	}
+	return nil
+}
+
+// replay 将 Last-Event-ID 之后的有界事件重放给重连客户端。
+func (s *containerSSEWriter) replay(lastID int64) error {
+	if s.replayKey == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	containerSSEReplay.Lock()
+	history := containerSSEReplay.items[s.replayKey]
+	events := make([]containerSSEEvent, 0)
+	if history != nil {
+		for _, event := range history.events {
+			if event.id > lastID {
+				events = append(events, containerSSEEvent{id: event.id, name: event.name, data: append([]byte(nil), event.data...)})
+			}
+		}
+	}
+	containerSSEReplay.Unlock()
+	for _, event := range events {
+		if event.name == "" {
+			if err := s.writeLocked("id: %d\ndata: %s\n\n", event.id, event.data); err != nil {
+				return err
+			}
+		} else if err := s.writeLocked("id: %d\nevent: %s\ndata: %s\n\n", event.id, event.name, event.data); err != nil {
+			return err
+		}
+		if event.id > s.nextID {
+			s.nextID = event.id
+		}
+		if s.flusher != nil {
+			s.flusher.Flush()
+		}
+	}
 	return nil
 }

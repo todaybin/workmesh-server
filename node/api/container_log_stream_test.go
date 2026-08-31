@@ -130,6 +130,45 @@ func TestContainerSSELastEventIDContinuesSequence(t *testing.T) {
 	}
 }
 
+func TestContainerSSEResumeReplaysBoundedHistory(t *testing.T) {
+	key := fmt.Sprintf("resume-test-%d", time.Now().UnixNano())
+	firstWriter := &captureSSEWriter{head: make(http.Header), seen: make(chan struct{})}
+	first := newContainerSSEWriter(firstWriter, firstWriter, nil, key, 0)
+	if err := first.event("ready", map[string]any{"source": "test"}); err != nil {
+		t.Fatalf("写入初始事件失败: %v", err)
+	}
+	if _, err := first.Write([]byte("line-one\n")); err != nil {
+		t.Fatalf("写入初始日志失败: %v", err)
+	}
+	secondWriter := &captureSSEWriter{head: make(http.Header), seen: make(chan struct{})}
+	second := newContainerSSEWriter(secondWriter, secondWriter, nil, key, 1)
+	if err := second.replay(1); err != nil {
+		t.Fatalf("重放 SSE 事件失败: %v", err)
+	}
+	body := secondWriter.String()
+	if !strings.Contains(body, "id: 2\ndata: line-one\n\n") {
+		t.Fatalf("Last-Event-ID 后应重放日志事件，响应=%q", body)
+	}
+	if strings.Contains(body, "id: 1\nevent: ready") {
+		t.Fatalf("Last-Event-ID=1 不应重复 ready 事件，响应=%q", body)
+	}
+}
+
+func TestContainerSSEBackpressureIsBounded(t *testing.T) {
+	called := false
+	s := &containerSSEWriter{
+		writer:  &captureSSEWriter{head: make(http.Header), seen: make(chan struct{})},
+		flusher: &captureSSEWriter{head: make(http.Header), seen: make(chan struct{})},
+		onError: func() { called = true },
+	}
+	if _, err := s.Write(bytes.Repeat([]byte("x"), maxContainerSSEPending+1)); err == nil {
+		t.Fatal("超过积压上限的 SSE 输出必须失败")
+	}
+	if !called {
+		t.Fatal("SSE 背压失败时应触发取消回调")
+	}
+}
+
 func TestContainerLogArgsComposeAndAllSemantics(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v2/containers/search/log?compose=/srv/a.yml,/srv/b.yml&since=all&tail=0", nil)
 	args, follow, err := containerLogArgs(req)

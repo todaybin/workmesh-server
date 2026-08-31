@@ -4,7 +4,6 @@
 package api
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -26,6 +25,8 @@ import (
 type terminalClientMessage struct {
 	Type      string `json:"type"`
 	Data      string `json:"data"`
+	Cols      int    `json:"cols,omitempty"`
+	Rows      int    `json:"rows,omitempty"`
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
@@ -35,12 +36,24 @@ type terminalServerMessage struct {
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
+const (
+	// terminalIdleTimeout 限制终端连接长时间无输入时占用的资源。
+	terminalIdleTimeout  = 30 * time.Minute
+	maxTerminalDimension = 500
+)
+
+// handleTerminalStream 建立本地、容器或 SSH 终端的双向 WebSocket 会话。
 func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 	if !requireStreamAuth(w, r, "WORKMESH_TERMINAL_TOKEN", "WORKMESH_STREAM_TOKEN") {
 		return
 	}
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"websocket": true, "upgradeRequired": true}})
+		return
+	}
+	cols, rows, err := terminalDimensions(r)
+	if err != nil {
+		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "TERMINAL_PARAMETERS_INVALID"}, "message": err.Error()})
 		return
 	}
 	command, err := terminalCommand(r)
@@ -55,40 +68,27 @@ func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.close()
 
-	stdin, err := command.StdinPipe()
+	session, err := startTerminalSession(command, cols, rows)
 	if err != nil {
-		writeTerminalError(ws, err)
+		_ = writeTerminalError(ws, err)
 		return
 	}
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		writeTerminalError(ws, err)
-		return
-	}
-	stderr, err := command.StderrPipe()
-	if err != nil {
-		writeTerminalError(ws, err)
-		return
-	}
-	if err := command.Start(); err != nil {
-		writeTerminalError(ws, fmt.Errorf("启动终端进程失败: %w", err))
-		return
-	}
+	defer session.Close()
 
-	// 输出泵与输入循环共享一个关闭信号，任一方向断开都会取消进程并释放管道。
+	// 输出泵与输入循环共享完成信号；任一方向断开都会终止子进程并释放 PTY。
 	done := make(chan struct{})
 	var once sync.Once
 	finish := func() {
 		once.Do(func() {
 			close(done)
-			if command.Process != nil {
-				_ = command.Process.Kill()
-			}
+			session.Close()
 		})
 	}
 	defer finish()
-	go pumpTerminalOutput(ws, stdout, finish)
-	go pumpTerminalOutput(ws, stderr, finish)
+	go pumpTerminalOutput(ws, session.output, finish)
+	if session.errOutput != nil {
+		go pumpTerminalOutput(ws, session.errOutput, finish)
+	}
 	go func() { _ = command.Wait(); finish() }()
 
 	for {
@@ -98,7 +98,6 @@ func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 		}
 		switch opcode {
 		case 0x8:
-			// 客户端关闭时回送相同状态码，确保浏览器和反向代理完成正常关闭握手。
 			code := uint16(1000)
 			if len(payload) >= 2 {
 				code = binary.BigEndian.Uint16(payload[:2])
@@ -110,10 +109,9 @@ func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 			_ = writeStreamFrame(ws.conn, 0xA, payload)
 			ws.writeMu.Unlock()
 		case 0xA:
-			// Pong 会刷新 readFrame 的空闲截止时间，无需额外响应。
 			continue
 		case 0x1:
-			if err := handleTerminalInput(ws, stdin, payload); err != nil {
+			if err := handleTerminalInputWithResize(ws, session.input, payload, session.resizeFn); err != nil {
 				return
 			}
 		}
@@ -125,9 +123,29 @@ func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// terminalDimensions 解析并限制浏览器报告的终端列数和行数。
+func terminalDimensions(r *http.Request) (int, int, error) {
+	cols, rows := 80, 40
+	if raw := strings.TrimSpace(r.URL.Query().Get("cols")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > maxTerminalDimension {
+			return 0, 0, errors.New("cols 必须是 1 到 500 之间的整数")
+		}
+		cols = value
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("rows")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > maxTerminalDimension {
+			return 0, 0, errors.New("rows 必须是 1 到 500 之间的整数")
+		}
+		rows = value
+	}
+	return cols, rows, nil
+}
+
+// terminalCommand 构造受限的本地、Docker 或 SSH 终端命令。
 func terminalCommand(r *http.Request) (*exec.Cmd, error) {
-	ctx, cancel := context.WithCancel(r.Context())
-	_ = cancel // exec.CommandContext 在连接断开或 handler 返回时负责终止子进程。
+	ctx := r.Context()
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch {
 	case strings.HasSuffix(path, "/local"):
@@ -159,7 +177,8 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 		if !validDockerIdentifier(containerID) || !validTerminalProgram(program) {
 			return nil, errors.New("containerid 或 command 参数无效")
 		}
-		args := []string{"exec", "-i"}
+		// -i 与 -t 同时启用，使 Docker 会话接收控制序列和窗口尺寸。
+		args := []string{"exec", "-i", "-t"}
 		if user := strings.TrimSpace(r.URL.Query().Get("user")); user != "" {
 			if !validDockerIdentifier(user) {
 				return nil, errors.New("user 参数无效")
@@ -172,7 +191,7 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 		host := strings.TrimSpace(r.URL.Query().Get("host"))
 		user := strings.TrimSpace(r.URL.Query().Get("user"))
 		if host == "" || strings.ContainsAny(host, " \t\r\n\x00") || len(host) > 255 {
-			return nil, errors.New("host 参数不能为空")
+			return nil, errors.New("host 参数不能为空且不能包含空白字符")
 		}
 		port := 22
 		if raw := r.URL.Query().Get("port"); raw != "" {
@@ -189,7 +208,8 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 			}
 			target = user + "@" + host
 		}
-		args := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-p", strconv.Itoa(port), target}
+		// 仅使用 SSH 配置或 Agent 的非交互认证，绝不从 URL 接收密码或私钥。
+		args := []string{"-tt", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-p", strconv.Itoa(port), target}
 		if command := strings.TrimSpace(r.URL.Query().Get("command")); command != "" {
 			if len(command) > 4096 || strings.IndexByte(command, 0) >= 0 {
 				return nil, errors.New("command 参数无效")
@@ -202,6 +222,7 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 	}
 }
 
+// validTerminalProgram 仅允许容器内单个可执行文件名，禁止注入 shell 参数。
 func validTerminalProgram(program string) bool {
 	if program == "" || len(program) > 128 || strings.ContainsAny(program, " \t\r\n\x00/\\") {
 		return false
@@ -214,7 +235,13 @@ func validTerminalProgram(program string) bool {
 	return true
 }
 
+// handleTerminalInput 保留旧调用签名，供非 PTY 测试和内部调用使用。
 func handleTerminalInput(ws *streamWebSocket, stdin io.Writer, payload []byte) error {
+	return handleTerminalInputWithResize(ws, stdin, payload, nil)
+}
+
+// handleTerminalInputWithResize 处理终端输入、心跳和窗口调整消息。
+func handleTerminalInputWithResize(ws *streamWebSocket, stdin io.Writer, payload []byte, resize func(int, int) error) error {
 	var message terminalClientMessage
 	if err := json.Unmarshal(payload, &message); err != nil {
 		return writeTerminalError(ws, errors.New("终端消息不是有效 JSON"))
@@ -225,19 +252,32 @@ func handleTerminalInput(ws *streamWebSocket, stdin io.Writer, payload []byte) e
 		if err != nil || len(decoded) > 64<<10 {
 			return writeTerminalError(ws, errors.New("终端输入无效或超过 64KiB"))
 		}
+		if stdin == nil {
+			return writeTerminalError(ws, errors.New("终端输入通道不可用"))
+		}
 		_, err = stdin.Write(decoded)
 		return err
 	case "heartbeat":
 		payload, _ := json.Marshal(terminalServerMessage{Type: "heartbeat", Timestamp: message.Timestamp})
 		return ws.writeText(payload)
 	case "resize":
-		// 标准库无跨平台 PTY resize 能力；接受消息以保持协议兼容，进程生命周期不受影响。
+		if message.Cols < 1 || message.Cols > maxTerminalDimension || message.Rows < 1 || message.Rows > maxTerminalDimension {
+			return writeTerminalError(ws, errors.New("终端窗口尺寸必须在 1 到 500 之间"))
+		}
+		if resize == nil {
+			return writeTerminalError(ws, errors.New("终端窗口调整不可用"))
+		}
+		if err := resize(message.Cols, message.Rows); err != nil {
+			// 调整失败不终止会话，客户端可以继续使用当前尺寸。
+			return writeTerminalError(ws, fmt.Errorf("调整终端窗口失败: %w", err))
+		}
 		return nil
 	default:
 		return writeTerminalError(ws, errors.New("终端消息类型不受支持"))
 	}
 }
 
+// pumpTerminalOutput 将 PTY 或普通管道输出编码为前端约定的 base64 文本帧。
 func pumpTerminalOutput(ws *streamWebSocket, reader io.Reader, finish func()) {
 	defer finish()
 	buffer := make([]byte, 32<<10)
@@ -259,6 +299,3 @@ func writeTerminalError(ws *streamWebSocket, err error) error {
 	message, _ := json.Marshal(terminalServerMessage{Type: "cmd", Data: base64.StdEncoding.EncodeToString([]byte(err.Error() + "\r\n"))})
 	return ws.writeText(message)
 }
-
-// terminalIdleTimeout 给调用方保留统一的会话超时定义，后续接入 PTY 时沿用该边界。
-const terminalIdleTimeout = 30 * time.Minute
