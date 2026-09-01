@@ -1,0 +1,19 @@
+{
+  "listenAddress": "127.0.0.1",
+  "listenPort": 9999,
+  "publicURL": "",
+  "dataDir": "./data",
+  "requestTimeout": "30s",
+  "shutdownTimeout": "10s",
+  "limits": {
+    "maxConcurrentTasks": 4,
+    "maxConcurrentConversions": 2,
+    "maxSSEStreams": 64,
+    "maxAIJobs": 4,
+    "maxLogBytes": 8388608,
+    "cacheTTL": "5m"
+  },
+  "backgroundTasks": {
+    "enabled": true
+  }
+}

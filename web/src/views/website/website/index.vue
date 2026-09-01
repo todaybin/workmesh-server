@@ -168,7 +168,7 @@
                             </span>
                             <span v-else>
                                 <Status
-                                    v-if="row.status === 'Running'"
+                                    v-if="String(row.status).toLowerCase() === 'running'"
                                     v-permission
                                     :operate="true"
                                     :status="row.status"
@@ -465,7 +465,7 @@ const handleDomainEdit = (row: Website.Website, domain: string) => {
 };
 
 const disabledConfig = computed(() => {
-    return nginxStatus.value != 'Running';
+    return String(nginxStatus.value).toLowerCase() != 'running';
 });
 
 const changeSort = ({ prop, order }) => {

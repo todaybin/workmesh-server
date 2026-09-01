@@ -1,6 +1,6 @@
 <template>
-    <div v-loading="loading" class="w-full h-full flex items-center justify-center px-8">
-        <div class="w-full flex-grow flex flex-col login-form">
+    <div v-loading="loading" class="login-form">
+        <div class="w-full flex-grow flex flex-col">
             <div v-if="mfaShow">
                 <el-form @submit.prevent>
                     <div class="flex flex-col justify-center items-center mb-6">
@@ -62,6 +62,7 @@
                                     <el-dropdown-item command="ru">Русский</el-dropdown-item>
                                     <el-dropdown-item command="ms">Bahasa Melayu</el-dropdown-item>
                                     <el-dropdown-item command="tr">Turkish</el-dropdown-item>
+                                    <el-dropdown-item command="es-ES">Español (España)</el-dropdown-item>
                                     <el-dropdown-item command="fa">فارسی</el-dropdown-item>
                                     <el-dropdown-item command="lo">ພາສາລາວ</el-dropdown-item>
                                 </el-dropdown-menu>
@@ -188,6 +189,7 @@
                                     <el-dropdown-item command="ru">Русский</el-dropdown-item>
                                     <el-dropdown-item command="ms">Bahasa Melayu</el-dropdown-item>
                                     <el-dropdown-item command="tr">Turkish</el-dropdown-item>
+                                    <el-dropdown-item command="es-ES">Español (España)</el-dropdown-item>
                                     <el-dropdown-item command="fa">فارسی</el-dropdown-item>
                                     <el-dropdown-item command="lo">ພາສາລາວ</el-dropdown-item>
                                 </el-dropdown-menu>
@@ -1033,6 +1035,10 @@ onBeforeUnmount(() => {
 }
 
 .login-form {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0 40px;
+
     .login-button {
         background-color: var(--login-btn-link-color);
         border-color: var(--login-btn-link-color);

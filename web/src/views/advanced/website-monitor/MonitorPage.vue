@@ -1,7 +1,7 @@
 <template>
     <div v-loading="loading">
         <el-card v-if="type === 'dashboard'" shadow="never">
-            <template #header>网站监控概况</template>
+            <template #header>{{ $t('serverPages.websiteMonitor.dashboard') }}</template>
             <el-row :gutter="12">
                 <el-col v-for="item in cards" :key="item.key" :span="4">
                     <el-statistic :title="item.label" :value="item.value" />
@@ -11,23 +11,23 @@
             <el-row :gutter="16">
                 <el-col :span="16">
                     <el-table :data="stats" stripe>
-                        <el-table-column prop="day" label="日期" />
-                        <el-table-column prop="pv" label="PV" />
-                        <el-table-column prop="uv" label="UV" />
-                        <el-table-column prop="flow" label="流量" />
-                        <el-table-column prop="req" label="请求数" />
+                        <el-table-column prop="day" :label="$t('serverPages.websiteMonitor.date')" />
+                        <el-table-column prop="pv" :label="$t('serverPages.websiteMonitor.pv')" />
+                        <el-table-column prop="uv" :label="$t('serverPages.websiteMonitor.uv')" />
+                        <el-table-column prop="flow" :label="$t('serverPages.websiteMonitor.flow')" />
+                        <el-table-column prop="req" :label="$t('serverPages.websiteMonitor.requests')" />
                     </el-table>
                 </el-col>
                 <el-col :span="8">
                     <el-table :data="locations" stripe size="small">
-                        <el-table-column prop="name" label="访客地域" />
-                        <el-table-column prop="value" label="访问量" width="90" />
+                        <el-table-column prop="name" :label="$t('serverPages.websiteMonitor.visitorRegion')" />
+                        <el-table-column prop="value" :label="$t('serverPages.websiteMonitor.visits')" width="90" />
                     </el-table>
                 </el-col>
             </el-row>
         </el-card>
         <el-card v-else-if="type === 'rank'" shadow="never">
-            <template #header>访问统计</template>
+            <template #header>{{ $t('serverPages.websiteMonitor.rank') }}</template>
             <el-radio-group v-model="rankType" @change="load">
                 <el-radio-button v-for="item in rankTypes" :key="item.value" :label="item.value">
                     {{ item.label }}
@@ -35,77 +35,77 @@
             </el-radio-group>
             <el-table :data="rank" class="mt-3">
                 <el-table-column type="index" width="60" />
-                <el-table-column prop="name" label="名称" />
-                <el-table-column prop="value" label="次数" />
+                <el-table-column prop="name" :label="$t('serverPages.websiteMonitor.name')" />
+                <el-table-column prop="value" :label="$t('serverPages.websiteMonitor.count')" />
             </el-table>
         </el-card>
         <el-card v-else-if="type === 'log'" shadow="never">
-            <template #header>请求日志</template>
+            <template #header>{{ $t('serverPages.websiteMonitor.log') }}</template>
             <el-form :inline="true">
-                <el-form-item label="IP"><el-input v-model="query.ip" clearable /></el-form-item>
-                <el-form-item label="URI"><el-input v-model="query.uri" clearable /></el-form-item>
-                <el-form-item><el-button type="primary" @click="load">查询</el-button></el-form-item>
+                <el-form-item :label="$t('serverPages.websiteMonitor.ip')"><el-input v-model="query.ip" clearable /></el-form-item>
+                <el-form-item :label="$t('serverPages.websiteMonitor.uri')"><el-input v-model="query.uri" clearable /></el-form-item>
+                <el-form-item><el-button type="primary" @click="load">{{ $t('serverPages.websiteMonitor.query') }}</el-button></el-form-item>
             </el-form>
             <el-table :data="logs">
-                <el-table-column prop="occurredAt" label="时间" />
-                <el-table-column prop="ip" label="IP" />
-                <el-table-column prop="method" label="方法" />
-                <el-table-column prop="uri" label="URI" />
-                <el-table-column prop="status" label="状态码" />
-                <el-table-column prop="durationMs" label="耗时(ms)" />
+                <el-table-column prop="occurredAt" :label="$t('serverPages.websiteMonitor.time')" />
+                <el-table-column prop="ip" :label="$t('serverPages.websiteMonitor.ip')" />
+                <el-table-column prop="method" :label="$t('serverPages.websiteMonitor.method')" />
+                <el-table-column prop="uri" :label="$t('serverPages.websiteMonitor.uri')" />
+                <el-table-column prop="status" :label="$t('serverPages.websiteMonitor.statusCode')" />
+                <el-table-column prop="durationMs" :label="$t('serverPages.websiteMonitor.duration')" />
             </el-table>
         </el-card>
         <el-card v-else-if="type === 'websites'" shadow="never">
-            <template #header>网站列表</template>
+            <template #header>{{ $t('serverPages.websiteMonitor.websites') }}</template>
             <el-table :data="websites">
-                <el-table-column prop="alias" label="网站" />
-                <el-table-column prop="primaryDomain" label="域名" />
-                <el-table-column prop="pv" label="PV" />
-                <el-table-column prop="uv" label="UV" />
-                <el-table-column prop="flow" label="流量" />
-                <el-table-column prop="req" label="请求数" />
+                <el-table-column prop="alias" :label="$t('menu.website')" />
+                <el-table-column prop="primaryDomain" :label="$t('serverPages.websiteMonitor.domain')" />
+                <el-table-column prop="pv" :label="$t('serverPages.websiteMonitor.pv')" />
+                <el-table-column prop="uv" :label="$t('serverPages.websiteMonitor.uv')" />
+                <el-table-column prop="flow" :label="$t('serverPages.websiteMonitor.flow')" />
+                <el-table-column prop="req" :label="$t('serverPages.websiteMonitor.requests')" />
             </el-table>
         </el-card>
         <el-card v-else-if="type === 'setting'" shadow="never">
-            <template #header>监控设置</template>
+            <template #header>{{ $t('serverPages.websiteMonitor.setting') }}</template>
             <el-form :model="config" label-width="120px" style="max-width: 680px">
-                <el-form-item label="监控开关"><el-switch v-model="config.enabled" /></el-form-item>
-                <el-form-item label="保存天数">
+                <el-form-item :label="$t('serverPages.websiteMonitor.monitorSwitch')"><el-switch v-model="config.enabled" /></el-form-item>
+                <el-form-item :label="$t('serverPages.websiteMonitor.retentionDays')">
                     <el-input-number v-model="config.storeDays" :min="1" :max="3650" />
                 </el-form-item>
-                <el-form-item label="保存大小(MB)"><el-input-number v-model="sizeMB" :min="64" /></el-form-item>
-                <el-form-item label="CDN 类型">
+                <el-form-item :label="$t('serverPages.websiteMonitor.retentionSize')"><el-input-number v-model="sizeMB" :min="64" /></el-form-item>
+                <el-form-item :label="$t('serverPages.websiteMonitor.cdnType')">
                     <el-select v-model="config.cdnType" clearable>
-                        <el-option label="无 CDN" value="" />
-                        <el-option label="Cloudflare" value="cloudflare" />
-                        <el-option label="阿里云 CDN" value="aliyun" />
-                        <el-option label="腾讯云 CDN" value="tencent" />
-                        <el-option label="其他 CDN" value="other" />
+                        <el-option :label="$t('serverPages.websiteMonitor.noCdn')" value="" />
+                        <el-option :label="$t('serverPages.websiteMonitor.cloudflare')" value="cloudflare" />
+                        <el-option :label="$t('serverPages.websiteMonitor.aliyunCdn')" value="aliyun" />
+                        <el-option :label="$t('serverPages.websiteMonitor.tencentCdn')" value="tencent" />
+                        <el-option :label="$t('serverPages.websiteMonitor.otherCdn')" value="other" />
                     </el-select>
                 </el-form-item>
-                <el-form-item label="真实 IP 请求头">
-                    <el-input v-model="config.realIPHeader" placeholder="CF-Connecting-IP 或 X-Forwarded-For" />
+                <el-form-item :label="$t('serverPages.websiteMonitor.realIPHeader')">
+                    <el-input v-model="config.realIPHeader" :placeholder="$t('serverPages.websiteMonitor.cdnHeaderPlaceholder')" />
                 </el-form-item>
-                <el-form-item label="排除状态码">
+                <el-form-item :label="$t('serverPages.websiteMonitor.excludeStatus')">
                     <el-input v-model="config.excludeStatus" placeholder="404,499" />
                 </el-form-item>
-                <el-form-item label="排除扩展名">
+                <el-form-item :label="$t('serverPages.websiteMonitor.excludeExtension')">
                     <el-input v-model="config.excludeExt" placeholder=".css,.js,.png" />
                 </el-form-item>
-                <el-form-item label="排除 URI"><el-input v-model="config.excludeURI" /></el-form-item>
-                <el-form-item label="排除 IP"><el-input v-model="config.excludeIP" /></el-form-item>
-                <el-form-item label="排除 UA"><el-input v-model="config.excludeUA" /></el-form-item>
-                <el-form-item><el-button type="primary" @click="save">保存</el-button></el-form-item>
+                <el-form-item :label="$t('serverPages.websiteMonitor.excludeURI')"><el-input v-model="config.excludeURI" /></el-form-item>
+                <el-form-item :label="$t('serverPages.websiteMonitor.excludeIP')"><el-input v-model="config.excludeIP" /></el-form-item>
+                <el-form-item :label="$t('serverPages.websiteMonitor.excludeUA')"><el-input v-model="config.excludeUA" /></el-form-item>
+                <el-form-item><el-button type="primary" @click="save">{{ $t('serverPages.websiteMonitor.save') }}</el-button></el-form-item>
             </el-form>
         </el-card>
         <el-card v-else shadow="never">
-            <template #header>趋势统计</template>
+            <template #header>{{ $t('serverPages.websiteMonitor.trend') }}</template>
             <el-table :data="stats">
-                <el-table-column prop="day" label="日期" />
-                <el-table-column prop="pv" label="PV" />
-                <el-table-column prop="uv" label="UV" />
-                <el-table-column prop="flow" label="流量" />
-                <el-table-column prop="req" label="请求数" />
+                <el-table-column prop="day" :label="$t('serverPages.websiteMonitor.date')" />
+                <el-table-column prop="pv" :label="$t('serverPages.websiteMonitor.pv')" />
+                <el-table-column prop="uv" :label="$t('serverPages.websiteMonitor.uv')" />
+                <el-table-column prop="flow" :label="$t('serverPages.websiteMonitor.flow')" />
+                <el-table-column prop="req" :label="$t('serverPages.websiteMonitor.requests')" />
             </el-table>
         </el-card>
     </div>
@@ -113,6 +113,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import i18n from '@/lang';
 import {
     getMonitorConfig,
     monitorLogs,
@@ -144,24 +145,24 @@ const config = reactive<any>({
     cdnType: '',
     realIPHeader: '',
 });
-const rankTypes = [
-    { value: 'uri', label: 'URI' },
-    { value: 'referer', label: 'Referer' },
-    { value: 'ip', label: 'IP' },
-    { value: 'browser', label: '浏览器' },
-    { value: 'os', label: '操作系统' },
-    { value: 'device', label: '设备' },
-    { value: 'status_code', label: '状态码' },
-];
+const rankTypes = computed(() => [
+                { value: 'uri', label: i18n.global.t('serverPages.websiteMonitor.uri') },
+    { value: 'referer', label: i18n.global.t('serverPages.websiteMonitor.referer') },
+    { value: 'ip', label: i18n.global.t('serverPages.websiteMonitor.ip') },
+    { value: 'browser', label: i18n.global.t('serverPages.websiteMonitor.browser') },
+    { value: 'os', label: i18n.global.t('serverPages.websiteMonitor.operatingSystem') },
+    { value: 'device', label: i18n.global.t('serverPages.websiteMonitor.device') },
+    { value: 'status_code', label: i18n.global.t('serverPages.websiteMonitor.statusCode') },
+]);
 const cards = computed(() => {
     const item = stats.value[0] || {};
     return [
-        { key: 'pv', label: 'PV', value: item.pv || 0 },
-        { key: 'uv', label: 'UV', value: item.uv || 0 },
-        { key: 'ip', label: 'IP', value: item.ip || 0 },
-        { key: 'flow', label: '流量', value: item.flow || 0 },
-        { key: 'spider', label: '蜘蛛', value: item.spider || 0 },
-        { key: 'req', label: '请求数', value: item.req || 0 },
+        { key: 'pv', label: i18n.global.t('serverPages.websiteMonitor.pv'), value: item.pv || 0 },
+        { key: 'uv', label: i18n.global.t('serverPages.websiteMonitor.uv'), value: item.uv || 0 },
+        { key: 'ip', label: i18n.global.t('serverPages.websiteMonitor.ip'), value: item.ip || 0 },
+        { key: 'flow', label: i18n.global.t('serverPages.websiteMonitor.flow'), value: item.flow || 0 },
+        { key: 'spider', label: i18n.global.t('serverPages.websiteMonitor.spider'), value: item.spider || 0 },
+        { key: 'req', label: i18n.global.t('serverPages.websiteMonitor.requests'), value: item.req || 0 },
     ];
 });
 async function load() {
@@ -195,7 +196,7 @@ async function load() {
 async function save() {
     config.storeSize = sizeMB.value * 1024 * 1024;
     await updateMonitorConfig(config);
-    ElMessage.success('监控设置已保存');
+    ElMessage.success(i18n.global.t('serverPages.websiteMonitor.saved'));
 }
 onMounted(() => {
     sizeMB.value = Math.round(config.storeSize / 1024 / 1024);

@@ -30,6 +30,7 @@ import i18n from '@/lang';
 import { stopProcess } from '@/api/modules/process';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import { useGlobalStore } from '@/composables/useGlobalStore';
+import { buildSameOriginWebSocketUrl } from '@/api/transport';
 import { checkStreamAuth } from '@/utils/stream-auth';
 const { currentNode: globalCurrentNode } = useGlobalStore();
 
@@ -87,11 +88,8 @@ const onClose = () => {
 
 const initProcess = async () => {
     const token = ++initProcessToken;
-    let href = window.location.href;
-    let protocol = href.split('//')[0] === 'http:' ? 'ws' : 'wss';
-    let ipLocal = href.split('//')[1].split('/')[0];
     let currentNode = globalCurrentNode.value;
-    const url = `${protocol}://${ipLocal}/api/v2/process/ws?operateNode=${currentNode}`;
+    const url = buildSameOriginWebSocketUrl('/process/ws', currentNode);
     const authError = await checkStreamAuth(url, currentNode);
     if (token !== initProcessToken) {
         return;

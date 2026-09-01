@@ -278,7 +278,7 @@ func isLocalRequest(r *http.Request) bool {
 
 func checkSecurityEntrance(w http.ResponseWriter, r *http.Request, settings SecuritySettings, authorize func(*http.Request) bool) bool {
 	entrance := strings.Trim(strings.TrimSpace(settings.SecurityEntrance), "/")
-	if entrance == "" || isAPIRequest(r.URL.Path) || isStaticWebPath(r.URL.Path) || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+	if entrance == "" || r.URL.Path == "/health" || r.URL.Path == "/ready" || isAPIRequest(r.URL.Path) || isStaticAssetPath(r.URL.Path) || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
 		return true
 	}
 	if strings.Trim(strings.TrimSpace(r.URL.Path), "/") == entrance {
@@ -404,6 +404,10 @@ func isStaticAPIPath(path string) bool {
 
 func isStaticWebPath(path string) bool {
 	return path == "/" || path == "/favicon.ico" || strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/public/")
+}
+
+func isStaticAssetPath(path string) bool {
+	return path == "/favicon.ico" || strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/public/")
 }
 
 func isPublicSecurityPath(r *http.Request) bool {

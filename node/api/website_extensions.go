@@ -4,6 +4,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/internal/storage"
 	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
@@ -44,6 +46,8 @@ type websiteExtensionStore struct {
 	Databases []map[string]any          `json:"databases"`
 	Logs      []map[string]any          `json:"logs"`
 	NextID    uint64                    `json:"nextId"`
+	db        *sql.DB
+	owner     *storage.Store
 }
 
 func newWebsiteExtensionStore() *websiteExtensionStore {
@@ -51,10 +55,18 @@ func newWebsiteExtensionStore() *websiteExtensionStore {
 	if root == "" {
 		root = "./data"
 	}
-	s := &websiteExtensionStore{path: filepath.Join(root, "website-extensions.json"), Proxies: map[string]map[string]any{}, Auths: map[string]map[string]any{}}
-	data, err := os.ReadFile(s.path)
-	if err == nil {
-		_ = json.Unmarshal(data, s)
+	s := &websiteExtensionStore{Proxies: map[string]map[string]any{}, Auths: map[string]map[string]any{}}
+	if db := sharedDB(); db != nil {
+		s.db = db
+	} else if opened, err := storage.Open(filepath.Join(root, "workmesh.db")); err == nil {
+		s.owner, s.db = opened, opened.DB()
+	}
+	if s.db != nil {
+		_, _ = s.db.Exec(`CREATE TABLE IF NOT EXISTS website_extension_state (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`)
+		var data []byte
+		if err := s.db.QueryRow("SELECT payload FROM website_extension_state WHERE id=1").Scan(&data); err == nil {
+			_ = json.Unmarshal(data, s)
+		}
 	}
 	if s.Proxies == nil {
 		s.Proxies = map[string]map[string]any{}
@@ -81,22 +93,15 @@ func newWebsiteExtensionStore() *websiteExtensionStore {
 }
 
 func (s *websiteExtensionStore) persistLocked() error {
+	if s.db == nil {
+		return errors.New("网站扩展公共数据库未初始化")
+	}
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	_, err = s.db.Exec(`INSERT INTO website_extension_state(id,payload,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at`, data, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
 }
 
 func (s *websiteExtensionStore) id() string {
@@ -147,6 +152,38 @@ func bodyID(body map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func bodyNumber(body map[string]any, keys ...string) float64 {
+	for _, key := range keys {
+		if value, ok := body[key].(float64); ok {
+			return value
+		}
+		if value, ok := body[key].(string); ok {
+			n, _ := strconv.ParseFloat(value, 64)
+			return n
+		}
+	}
+	return 0
+}
+
+func bodyIDs(value any) []uint {
+	items, _ := value.([]any)
+	result := make([]uint, 0, len(items))
+	for _, item := range items {
+		switch v := item.(type) {
+		case float64:
+			if v > 0 {
+				result = append(result, uint(v))
+			}
+		case string:
+			n, _ := strconv.ParseUint(v, 10, 64)
+			if n > 0 {
+				result = append(result, uint(n))
+			}
+		}
+	}
+	return result
 }
 
 func cloneRecord(item map[string]any) map[string]any {
@@ -338,9 +375,59 @@ func registerWebsiteExtensionRoutes(mux *http.ServeMux) {
 			store.Auths[id] = item
 			result = item
 		case rest == "batch/group" || rest == "batch/operate" || rest == "batch/ssl" || rest == "group/change":
-			result = map[string]any{"accepted": true, "operation": rest, "resourceIds": body["ids"], "updatedAt": now}
+			svc := service.NewWebsiteService("")
+			if rest == "batch/group" || rest == "group/change" {
+				groupID := uint(bodyNumber(body, "groupID", "websiteGroupId"))
+				ids := bodyIDs(body["ids"])
+				if err := service.NewWebsiteService("").SetGroups(ids, groupID); err != nil {
+					extensionError(w, 400, err)
+					return
+				}
+				result = map[string]any{"ids": ids, "groupID": groupID, "updatedAt": now}
+			} else if rest == "batch/operate" {
+				operation := bodyString(body, "operate", "operation")
+				if operation == "" {
+					extensionError(w, 400, errors.New("网站操作不能为空"))
+					return
+				}
+				ids := bodyIDs(body["ids"])
+				updated := make([]any, 0, len(ids))
+				for _, id := range ids {
+					item, opErr := svc.Operate(id, operation)
+					if opErr != nil {
+						extensionError(w, 400, opErr)
+						return
+					}
+					updated = append(updated, item)
+				}
+				result = map[string]any{"operation": operation, "items": updated, "updatedAt": now}
+			} else {
+				ids := bodyIDs(body["ids"])
+				enabled, _ := body["enabled"].(bool)
+				for _, id := range ids {
+					if _, opErr := svc.UpdateHTTPS(id, enabled, uint(bodyNumber(body, "websiteSSLId", "websiteSSLID")), bodyString(body, "httpConfig")); opErr != nil {
+						extensionError(w, 400, opErr)
+						return
+					}
+					if _, opErr := svc.UpdateConfig(id, "https", map[string]any{"enabled": enabled}); opErr != nil {
+						extensionError(w, 400, opErr)
+						return
+					}
+				}
+				result = map[string]any{"enabled": enabled, "ids": ids, "updatedAt": now}
+			}
 		case rest == "crosssite":
-			result = map[string]any{"accepted": true, "source": bodyString(body, "source", "sourceDomain"), "target": bodyString(body, "target", "targetDomain")}
+			id, idErr := parseID(bodyID(body))
+			operation := bodyString(body, "operation", "operate")
+			if idErr != nil || id == 0 || operation == "" {
+				extensionError(w, 400, errors.New("网站 ID 和跨站访问操作不能为空"))
+				return
+			}
+			if err := service.NewWebsiteService("").OperateCrossSiteAccess(id, operation); err != nil {
+				extensionError(w, 400, err)
+				return
+			}
+			result = map[string]any{"websiteID": id, "operation": operation, "updatedAt": now}
 		case rest == "databases":
 			item := cloneRecord(body)
 			item["id"] = store.id()
@@ -360,10 +447,30 @@ func registerWebsiteExtensionRoutes(mux *http.ServeMux) {
 			}
 			result = map[string]any{"path": filepath.Join(path, "composer.json"), "status": "validated", "executed": false}
 		case rest == "log/search" || rest == "monitor/logs/search":
+			if id, err := parseID(bodyID(body)); err == nil && id > 0 {
+				logType := bodyString(body, "logType", "type")
+				if logType == "" {
+					logType = "access.log"
+				}
+				if log, logErr := service.NewWebsiteService("").WebsiteLog(id, logType, int(bodyNumber(body, "page")), int(bodyNumber(body, "pageSize"))); logErr == nil {
+					result = log
+					break
+				}
+			}
 			result = pageRecords(store.Logs, body)
 		case rest == "log/operate":
-			addLog(bodyString(body, "operate", "action"))
-			result = map[string]any{"recorded": true}
+			id, idErr := parseID(bodyID(body))
+			logType := bodyString(body, "logType", "type")
+			if idErr == nil && id > 0 && logType != "" {
+				if err := service.NewWebsiteService("").OperateWebsiteLog(id, logType, bodyString(body, "operate", "action")); err != nil {
+					extensionError(w, 400, err)
+					return
+				}
+				result = map[string]any{"updated": true}
+			} else {
+				addLog(bodyString(body, "operate", "action"))
+				result = map[string]any{"updated": true}
+			}
 		case rest == "monitor/logs/clear":
 			store.Logs = []map[string]any{}
 			result = map[string]any{"cleared": true}

@@ -105,7 +105,8 @@ import { submitSAML2Navigation } from '@/utils/saml2';
 import router from '@/routers';
 import { loadProductProFromDB } from '@/utils/xpack';
 import { routerToNameWithQuery } from '@/utils/router';
-import { changeToLocal, listNodes, setDefaultNodeInfo } from '@/utils/node';
+import { changeToLocal, listNodes, loadCurrentNodeRole, setDefaultNodeInfo, normalizeNodeRole } from '@/utils/node';
+import { getNodeDisplayName } from '@/utils/node-display';
 import { Login } from '@/api/interface/auth';
 import { syncAuthInfo } from '@/utils/rbac';
 import UserInfo from './user-info/index.vue';
@@ -113,7 +114,7 @@ import NodeDrawer from './node-drawer/index.vue';
 import { useGlobalStore } from '@/composables/useGlobalStore';
 
 const currentUser = ref<Login.AuthInfo>();
-const { globalStore, currentNode, currentNodeAddr, defaultNetwork, entrance, isEnterprise, isXpackOrEE } =
+const { globalStore, currentNode, currentNodeAddr, currentNodeRole, defaultNetwork, entrance, isEnterprise, isXpackOrEE } =
     useGlobalStore();
 const menuStore = MenuStore();
 const nodes = ref([]);
@@ -135,13 +136,8 @@ bus.on('refreshTask', () => {
 });
 
 const loadCurrentName = () => {
-    if (currentNode.value) {
-        if (currentNode.value === 'local') {
-            return globalStore.getMasterAlias();
-        }
-        return currentNode.value;
-    }
-    return globalStore.getMasterAlias();
+    const item = nodeOptions.value.find((node) => node.name === currentNode.value || node.nodeId === currentNode.value);
+    return getNodeDisplayName(item, globalStore.getMasterAlias(), currentNodeRole.value || item?.role);
 };
 
 const visibleNodeOptions = computed(() => {
@@ -156,7 +152,7 @@ const showPopover = async () => {
 };
 
 const displayNodeName = (item) => {
-    return item.name === 'local' ? globalStore.getMasterAlias() : item.name;
+    return getNodeDisplayName(item, globalStore.getMasterAlias());
 };
 
 const openNodeDrawer = () => {
@@ -172,21 +168,30 @@ const loadNodes = async () => {
     loading.value = true;
     nodes.value = [];
     if (!isXpackOrEE.value) {
-        changeToLocal();
+        await changeToLocal();
+        await loadCurrentNodeRole();
         loading.value = false;
         return;
     }
     await listNodes('all')
-        .then((res) => {
+        .then(async (res) => {
             nodes.value = res || [];
             if (nodes.value.length === 0) {
                 setDefaultNodeInfo();
             }
             nodeOptions.value = nodes.value || [];
+            const current = nodeOptions.value.find(
+                (item) => item.isCurrent || item.name === currentNode.value || item.nodeId === currentNode.value,
+            );
+            currentNodeRole.value = normalizeNodeRole(current?.role);
+            if (!currentNodeRole.value) {
+                await loadCurrentNodeRole();
+            }
             loading.value = false;
         })
         .catch(() => {
             setDefaultNodeInfo();
+            void loadCurrentNodeRole();
             loading.value = false;
         });
 };
@@ -205,6 +210,7 @@ const changeNode = async (command: string) => {
                     await loadGlobalSetting('local');
                     currentNode.value = 'local';
                     currentNodeAddr.value = item.addr;
+                    currentNodeRole.value = normalizeNodeRole(item.role);
                     localStorage.removeItem('dashboardCache');
                     localStorage.removeItem('upgradeChecked');
                     menuStore.setMenuList([]);
@@ -230,6 +236,7 @@ const changeNode = async (command: string) => {
                 localStorage.removeItem('upgradeChecked');
                 currentNode.value = command;
                 currentNodeAddr.value = item.addr;
+                currentNodeRole.value = normalizeNodeRole(item.role);
                 if (isEnterprise.value) {
                     await loadCurrentUser(command);
                 }

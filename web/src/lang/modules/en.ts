@@ -5740,7 +5740,9 @@ const message = {
             deleteConfirm: 'Delete this export record and file?',
         },
         waf: {
-            WAF: 'WAF',
+           WAF: 'WAF',
+            time: 'Time',
+            runtimeUnavailable: 'The WAF runtime is unavailable. Install an OpenResty image with ModSecurity and CRS first.',
             name: 'WAF',
             blackWhite: 'Black and White List',
             globalSetting: 'Global Settings',

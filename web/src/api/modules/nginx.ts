@@ -41,3 +41,7 @@ export const getHttpsStatus = () => {
 export const operateHttps = (req: Nginx.NginxOperateReq) => {
     return http.post(`/openresty/https`, req);
 };
+
+export const operateNginx = (req: Nginx.NginxOperateReq) => {
+    return http.post(`/openresty/operate`, req);
+};

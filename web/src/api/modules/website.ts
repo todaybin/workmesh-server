@@ -39,7 +39,7 @@ export const updateWebsite = (req: Website.WebSiteUpdateReq, node?: string) => {
     return http.post<any>(`/websites/update${query}`, req);
 };
 
-export const getWebsite = (id: number) => {
+export const getWebsite = (id: number | string) => {
     return http.get<Website.WebsiteDTO>(`/websites/${id}`);
 };
 

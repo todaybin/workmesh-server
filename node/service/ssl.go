@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/internal/storage"
 	"github.com/todaybin/workmesh-server/node/model"
 )
 
@@ -27,6 +29,8 @@ type SSLService struct {
 	path   string
 	serial uint
 	items  map[uint]model.WebsiteSSL
+	db     *sql.DB
+	owner  *storage.Store
 }
 
 // NewSSLService 创建证书服务。
@@ -35,7 +39,15 @@ func NewSSLService() *SSLService {
 	if root == "" {
 		root = "./data"
 	}
-	s := &SSLService{root: root, path: filepath.Join(root, "ssl.json"), items: make(map[uint]model.WebsiteSSL)}
+	s := &SSLService{root: root, path: filepath.Join(root, "ssl.json"), items: make(map[uint]model.WebsiteSSL), db: currentWebsiteDB()}
+	if s.db == nil {
+		if opened, err := storage.Open(filepath.Join(root, "workmesh.db")); err == nil {
+			s.owner, s.db = opened, opened.DB()
+		}
+	}
+	if s.db != nil {
+		_ = ensureWebsiteTables(s.db)
+	}
 	s.load()
 	return s
 }
@@ -52,8 +64,13 @@ type sslState struct {
 }
 
 func (s *SSLService) load() {
-	b, err := os.ReadFile(s.path)
-	if err != nil {
+	var b []byte
+	if s.db != nil {
+		_ = s.db.QueryRow("SELECT payload FROM website_state WHERE state_key='ssl-certificates'").Scan(&b)
+	} else {
+		return
+	}
+	if len(b) == 0 {
 		return
 	}
 	var state sslState
@@ -71,6 +88,9 @@ func (s *SSLService) load() {
 }
 
 func (s *SSLService) persistLocked() error {
+	if s.db == nil {
+		return errors.New("网站公共数据库未初始化")
+	}
 	state := sslState{Serial: s.serial, Items: make([]sslPersisted, 0, len(s.items))}
 	for _, item := range s.items {
 		privateKey := item.PrivateKey
@@ -82,18 +102,8 @@ func (s *SSLService) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.root, 0o750); err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	_, err = s.db.Exec(`INSERT INTO website_state(state_key,payload,updated_at) VALUES('ssl-certificates',?,?) ON CONFLICT(state_key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at`, b, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
 }
 
 // Create 保存证书申请配置，证书申请由 ACME 适配器异步完成。

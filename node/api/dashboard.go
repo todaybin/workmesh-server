@@ -91,7 +91,32 @@ func handleDashboardQuickOption(w http.ResponseWriter, _ *http.Request) {
 }
 
 func handleDashboardLauncher(w http.ResponseWriter, _ *http.Request) {
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": dashboardQuickJumps()})
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": dashboardAppLaunchers()})
+}
+
+// dashboardAppLaunchers 按原系统从已安装应用生成启动器，并保留系统快捷入口。
+func dashboardAppLaunchers() []map[string]any {
+	items := dashboardQuickJumps()
+	store := getAppStore()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	for _, app := range store.state.Apps {
+		if strings.TrimSpace(app.ID) == "" || strings.EqualFold(app.Status, "failed") {
+			continue
+		}
+		port := appConfiguredInt(app.Config, 0, "httpPort", "port", "PANEL_APP_PORT_HTTP")
+		router := "/apps/" + app.ID
+		if port > 0 {
+			router = fmt.Sprintf("http://127.0.0.1:%d", port)
+		}
+		items = append(items, map[string]any{
+			"id": app.ID, "installID": app.ID, "detailID": app.ID, "name": app.Name, "key": app.Key,
+			"title": app.Name, "version": app.Version, "status": normalizeAppStatus(app.Status),
+			"path": appInstallPath(app), "httpPort": port, "httpsPort": appConfiguredInt(app.Config, 0, "httpsPort", "PANEL_APP_PORT_HTTPS"),
+			"router": router, "isShow": true, "recommend": app.Recommend,
+		})
+	}
+	return items
 }
 
 func handleDashboardLauncherOption(w http.ResponseWriter, r *http.Request) {

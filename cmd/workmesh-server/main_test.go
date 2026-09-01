@@ -191,6 +191,22 @@ func TestHTTPMuxProtectsNodeAPIsAndAllowsLogin(t *testing.T) {
 	}
 }
 
+func TestReadinessReturnsUnavailableBeforeBootstrap(t *testing.T) {
+	state := newReadinessState()
+	mux, _ := httpMuxWithReadiness(configForTest(), state)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("bootstrap 未完成时应返回 503，实际为 %d", recorder.Code)
+	}
+	state.SetReady()
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("bootstrap 完成后应返回 200，实际为 %d", recorder.Code)
+	}
+}
+
 func TestSecurityWrapperProtectsControlAndLeavesHealthPublic(t *testing.T) {
 	mux, _ := httpMux(configForTest())
 	secured := controlapi.NewSecurityMiddleware(mux, controlapi.SecurityMiddlewareOptions{Authorize: nodeapi.AuthorizeControlRequest})

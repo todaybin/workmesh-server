@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -58,7 +59,7 @@ type fileAdvancedRequest struct {
 	Name              string            `json:"name"`
 	Token             string            `json:"token"`
 	Key               string            `json:"key"`
-	ID                string            `json:"id"`
+	ID                flexibleID        `json:"id"`
 	Code              string            `json:"code"`
 	Query             string            `json:"query"`
 	Paths             []string          `json:"paths"`
@@ -91,6 +92,25 @@ type fileAdvancedRequest struct {
 	OutputFormat      string            `json:"outputFormat"`
 	Files             []fileConvertItem `json:"files"`
 	Remark            string            `json:"remark"`
+}
+
+// flexibleID 兼容历史客户端将资源 ID 以数字或字符串提交的两种形式。
+type flexibleID string
+
+func (id *flexibleID) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*id = flexibleID(text)
+		return nil
+	}
+	var number json.Number
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&number); err != nil {
+		return fmt.Errorf("id 必须是字符串或数字")
+	}
+	*id = flexibleID(number.String())
+	return nil
 }
 
 // fileConvertItem 描述单个媒体文件转换输入与目标格式。
@@ -381,6 +401,8 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodGet {
 		switch path {
+		case "read/website":
+			handleWebsiteFileRead(w, fileAdvancedRequest{ID: flexibleID(r.URL.Query().Get("id")), Path: r.URL.Query().Get("path")})
 		case "recycle/status":
 			fileAux.Lock()
 			loadFileAuxLocked()
@@ -450,6 +472,8 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch path {
+	case "read/website":
+		handleWebsiteFileRead(w, req)
 	case "check":
 		clean, err := cleanFilePath(req.Path)
 		if err != nil {
@@ -545,7 +569,7 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		handleFileWget(w, r, req)
 		return
 	case "wget/stop":
-		key := strings.TrimSpace(req.ID)
+		key := strings.TrimSpace(string(req.ID))
 		if key == "" {
 			key = strings.TrimSpace(req.Token)
 		}
@@ -604,7 +628,7 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 	case "favorite/del":
 		fileAux.Lock()
 		loadFileAuxLocked()
-		id := strings.TrimSpace(req.ID)
+		id := strings.TrimSpace(string(req.ID))
 		if id == "" {
 			id = strings.TrimSpace(req.Token)
 		}
@@ -728,7 +752,7 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"cleared": true}})
 	case "recycle/reduce":
-		id := strings.TrimSpace(req.ID)
+		id := strings.TrimSpace(string(req.ID))
 		if id == "" {
 			id = strings.TrimSpace(req.Token)
 		}
@@ -778,7 +802,7 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 	case "chunkupload/stop":
 		id := strings.TrimSpace(req.UploadID)
 		if id == "" {
-			id = strings.TrimSpace(req.ID)
+			id = strings.TrimSpace(string(req.ID))
 		}
 		if id == "" || filepath.Base(id) != id || strings.ContainsAny(id, `/\\`) {
 			fileError(w, http.StatusBadRequest, errors.New("uploadID 无效"))
@@ -954,7 +978,7 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		loadFileAuxLocked()
 		var found *fileHistoryItem
 		for i := range fileAux.data.History {
-			if fileAux.data.History[i].ID == req.ID {
+			if fileAux.data.History[i].ID == string(req.ID) {
 				found = &fileAux.data.History[i]
 				break
 			}
@@ -971,7 +995,7 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		kept := fileAux.data.History[:0]
 		removed := false
 		for _, item := range fileAux.data.History {
-			if item.ID == req.ID {
+			if item.ID == string(req.ID) {
 				removed = true
 			} else {
 				kept = append(kept, item)
@@ -994,7 +1018,7 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		loadFileAuxLocked()
 		var found *fileHistoryItem
 		for i := range fileAux.data.History {
-			if fileAux.data.History[i].ID == req.ID {
+			if fileAux.data.History[i].ID == string(req.ID) {
 				found = &fileAux.data.History[i]
 				break
 			}
@@ -1181,6 +1205,67 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		fileError(w, http.StatusNotImplemented, fmt.Errorf("文件操作 %q 尚未实现", path))
 	}
+}
+
+// handleWebsiteFileRead 以网站 ID 解析根目录，并拒绝读取站点目录以外的任何路径。
+func handleWebsiteFileRead(w http.ResponseWriter, req fileAdvancedRequest) {
+	idText := strings.TrimSpace(string(req.ID))
+	id, err := strconv.ParseUint(idText, 10, 32)
+	if err != nil || id == 0 {
+		fileError(w, http.StatusBadRequest, errors.New("网站 ID 无效"))
+		return
+	}
+	site, err := service.NewWebsiteService("").Get(uint(id))
+	if err != nil {
+		fileError(w, http.StatusNotFound, errors.New("网站不存在"))
+		return
+	}
+	root := filepath.Clean(site.SiteDir)
+	target := root
+	if requested := strings.TrimSpace(req.Path); requested != "" {
+		if filepath.IsAbs(requested) {
+			target = filepath.Clean(requested)
+		} else {
+			target = filepath.Join(root, requested)
+		}
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		fileError(w, http.StatusForbidden, errors.New("路径必须位于网站目录内"))
+		return
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		fileError(w, http.StatusNotFound, err)
+		return
+	}
+	if info.IsDir() {
+		entries, err := os.ReadDir(target)
+		if err != nil {
+			fileError(w, http.StatusForbidden, err)
+			return
+		}
+		items := make([]map[string]any, 0, len(entries))
+		for _, entry := range entries {
+			entryInfo, statErr := entry.Info()
+			if statErr != nil {
+				continue
+			}
+			items = append(items, map[string]any{"name": entry.Name(), "path": filepath.Join(target, entry.Name()), "isDir": entry.IsDir(), "size": entryInfo.Size(), "modTime": entryInfo.ModTime()})
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"websiteID": id, "root": root, "path": target, "isDir": true, "items": items}})
+		return
+	}
+	if info.Size() > 4<<20 {
+		fileError(w, http.StatusRequestEntityTooLarge, errors.New("文件超过 4 MiB 读取限制"))
+		return
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		fileError(w, http.StatusForbidden, err)
+		return
+	}
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"websiteID": id, "root": root, "path": target, "isDir": false, "content": string(data), "size": info.Size()}})
 }
 
 // handleFileAISearch 在指定目录内执行受限内容搜索，避免将搜索请求转发为占位响应。

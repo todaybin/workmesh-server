@@ -27,6 +27,60 @@ func TestCLIListenIPPersistsSettings(t *testing.T) {
 	}
 }
 
+func TestCLIHelpFlagsNeverStartServer(t *testing.T) {
+	for _, args := range [][]string{{"-h"}, {"--help"}, {"-l"}, {"--language"}, {"-l", "zh"}, {"unknown-command"}} {
+		handled, err := runCLI(args, t.TempDir())
+		if !handled || err != nil {
+			t.Fatalf("参数 %v 应由 CLI 消费，handled=%v err=%v", args, handled, err)
+		}
+	}
+}
+
+func TestCLIUserAndSecuritySettingsPersist(t *testing.T) {
+	dir := t.TempDir()
+	if handled, err := runCLI([]string{"update", "username", "operator"}, dir); !handled || err != nil {
+		t.Fatalf("修改用户名失败: handled=%v err=%v", handled, err)
+	}
+	users, err := loadCLIUsers(dir)
+	if err != nil || users["operator"].Name != "operator" {
+		t.Fatalf("用户名未写入: %#v err=%v", users, err)
+	}
+	if handled, err := runCLI([]string{"update", "password", "new-password"}, dir); !handled || err != nil {
+		t.Fatalf("修改密码失败: handled=%v err=%v", handled, err)
+	}
+	if handled, err := runCLI([]string{"update", "entrance", "secureentry"}, dir); !handled || err != nil {
+		t.Fatalf("修改安全入口失败: handled=%v err=%v", handled, err)
+	}
+	if entrance, err := loadSecurityEntrance(dir); err != nil || entrance != "secureentry" {
+		t.Fatalf("安全入口未写入: %q err=%v", entrance, err)
+	}
+	if handled, err := runCLI([]string{"reset", "domain"}, dir); !handled || err != nil {
+		t.Fatalf("取消域名绑定失败: handled=%v err=%v", handled, err)
+	}
+}
+
+func TestCLIUpdatePortPersistsEnvironmentOverride(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "server.json")
+	if err := os.WriteFile(configPath, []byte(`{"listenAddress":"127.0.0.1","listenPort":9999}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	envPath := filepath.Join(dir, "server.env")
+	if err := os.WriteFile(envPath, []byte("WORKMESH_SERVER_ADDR=0.0.0.0:9999\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := os.Getenv("WORKMESH_SERVER_CONFIG")
+	defer os.Setenv("WORKMESH_SERVER_CONFIG", old)
+	_ = os.Setenv("WORKMESH_SERVER_CONFIG", configPath)
+	if err := updateServerPort(18080); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(envPath)
+	if err != nil || !strings.Contains(string(raw), "0.0.0.0:18080") {
+		t.Fatalf("环境端口未更新: %s err=%v", raw, err)
+	}
+}
+
 func TestCLIAppInitCreatesDataDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "data")
 	handled, err := runCLI([]string{"app", "init"}, dir)
@@ -43,10 +97,15 @@ func TestInitializeDataDirCreatesRuntimeLayout(t *testing.T) {
 	if err := initializeDataDir(dir); err != nil {
 		t.Fatalf("初始化数据目录失败: %v", err)
 	}
-	for _, name := range []string{"apps", "backups", "logs", "releases", "runtime", "uploads"} {
+	for _, name := range []string{"logs", "releases"} {
 		info, err := os.Stat(filepath.Join(dir, name))
 		if err != nil || !info.IsDir() {
 			t.Fatalf("缺少运行目录 %s: %v", name, err)
+		}
+	}
+	for _, name := range []string{"apps", "backups", "runtime", "uploads"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("按需目录 %s 不应在启动时创建", name)
 		}
 	}
 }

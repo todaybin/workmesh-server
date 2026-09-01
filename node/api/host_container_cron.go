@@ -397,6 +397,7 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 	registerHostRoutes(mux)
 	registerAIExecutionRoutes(mux)
 	registerCoreResourceRoutes(mux)
+	registerGroupRoutes(mux)
 	registerCoreCommandRoutes(mux)
 	registerFileRoutes(mux)
 	RegisterDatabaseAdminRoutes(mux)
@@ -614,7 +615,7 @@ func registerUnmigratedRoutes(mux *http.ServeMux) {
 			})
 		}
 	}
-	mux.HandleFunc("GET /api/v2/containers/stats/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /api/v2/containers/stats", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "message": "该接口正在迁移"})
 	})
 }

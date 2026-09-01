@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,23 +15,41 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/todaybin/workmesh-server/config"
 	controlapi "github.com/todaybin/workmesh-server/control/api"
+	"github.com/todaybin/workmesh-server/internal/storage"
 	nodeapi "github.com/todaybin/workmesh-server/node/api"
-	"github.com/todaybin/workmesh-server/runtime/cache"
+	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 	"github.com/todaybin/workmesh-server/runtime/log"
 	"github.com/todaybin/workmesh-server/runtime/role"
-	"github.com/todaybin/workmesh-server/runtime/schedule"
-	"github.com/todaybin/workmesh-server/runtime/store"
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, configErr := config.Load()
+	if configErr != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "加载服务配置失败:", configErr)
+		os.Exit(1)
+	}
+	if err := cfg.ApplyRuntimeEnvironment(); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "同步服务配置失败:", err)
+		os.Exit(1)
+	}
 	if err := initializeDataDir(cfg.DataDir); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "初始化数据目录失败:", err)
+		os.Exit(1)
+	}
+	if entrance, err := loadSecurityEntrance(cfg.DataDir); err == nil && entrance == "" {
+		if err := saveSecurityEntrance(cfg.DataDir, randomSecurityEntrance()); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "初始化安全入口失败:", err)
+			os.Exit(1)
+		}
+	} else if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "读取安全入口失败:", err)
 		os.Exit(1)
 	}
 	if handled, err := runCLI(os.Args[1:], cfg.DataDir); handled {
@@ -44,34 +64,54 @@ func main() {
 		defer logWriter.Close()
 		logger = log.New(io.MultiWriter(os.Stderr, logWriter))
 	}
-	stateStore, err := store.Open(filepath.Join(cfg.DataDir, "state.json"))
+	readiness := newReadinessState()
+	readiness.SetNotReady("正在初始化统一存储")
+	stateStore, err := storage.Open(filepath.Join(cfg.DataDir, "workmesh.db"))
 	if err != nil {
 		logger.Error("打开状态存储失败", "error", err)
 		os.Exit(1)
 	}
 	defer stateStore.Close()
+	if err := initializeUnifiedSchema(stateStore); err != nil {
+		logger.Error("执行统一存储迁移失败", "error", err)
+		os.Exit(1)
+	}
+	if err := service.SetWebsiteDB(stateStore.DB()); err != nil {
+		logger.Error("初始化网站公共数据库存储失败", "error", err)
+		os.Exit(1)
+	}
+	if err := service.SetWebsiteSecurityDB(stateStore.DB()); err != nil {
+		logger.Error("初始化证书公共数据库存储失败", "error", err)
+		os.Exit(1)
+	}
+	if report, err := importLegacyData(context.Background(), stateStore, cfg.DataDir); err != nil {
+		logger.Error("导入旧数据失败", "error", err, "report", report)
+		os.Exit(1)
+	}
+	if err := nodeapi.SetSharedStore(stateStore); err != nil {
+		logger.Error("初始化节点公共控制面存储失败", "error", err)
+		os.Exit(1)
+	}
 	if err := nodeapi.RecoverDeploymentState(cfg.DataDir); err != nil {
 		logger.Error("恢复部署制品状态失败", "error", err)
 		os.Exit(1)
 	}
-	_ = cache.New()
 	if _, err := role.New(cfg.NodeID, cfg.Role); err != nil {
 		logger.Error("节点角色配置无效", "error", err)
 		os.Exit(1)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	scheduler := schedule.New()
-	scheduler.Start(ctx)
-	nodeapi.StartBackgroundTasks(ctx)
-	defer scheduler.Stop()
-
-	mux, gatewayStore := httpMux(cfg)
+	mux, gatewayStore := httpMuxWithReadiness(cfg, readiness)
+	if cfg.BackgroundTasks.Enabled && backgroundTasksConfigured(cfg.DataDir) {
+		nodeapi.StartBackgroundTasks(ctx)
+	}
 	gatewayStore.Start(ctx, []string{"system", "containers", "files", "databases", "websites", "tasks"})
 	// 统一安全包装器位于所有控制面和节点路由外层，避免新增路由遗漏 Session/CSRF、域名绑定和密码过期校验。
 	securedMux := controlapi.NewSecurityMiddleware(mux, controlapi.SecurityMiddlewareOptions{
 		DataDir: cfg.DataDir, Authorize: nodeapi.AuthorizeControlRequest,
 	})
+	readiness.SetReady()
 	server := wmhttp.New(cfg.ListenAddr, securedMux, cfg.RequestTimeout)
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, context.Canceled) {
@@ -83,10 +123,138 @@ func main() {
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
+	readiness.SetNotReady("服务正在关闭")
 	_ = server.Shutdown(shutdownCtx)
 }
 
+func initializeUnifiedSchema(s *storage.Store) error {
+	migration := storage.SQLMigration("0002-legacy-payloads", `CREATE TABLE IF NOT EXISTS legacy_payloads (
+		domain TEXT NOT NULL,
+		source_path TEXT NOT NULL,
+		source_sha256 TEXT NOT NULL,
+		payload BLOB NOT NULL,
+		imported_at TEXT NOT NULL,
+		PRIMARY KEY(domain, source_path, source_sha256)
+	)
+	`)
+	websiteMigration := storage.SQLMigration("0003-website-control-plane", `
+	CREATE TABLE IF NOT EXISTS website_state (state_key TEXT PRIMARY KEY, payload BLOB NOT NULL, updated_at TEXT NOT NULL);
+	CREATE TABLE IF NOT EXISTS websites (id INTEGER PRIMARY KEY, primary_domain TEXT NOT NULL UNIQUE, payload BLOB NOT NULL, status TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+	CREATE INDEX IF NOT EXISTS idx_websites_group_status ON websites(group_id, status, id);
+	CREATE TABLE IF NOT EXISTS website_domains (id TEXT PRIMARY KEY, website_id INTEGER NOT NULL REFERENCES websites(id) ON DELETE CASCADE, domain TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 80, ssl INTEGER NOT NULL DEFAULT 0, payload BLOB NOT NULL, UNIQUE(website_id, domain));
+	CREATE INDEX IF NOT EXISTS idx_website_domains_website ON website_domains(website_id, domain);
+	CREATE TABLE IF NOT EXISTS website_configs (website_id INTEGER NOT NULL REFERENCES websites(id) ON DELETE CASCADE, config_type TEXT NOT NULL, payload BLOB NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(website_id, config_type));
+	CREATE TABLE IF NOT EXISTS website_dns_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, provider TEXT NOT NULL, credentials BLOB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`)
+	nodeMigration := storage.SQLMigration("0004-node-terminal-control-plane", `
+	CREATE TABLE IF NOT EXISTS node_hosts (id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL, port INTEGER NOT NULL, user_name TEXT NOT NULL DEFAULT '', group_id INTEGER NOT NULL DEFAULT 0, payload BLOB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+	CREATE INDEX IF NOT EXISTS idx_node_hosts_group_name ON node_hosts(group_id, name, id);
+	CREATE TABLE IF NOT EXISTS node_quick_commands (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'command', command TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, group_belong TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', payload BLOB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+	CREATE INDEX IF NOT EXISTS idx_node_quick_commands_type_name ON node_quick_commands(type, name, id);
+	CREATE TABLE IF NOT EXISTS node_settings (setting_key TEXT PRIMARY KEY, payload BLOB NOT NULL, updated_at TEXT NOT NULL);`)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return storage.ApplyMigrations(ctx, s.DB(), []storage.Migration{migration, websiteMigration, nodeMigration})
+}
+
+func importLegacyData(ctx context.Context, s *storage.Store, dataDir string) (storage.LegacyImportReport, error) {
+	handlers := make([]storage.LegacyJSONHandler, 0, 4)
+	for _, domain := range []storage.LegacyDomain{storage.LegacyDomainGroups, storage.LegacyDomainWebsites, storage.LegacyDomainDomains, storage.LegacyDomainSSL} {
+		d := domain
+		handlers = append(handlers, storage.LegacyJSONHandlerFunc{DomainName: d, ImportFunc: func(ctx context.Context, tx *sql.Tx, source storage.LegacyJSONSource) (int64, error) {
+			_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO legacy_payloads(domain, source_path, source_sha256, payload, imported_at) VALUES(?, ?, ?, ?, ?)`, string(source.Domain), source.Path, source.SHA256, []byte(source.Data), time.Now().UTC().Format(time.RFC3339Nano))
+			if err != nil {
+				return 0, err
+			}
+			stateKey := map[storage.LegacyDomain]string{
+				storage.LegacyDomainWebsites: "websites",
+				storage.LegacyDomainDomains:  "website-domains",
+				storage.LegacyDomainSSL:      "ssl",
+				storage.LegacyDomainGroups:   "groups",
+			}[source.Domain]
+			if source.Domain == storage.LegacyDomainSSL {
+				switch filepath.Base(source.Path) {
+				case "ssl.json":
+					stateKey = "ssl-certificates"
+				case "website-acme.json":
+					stateKey = "website-acme"
+				case "website-ca.json":
+					stateKey = "website-ca"
+				case "website-ca-ssls.json":
+					stateKey = "website-ca-ssls"
+				}
+			}
+			if stateKey != "" {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO website_state(state_key,payload,updated_at) VALUES(?,?,?) ON CONFLICT(state_key) DO NOTHING`, stateKey, []byte(source.Data), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+					return 0, err
+				}
+			}
+			return 1, nil
+		}})
+	}
+	return s.ImportLegacyJSON(ctx, storage.LegacyJSONImportOptions{SourceDir: dataDir, Handlers: handlers, ArchiveImported: true})
+}
+
+// readinessState 保存进程 bootstrap 状态，避免在迁移或关闭阶段错误宣告就绪。
+type readinessState struct {
+	ready  atomic.Bool
+	reason atomic.Value
+}
+
+func newReadinessState() *readinessState {
+	s := &readinessState{}
+	s.reason.Store("服务正在初始化")
+	return s
+}
+
+func (s *readinessState) SetReady() {
+	s.reason.Store("")
+	s.ready.Store(true)
+}
+
+func (s *readinessState) SetNotReady(reason string) {
+	if strings.TrimSpace(reason) == "" {
+		reason = "服务尚未完成初始化"
+	}
+	s.reason.Store(reason)
+	s.ready.Store(false)
+}
+
+func (s *readinessState) ServeHTTP(w http.ResponseWriter) {
+	if s.ready.Load() {
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]string{"status": "ready"}})
+		return
+	}
+	reason, _ := s.reason.Load().(string)
+	wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "NOT_READY"}, "message": reason})
+}
+
+// backgroundTasksConfigured 只在数据目录确实存在可执行任务时启用周期维护。
+func backgroundTasksConfigured(dataDir string) bool {
+	cronPath := filepath.Join(dataDir, "cronjobs.json")
+	if raw, err := os.ReadFile(cronPath); err == nil {
+		var payload struct {
+			Items map[string]struct {
+				Status string `json:"status"`
+			} `json:"items"`
+		}
+		if json.Unmarshal(raw, &payload) == nil {
+			for _, item := range payload.Items {
+				if strings.EqualFold(strings.TrimSpace(item.Status), "enabled") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) {
+	readiness := newReadinessState()
+	readiness.SetReady()
+	return httpMuxWithReadiness(cfg, readiness)
+}
+
+func httpMuxWithReadiness(cfg config.Config, readiness *readinessState) (*http.ServeMux, *controlapi.GatewayStateStore) {
 	mux := http.NewServeMux()
 	// 静态资源必须在 API 兼容层之前命中文件系统，否则浏览器会收到 JSON 错误响应并拒绝执行模块脚本。
 	staticRoot := filepath.Join("web", "dist")
@@ -191,7 +359,7 @@ func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) 
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
 	})
 	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ready"}})
+		readiness.ServeHTTP(w)
 	})
 	mux.HandleFunc("GET /api/v2/health/check", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})

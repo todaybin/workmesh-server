@@ -18,8 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/todaybin/workmesh-server/node/model"
-	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -41,17 +39,15 @@ func handleContainerLogStream(w http.ResponseWriter, r *http.Request) {
 	if !requireStreamAuth(w, r, "WORKMESH_CONTAINER_TOKEN", "WORKMESH_STREAM_TOKEN") {
 		return
 	}
+	if !strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") {
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": nil})
+		return
+	}
 	args, follow, err := containerLogArgs(r)
 	if err != nil {
 		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "CONTAINER_LOG_PARAMETERS_INVALID"}, "message": err.Error()})
 		return
 	}
-	if !strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream") {
-		result, runErr := (service.CommandService{}).Execute(r.Context(), model.CommandRequest{Program: "docker", Args: args, Timeout: 30 * time.Second})
-		writeCommandResult(w, result, runErr)
-		return
-	}
-
 	limit := 30 * time.Second
 	if follow {
 		limit = 30 * time.Minute

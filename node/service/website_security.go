@@ -3,8 +3,8 @@
 
 package service
 
-// 本文件承载网站证书账户与自签 CA 的轻量本地实现。所有状态写入工作目录，
-// 使用临时文件加原子 rename，确保单进程部署重启后仍能恢复，不依赖外部数据库。
+// 本文件承载网站证书账户与自签 CA 的本地实现。元数据统一写入公共 SQLite，
+// 证书和私钥仅由真实证书流程生成或导入，不通过模拟响应代替执行。
 
 import (
 	"archive/zip"
@@ -16,6 +16,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -28,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/todaybin/workmesh-server/internal/storage"
 )
 
 // WebsiteACMEAccount 保存 ACME 注册账户；私钥只在服务端存储，不通过 API 返回。
@@ -90,6 +93,33 @@ type WebsiteSecurityService struct {
 	acmeNext uint
 	caNext   uint
 	sslNext  uint
+	db       *sql.DB
+	owner    *storage.Store
+}
+
+// SetWebsiteSecurityDB 注入证书服务使用的公共数据库连接。
+func SetWebsiteSecurityDB(db *sql.DB) error {
+	if db == nil {
+		return errors.New("证书公共数据库连接不能为空")
+	}
+	if err := ensureWebsiteTables(db); err != nil {
+		return err
+	}
+	websiteSecurityDBMu.Lock()
+	websiteSecurityDB = db
+	websiteSecurityDBMu.Unlock()
+	return nil
+}
+
+var (
+	websiteSecurityDBMu sync.RWMutex
+	websiteSecurityDB   *sql.DB
+)
+
+func currentWebsiteSecurityDB() *sql.DB {
+	websiteSecurityDBMu.RLock()
+	defer websiteSecurityDBMu.RUnlock()
+	return websiteSecurityDB
 }
 
 // CertificateRenewalReport 描述一次后台证书续期扫描的结果。
@@ -108,16 +138,29 @@ func NewWebsiteSecurityService(root string) *WebsiteSecurityService {
 	if root == "" {
 		root = "./data"
 	}
-	s := &WebsiteSecurityService{root: root}
+	db := currentWebsiteSecurityDB()
+	var owner *storage.Store
+	if db == nil {
+		if opened, err := storage.Open(filepath.Join(root, "workmesh.db")); err == nil {
+			owner, db = opened, opened.DB()
+		}
+	}
+	s := &WebsiteSecurityService{root: root, db: db, owner: owner}
+	if s.db != nil {
+		_ = ensureWebsiteTables(s.db)
+	}
 	s.load()
 	return s
 }
 
 func (s *WebsiteSecurityService) load() {
-	_ = os.MkdirAll(s.root, 0o750)
 	read := func(name string, target any) {
-		data, err := os.ReadFile(filepath.Join(s.root, name))
-		if err == nil && len(data) > 0 {
+		if s.db == nil {
+			return
+		}
+		key := strings.TrimSuffix(name, ".json")
+		var data []byte
+		if err := s.db.QueryRow("SELECT payload FROM website_state WHERE state_key = ?", key).Scan(&data); err == nil && len(data) > 0 {
 			_ = json.Unmarshal(data, target)
 		}
 	}
@@ -142,22 +185,16 @@ func (s *WebsiteSecurityService) load() {
 }
 
 func (s *WebsiteSecurityService) persist(name string, value any) error {
+	if s.db == nil {
+		return errors.New("证书公共数据库未初始化")
+	}
 	b, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err = os.MkdirAll(s.root, 0o750); err != nil {
-		return err
-	}
-	tmp := filepath.Join(s.root, name+".tmp")
-	if err = os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	if err = os.Rename(tmp, filepath.Join(s.root, name)); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	key := strings.TrimSuffix(name, ".json")
+	_, err = s.db.Exec(`INSERT INTO website_state(state_key,payload,updated_at) VALUES(?,?,?) ON CONFLICT(state_key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at`, key, b, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
 }
 
 var emailPattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)

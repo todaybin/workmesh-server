@@ -5,6 +5,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -123,6 +124,38 @@ func TestWebsiteAdvancedRoutes(t *testing.T) {
 	}
 }
 
+func TestWebsiteCheckUsesOpenRestyInstallContainerStatus(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	resetAppStoreForTest()
+	defer resetAppStoreForTest()
+	appMux := http.NewServeMux()
+	RegisterAppRoutes(appMux)
+	install := httptest.NewRecorder()
+	appMux.ServeHTTP(install, httptest.NewRequest(http.MethodPost, "/api/v2/apps/install", bytes.NewBufferString(`{"id":"resty","key":"openresty","name":"resty-prod","version":"1.27.1","containerName":"workmesh-openresty"}`)))
+	if install.Code != http.StatusOK {
+		t.Fatalf("安装 OpenResty 失败: %d %s", install.Code, install.Body.String())
+	}
+	store := getAppStore()
+	store.containerStates = func(_ context.Context, _ []string) (map[string]string, error) {
+		return map[string]string{"workmesh-openresty": "running"}, nil
+	}
+	mux := http.NewServeMux()
+	registerWebsiteFunctionalRoutes(mux)
+	ok := httptest.NewRecorder()
+	mux.ServeHTTP(ok, httptest.NewRequest(http.MethodPost, "/api/v2/websites/check", bytes.NewBufferString(`{}`)))
+	if ok.Code != http.StatusOK || !bytes.Contains(ok.Body.Bytes(), []byte(`"data":null`)) {
+		t.Fatalf("运行中的 OpenResty 不应阻止创建: %d %s", ok.Code, ok.Body.String())
+	}
+	store.containerStates = func(_ context.Context, _ []string) (map[string]string, error) {
+		return map[string]string{"workmesh-openresty": "exited"}, nil
+	}
+	stopped := httptest.NewRecorder()
+	mux.ServeHTTP(stopped, httptest.NewRequest(http.MethodPost, "/api/v2/websites/check", bytes.NewBufferString(`{}`)))
+	if stopped.Code != http.StatusOK || !bytes.Contains(stopped.Body.Bytes(), []byte(`"status":"Stopped"`)) {
+		t.Fatalf("停止的 OpenResty 应返回预检异常: %d %s", stopped.Code, stopped.Body.String())
+	}
+}
+
 func TestWebsiteLBSAndResourceRoutes(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -153,6 +186,40 @@ func TestWebsiteAdvancedRouteValidation(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("不存在网站应返回 404，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWebsiteExtendedFieldsAndLogs(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", root)
+	mux := http.NewServeMux()
+	registerWebsiteFunctionalRoutes(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/websites", bytes.NewBufferString(`{"primaryDomain":"extended.example","protocol":"HTTPS","websiteSSLId":7,"errorLog":false,"domains":[{"domain":"www.extended.example","port":443,"ssl":true}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !bytes.Contains(res.Body.Bytes(), []byte(`"websiteSSLId":7`)) {
+		t.Fatalf("扩展字段未保存: %d %s", res.Code, res.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			SiteDir string `json:"siteDir"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(res.Body.Bytes(), &envelope)
+	logPath := filepath.Join(root, "websites", "1", "logs", "access.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte("GET /\nPOST /login\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logReq := httptest.NewRequest(http.MethodPost, "/api/v2/websites/log/search", bytes.NewBufferString(`{"id":1,"logType":"access.log","page":1,"pageSize":1}`))
+	logReq.Header.Set("Content-Type", "application/json")
+	logRes := httptest.NewRecorder()
+	mux.ServeHTTP(logRes, logReq)
+	if logRes.Code != http.StatusOK || !bytes.Contains(logRes.Body.Bytes(), []byte("GET /")) {
+		t.Fatalf("真实日志读取失败: %d %s", logRes.Code, logRes.Body.String())
 	}
 }
 

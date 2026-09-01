@@ -4294,7 +4294,9 @@ const message = {
             deleteConfirm: '确认删除此导出记录及文件？',
         },
         waf: {
-            WAF: 'WAF',
+           WAF: 'WAF',
+            time: '时间',
+            runtimeUnavailable: 'WAF 运行时不可用，请先安装带 ModSecurity 和 CRS 的 OpenResty 镜像。',
             name: 'WAF',
             resource: '资源',
             blackWhite: '黑白名单',

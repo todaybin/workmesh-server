@@ -81,6 +81,7 @@ import DrawerPro from '@/components/drawer-pro/index.vue';
 import i18n from '@/lang';
 import { computed, ref, watch } from 'vue';
 import { useGlobalStore } from '@/composables/useGlobalStore';
+import { getNodeDisplayName } from '@/utils/node-display';
 
 const { isAdmin } = useGlobalStore();
 
@@ -159,7 +160,7 @@ const nodeGroups = computed(() => {
 });
 
 const displayNodeName = (item: NodeItem) => {
-    return item.name === 'local' ? props.masterAlias : item.name;
+    return getNodeDisplayName(item, props.masterAlias);
 };
 
 const displayGroupName = (item: NodeItem) => {

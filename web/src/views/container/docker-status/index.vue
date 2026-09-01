@@ -48,4 +48,6 @@ const goSetting = async () => {
 onMounted(() => {
     loadStatus();
 });
+
+defineExpose({ refresh: loadStatus });
 </script>

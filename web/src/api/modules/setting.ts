@@ -9,6 +9,9 @@ import { App } from '../interface/app';
 export const listNodeOptions = (type: string) => {
     return http.post<Array<Setting.NodeItem>>(`/core/nodes/list`, { type: type });
 };
+export const getCurrentNodeRole = () => {
+    return http.get<{ node_id?: string; nodeId?: string; role?: string }>(`/core/nodes/role`);
+};
 export const updateNodeFavorite = (id: number, isFavorite: boolean) => {
     return http.post(`/core/xpack/nodes/favorite`, { id, isFavorite });
 };

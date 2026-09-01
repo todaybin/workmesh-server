@@ -34,7 +34,7 @@
 
 | 路由 | 方法 | 行为 | 状态来源 |
 | --- | --- | --- | --- |
-| `/api/v2/apps/search` | POST | 按 `name/key` 搜索应用目录，支持 `WORKMESH_APP_CATALOG` JSON 文件 | `apps.json` 的 `catalog` |
+| `/api/v2/apps/search` | POST | 按 `name/key/tags` 分页搜索应用目录；目录为空时懒加载原 1Panel 应用商店清单 | `apps.json` 的 `catalog` |
 | `/api/v2/apps/sync/local`、`sync/remote` | POST | 重新加载本地目录或登记同步任务，返回统一列表 | `apps.json` |
 | `/api/v2/apps/:key`、`detail/*`、`details/*` | GET | 返回应用详情、版本和参数结构；找不到时 `available=false` | catalog/installed |
 | `/api/v2/apps/tags`、`checkupdate`、`services/:key` | GET | 返回目录标签、更新状态和服务状态 | catalog/installed |
@@ -51,6 +51,8 @@
 | `/api/v2/core/xpack/sync/app/install` | POST | 多节点安装兼容入口，复用安装幂等逻辑 | `apps.json` |
 
 安装写入遵循“同一 ID/key 更新、不同应用追加”的幂等规则；响应保留旧前端字段 `appKey`、`appName`、`appStatus`、`ready`、`total`、`canUpdate` 等，避免页面转换层丢字段。
+
+未设置 `WORKMESH_APP_CATALOG` 时，Server 使用原应用商店仓库获取清单：默认地址为 `https://apps-assets.fit2cloud.com/{mode}/1panel.json.zip`，其中 `{mode}` 默认为 `stable`。可使用 `WORKMESH_APP_REPO_URL`、`WORKMESH_APP_REPO_MODE` 和 `WORKMESH_APP_REPO_EDITION=intl` 覆盖仓库配置。清单成功后缓存到 `WORKMESH_DATA_DIR/apps.json`；远程暂时不可用时继续使用上次缓存。
 
 ## 验收
 

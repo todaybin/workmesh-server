@@ -78,9 +78,6 @@ func registerCoreResourceRoutes(mux *http.ServeMux) {
 	// 脚本运行必须先经过受保护的专用处理器，不能落入普通资源 CRUD。
 	mux.HandleFunc("GET /api/v2/core/script/run", handleScriptRun)
 	for _, pattern := range []string{
-		"POST /api/v2/groups/del",
-		"POST /api/v2/groups/search",
-		"POST /api/v2/groups/update",
 		"POST /api/v2/core/groups/del",
 		"POST /api/v2/core/groups/search",
 		"POST /api/v2/core/groups/update",
@@ -105,7 +102,7 @@ func registerCoreResourceRoutes(mux *http.ServeMux) {
 			mux.HandleFunc(pattern, coreResourceHandler)
 		}
 	}
-	for _, prefix := range []string{"/api/v2/core/commands/", "/api/v2/core/script/", "/api/v2/core/logs/", "/api/v2/core/groups/", "/api/v2/groups/"} {
+	for _, prefix := range []string{"/api/v2/core/commands/", "/api/v2/core/script/", "/api/v2/core/logs/", "/api/v2/core/groups/"} {
 		mux.HandleFunc(prefix, coreResourceHandler)
 	}
 }
@@ -174,7 +171,7 @@ func isCoreResourceRoute(pattern string) bool {
 	if path == "/api/v2/core/script" {
 		return true
 	}
-	for _, prefix := range []string{"/api/v2/core/commands/", "/api/v2/core/script/", "/api/v2/core/logs/", "/api/v2/core/groups/", "/api/v2/groups/"} {
+	for _, prefix := range []string{"/api/v2/core/commands/", "/api/v2/core/script/", "/api/v2/core/logs/", "/api/v2/core/groups/"} {
 		if strings.HasPrefix(path, prefix) {
 			return true
 		}

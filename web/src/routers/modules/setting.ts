@@ -57,7 +57,7 @@ const settingRouter = {
                     hidden: true,
                     meta: {
                         parent: 'menu.settings',
-                        title: 'Gateway 绑定',
+                        title: 'serverPages.gateway.bindRoute',
                         ignoreTab: true,
                         adminOnly: true,
                     },

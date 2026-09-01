@@ -265,6 +265,7 @@ export namespace Setting {
 
     export interface NodeItem {
         id: number;
+        nodeId?: string;
         groupID?: number;
         groupBelong?: string;
         addr: string;
@@ -273,6 +274,10 @@ export namespace Setting {
         isXpack: boolean;
         isBound: boolean;
         isFavorite?: boolean;
+        isCurrent?: boolean;
+        displayName?: string;
+        endpoint?: string;
+        role?: 'primary' | 'secondary' | string;
         name: string;
     }
     export interface NodeCreate {

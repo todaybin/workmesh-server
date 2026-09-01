@@ -48,3 +48,11 @@ func TestDockerStatusInfoHealthyCLI(t *testing.T) {
 		t.Fatalf("version should be returned: %#v", status)
 	}
 }
+
+func TestParseContainerStatesRequiresExactRecordedName(t *testing.T) {
+	wanted := map[string]struct{}{"workmesh-openresty": {}}
+	states := parseContainerStates("workmesh-openresty\trunning\nnginx-proxy-manager\trunning\nworkmesh-openresty-old\texited\n", wanted)
+	if len(states) != 1 || states["workmesh-openresty"] != "running" {
+		t.Fatalf("unexpected exact container states: %#v", states)
+	}
+}

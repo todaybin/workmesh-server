@@ -2033,13 +2033,21 @@ func readTaskLog(w http.ResponseWriter, r *http.Request, s *domainStore) {
 		return
 	}
 	id, path := valueString(v, "id", "taskID"), valueString(v, "path", "logFile")
+	taskStatus := ""
 	s.mu.RLock()
 	for _, item := range s.state.Logs {
 		if id != "" && item.ID == id && path == "" && item.Meta != nil {
 			path = valueString(item.Meta, "path", "logFile")
+			taskStatus = item.Level
 		}
 	}
 	s.mu.RUnlock()
+	if path == "" && id != "" {
+		candidate := appTaskLogPath(id)
+		if info, statErr := os.Stat(candidate); statErr == nil && info.Mode().IsRegular() {
+			path = candidate
+		}
+	}
 	if path == "" {
 		domainError(w, 400, "INVALID_TASK", "任务日志路径或任务 ID 不能为空")
 		return
@@ -2069,12 +2077,15 @@ func readTaskLog(w http.ResponseWriter, r *http.Request, s *domainStore) {
 	if end > len(lines) {
 		end = len(lines)
 	}
-	success(w, map[string]any{"path": path, "lines": lines[start:end], "totalLines": len(lines), "total": (len(lines) + size - 1) / size, "end": end >= len(lines), "scope": "page"})
+	success(w, map[string]any{"path": path, "lines": lines[start:end], "totalLines": len(lines), "total": (len(lines) + size - 1) / size, "end": end >= len(lines), "scope": "page", "taskStatus": taskStatus})
 }
 
 func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 	// 默认字段与前端 SettingInfo/SettingBaseInfo 契约保持一致；状态文件中已有值会覆盖默认值。
 	defaults := map[string]any{
+		"dockerSockPath": "unix:///var/run/docker.sock", "systemIP": "", "localTime": "", "timeZone": "", "ntpSite": "",
+		"defaultNetwork": "workmesh-network", "defaultIO": "read", "lastCleanTime": "", "lastCleanSize": "", "lastCleanData": "",
+		"monitorStatus": "enable", "monitorInterval": "10", "monitorStoreDays": "7", "fileRecycleBin": "disable", "localSSHConnShow": "disable", "firewallPortWhiteList": "",
 		"systemVersion": "workmesh-server", "upgradeBackupCopies": "3", "developerMode": "false",
 		"sessionTimeout": 86400, "expirationDays": 0, "panelName": "WorkMesh", "edition": "community",
 		"theme": "system", "menuTabs": "false", "menuAccordion": "false", "language": "zh", "docSource": "official",
@@ -2181,7 +2192,36 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 		}
 		success(w, copy)
 	}
-	for _, path := range []string{"/api/v2/config/global", "/api/v2/core/settings/apps/store/update", "/api/v2/core/settings/bind/update", "/api/v2/core/settings/menu/update", "/api/v2/core/settings/port/update", "/api/v2/core/settings/proxy/update", "/api/v2/core/settings/search", "/api/v2/core/settings/search/base", "/api/v2/core/settings/terminal/update", "/api/v2/core/settings/ssl/update", "/api/v2/core/settings/upgrade", "/api/v2/core/settings/upgrade/notes", "/api/v2/core/settings/memo", "/api/v2/core/settings/update", "/api/v2/settings/description/save", "/api/v2/settings/file-history/search", "/api/v2/settings/file-history/update", "/api/v2/settings/files/ai/search", "/api/v2/settings/files/ai/update", "/api/v2/settings/search", "/api/v2/settings/update"} {
+	mux.HandleFunc("POST /api/v2/settings/description/save", func(w http.ResponseWriter, r *http.Request) {
+		v, err := requestMap(r)
+		if err != nil {
+			domainError(w, 400, "INVALID_JSON", err.Error())
+			return
+		}
+		typ, id := valueString(v, "type"), valueString(v, "id")
+		if typ == "" || id == "" {
+			domainError(w, 400, "INVALID_DESCRIPTION", "资源类型和 ID 不能为空")
+			return
+		}
+		s.mu.Lock()
+		if s.state.Settings == nil {
+			s.state.Settings = map[string]any{}
+		}
+		descriptions, _ := s.state.Settings["descriptions"].(map[string]any)
+		if descriptions == nil {
+			descriptions = map[string]any{}
+		}
+		descriptions[typ+":"+id] = map[string]any{"description": valueString(v, "description"), "isPinned": boolValue(v, "isPinned")}
+		s.state.Settings["descriptions"] = descriptions
+		err = s.saveLocked()
+		s.mu.Unlock()
+		if err != nil {
+			domainError(w, 500, "STATE_SAVE", err.Error())
+			return
+		}
+		success(w, nil)
+	})
+	for _, path := range []string{"/api/v2/config/global", "/api/v2/core/settings/apps/store/update", "/api/v2/core/settings/bind/update", "/api/v2/core/settings/menu/update", "/api/v2/core/settings/port/update", "/api/v2/core/settings/proxy/update", "/api/v2/core/settings/search", "/api/v2/core/settings/search/base", "/api/v2/core/settings/ssl/update", "/api/v2/core/settings/upgrade", "/api/v2/core/settings/upgrade/notes", "/api/v2/core/settings/memo", "/api/v2/core/settings/update", "/api/v2/settings/file-history/search", "/api/v2/settings/file-history/update", "/api/v2/settings/files/ai/search", "/api/v2/settings/files/ai/update", "/api/v2/settings/search", "/api/v2/settings/update"} {
 		mux.HandleFunc("POST "+path, update)
 	}
 	settingsOperational := func(endpoint string) http.HandlerFunc {
@@ -2200,9 +2240,9 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 				}
 				result["items"] = menu
 			case "/api/v2/core/settings/terminal/search":
-				term, ok := s.state.Settings["terminal"]
-				if !ok {
-					term = map[string]any{"enabled": true, "shell": "default"}
+				var term map[string]any
+				if !loadNodeSetting("terminal", &term) || term == nil {
+					term = map[string]any{}
 				}
 				result["config"] = term
 			case "/api/v2/core/settings/ssl/download":
@@ -2223,6 +2263,18 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 	// 使用显式路由注册，确保契约扫描和运行时注册保持一一对应。
 	mux.HandleFunc("POST /api/v2/core/settings/menu/default", settingsOperational("/api/v2/core/settings/menu/default"))
 	mux.HandleFunc("POST /api/v2/core/settings/terminal/search", settingsOperational("/api/v2/core/settings/terminal/search"))
+	mux.HandleFunc("POST /api/v2/core/settings/terminal/update", func(w http.ResponseWriter, r *http.Request) {
+		value, err := requestMap(r)
+		if err != nil {
+			domainError(w, 400, "INVALID_JSON", err.Error())
+			return
+		}
+		if err := saveNodeSetting("terminal", value); err != nil {
+			domainError(w, 500, "STATE_SAVE", err.Error())
+			return
+		}
+		success(w, map[string]any{"config": value})
+	})
 	mux.HandleFunc("POST /api/v2/core/settings/ssl/download", settingsOperational("/api/v2/core/settings/ssl/download"))
 	mux.HandleFunc("POST /api/v2/core/settings/ssl/reload", settingsOperational("/api/v2/core/settings/ssl/reload"))
 	// Agent 侧设置快照使用同一份轻量状态文件，支持创建、查询、导入、恢复、回滚和删除。

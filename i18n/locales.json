@@ -1,0 +1,17 @@
+{
+  "default": "zh",
+  "locales": [
+    { "code": "zh", "file": "zh.yaml", "aliases": ["zh-cn", "zh-hans"] },
+    { "code": "zh-Hant", "file": "zh-Hant.yaml", "aliases": ["zh-hant", "zh-tw", "zh-hk", "tw"] },
+    { "code": "en", "file": "en.yaml", "aliases": [] },
+    { "code": "pt-BR", "file": "pt-BR.yaml", "aliases": ["pt", "pt-br"] },
+    { "code": "ja", "file": "ja.yaml", "aliases": [] },
+    { "code": "ru", "file": "ru.yaml", "aliases": [] },
+    { "code": "ms", "file": "ms.yaml", "aliases": [] },
+    { "code": "ko", "file": "ko.yaml", "aliases": [] },
+    { "code": "lo", "file": "lo.yaml", "aliases": [] },
+    { "code": "tr", "file": "tr.yaml", "aliases": [] },
+    { "code": "es-ES", "file": "es-ES.yaml", "aliases": ["es", "es-es"] },
+    { "code": "fa", "file": "fa.yaml", "aliases": [] }
+  ]
+}

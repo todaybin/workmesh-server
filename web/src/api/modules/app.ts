@@ -34,7 +34,7 @@ export const getAppDetailByID = (id: number) => {
 };
 
 export const installApp = (install: App.AppInstall) => {
-    return http.post<any>('apps/install', install);
+    return http.post<any>('apps/install', install).finally(invalidateAppInstalledCache);
 };
 
 export const changePort = (params: App.ChangePort) => {
@@ -43,8 +43,21 @@ export const changePort = (params: App.ChangePort) => {
 
 export const searchAppInstalled = (search: App.AppInstallSearch, node?: string) => {
     const params = node ? `?operateNode=${node}` : '';
-    return http.post<ResPage<App.AppInstallDto>>(`apps/installed/search${params}`, search);
+    const key = `${node || ''}:${JSON.stringify(search || {})}`;
+    const now = Date.now();
+    const cached = installedSearchCache.get(key);
+    if (cached && now - cached.timestamp < 2000) {
+        return cached.promise;
+    }
+    const promise = http.post<ResPage<App.AppInstallDto>>(`apps/installed/search${params}`, search);
+    installedSearchCache.set(key, { timestamp: now, promise });
+    promise.catch(() => installedSearchCache.delete(key));
+    return promise;
 };
+
+const installedSearchCache = new Map<string, { timestamp: number; promise: Promise<any> }>();
+
+export const invalidateAppInstalledCache = () => installedSearchCache.clear();
 
 export const listAppInstalled = () => {
     return http.get<Array<App.AppInstalledOption>>('apps/installed/list');
@@ -68,7 +81,7 @@ export const appInstalledDeleteCheck = (appInstallId: number, node?: string) => 
 };
 
 export const getAppInstalled = (search: App.AppInstalledSearch) => {
-    return http.post<ResPage<App.AppInstalled>>('apps/installed/search', search);
+    return searchAppInstalled(search) as Promise<{ data: ResPage<App.AppInstalled> }>;
 };
 
 export const getAppInstalledByID = (installID: number, node?: string) => {
@@ -78,7 +91,7 @@ export const getAppInstalledByID = (installID: number, node?: string) => {
 
 export const installedOp = (op: App.AppInstalledOp, node?: string) => {
     const params = node ? `?operateNode=${node}` : '';
-    return http.post<any>(`apps/installed/op${params}`, op, TimeoutEnum.T_40S);
+    return http.post<any>(`apps/installed/op${params}`, op, TimeoutEnum.T_40S).finally(invalidateAppInstalledCache);
 };
 
 export const syncInstalledApp = () => {

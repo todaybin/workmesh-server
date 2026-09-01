@@ -27,6 +27,18 @@ func TestFilesSearchAndContent(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("search status=%d", res.Code)
 	}
+	var envelope struct {
+		Data struct {
+			Path  string           `json:"path"`
+			Items []map[string]any `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("search response is not JSON: %v", err)
+	}
+	if envelope.Data.Path != root || len(envelope.Data.Items) != 1 {
+		t.Fatalf("search response does not match FileInfo contract: %#v", envelope.Data)
+	}
 	res = httptest.NewRecorder()
 	body, _ = json.Marshal(map[string]any{"path": path})
 	mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/files/content", bytes.NewReader(body)))

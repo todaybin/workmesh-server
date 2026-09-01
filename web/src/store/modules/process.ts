@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, reactive } from 'vue';
 import { MsgError } from '@/utils/message';
 import { checkStreamAuth } from '@/utils/stream-auth';
+import { buildSameOriginWebSocketUrl } from '@/api/transport';
 
 export interface PsSearch {
     type: 'ps';
@@ -141,11 +142,7 @@ export const ProcessStore = defineStore('ProcessStore', () => {
         const token = ++initWebSocketToken;
         isConnecting.value = true;
 
-        const href = window.location.href;
-        const protocol = href.split('//')[0] === 'http:' ? 'ws' : 'wss';
-        const ipLocal = href.split('//')[1].split('/')[0];
-
-        const url = `${protocol}://${ipLocal}/api/v2/process/ws?operateNode=${currentNode}`;
+        const url = buildSameOriginWebSocketUrl('/process/ws', currentNode);
         const authError = await checkStreamAuth(url, currentNode);
         if (token !== initWebSocketToken || connectionRefCount === 0) {
             if (token === initWebSocketToken) {

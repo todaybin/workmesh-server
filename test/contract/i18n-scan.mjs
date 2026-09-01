@@ -19,21 +19,12 @@ for (let index = 2; index < process.argv.length; index += 1) {
 const legacyRoot = path.resolve(args.get('--legacy') || 'apps/workmesh-node');
 const projectRoot = path.resolve(args.get('--project') || 'apps/workmesh-server');
 const write = args.has('--write');
-const locales = ['zh', 'zh-Hant', 'en', 'pt-BR', 'ja', 'ru', 'ms', 'ko', 'lo', 'tr', 'es-ES', 'fa'];
-const frontendFiles = {
-  zh: 'zh.ts',
-  'zh-Hant': 'zh-Hant.ts',
-  en: 'en.ts',
-  'pt-BR': 'pt-br.ts',
-  ja: 'ja.ts',
-  ru: 'ru.ts',
-  ms: 'ms.ts',
-  ko: 'ko.ts',
-  lo: 'lo.ts',
-  tr: 'tr.ts',
-  'es-ES': 'es-es.ts',
-  fa: 'fa.ts',
-};
+const localeManifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'i18n', 'locales.json'), 'utf8'));
+const locales = localeManifest.locales.map((entry) => entry.code);
+const frontendFiles = Object.fromEntries(localeManifest.locales.map((entry) => [
+  entry.code,
+  entry.file.replace(/\.yaml$/i, '.ts').replace(/^pt-BR\.ts$/, 'pt-br.ts').replace(/^es-ES\.ts$/, 'es-es.ts'),
+]));
 const legacyNetworkKey = `Err${'1'}${'Panel'}NetworkFailed`;
 const backendKeyAliases = new Map([[legacyNetworkKey, 'ErrWorkMeshNetworkFailed']]);
 const frontendKeyAliases = new Map([
@@ -183,6 +174,8 @@ if (ts) {
   }
 }
 
+const serverPagesFile = path.join(projectRoot, 'web', 'src', 'lang', 'server-pages.ts');
+if (!fs.existsSync(serverPagesFile)) failures.push('缺少页面专用语言资源: ' + serverPagesFile);
 const localeSurfaceFiles = [
   ['加载器', path.join(projectRoot, 'web', 'src', 'lang', 'index.ts'), 1, true],
   ['FU 组件', path.join(projectRoot, 'web', 'src', 'lang', 'fu.ts'), 1, true],

@@ -4,13 +4,13 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"io"
+	_ "modernc.org/sqlite"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,7 +34,7 @@ type quickCommand struct {
 
 type commandStore struct {
 	mu    sync.RWMutex
-	path  string
+	db    *sql.DB
 	items []quickCommand
 }
 
@@ -42,37 +42,52 @@ var commandStoreMu sync.Mutex
 var commandStoreInstance *commandStore
 
 func getCommandStore() *commandStore {
-	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
-	if dir == "" {
-		dir = "./data"
-	}
-	path := filepath.Join(dir, "commands.json")
 	commandStoreMu.Lock()
 	defer commandStoreMu.Unlock()
-	if commandStoreInstance != nil && commandStoreInstance.path == path {
+	db := sharedDB()
+	if db == nil {
+		fallback, _ := sql.Open("sqlite", ":memory:")
+		db = fallback
+	}
+	if commandStoreInstance != nil && commandStoreInstance.db == db {
 		return commandStoreInstance
 	}
-	s := &commandStore{path: path, items: []quickCommand{}}
-	if b, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(b, &s.items)
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS node_quick_commands (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'command', command TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, group_belong TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', payload BLOB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+	s := &commandStore{db: db, items: []quickCommand{}}
+	rows, _ := db.Query(`SELECT id,name,type,command,group_id,group_belong,description,payload,created_at,updated_at FROM node_quick_commands ORDER BY name,id`)
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var item quickCommand
+			var payload []byte
+			_ = rows.Scan(&item.ID, &item.Name, &item.Type, &item.Command, &item.GroupID, &item.GroupBelong, &item.Description, &payload, &item.CreatedAt, &item.UpdatedAt)
+			_ = json.Unmarshal(payload, &item)
+			s.items = append(s.items, item)
+		}
 	}
 	commandStoreInstance = s
 	return s
 }
 
 func (s *commandStore) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
-		return err
+	if s.db == nil {
+		return errors.New("公共数据库未初始化")
 	}
-	b, err := json.Marshal(s.items)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	defer tx.Rollback()
+	if _, err = tx.Exec("DELETE FROM node_quick_commands"); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	for _, item := range s.items {
+		payload, _ := json.Marshal(item)
+		if _, err = tx.Exec(`INSERT INTO node_quick_commands(id,name,type,command,group_id,group_belong,description,payload,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, item.ID, item.Name, item.Type, item.Command, item.GroupID, item.GroupBelong, item.Description, payload, item.CreatedAt, item.UpdatedAt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func isCoreCommandRoute(pattern string) bool {

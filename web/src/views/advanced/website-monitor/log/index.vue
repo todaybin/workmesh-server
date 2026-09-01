@@ -1,41 +1,41 @@
 <template>
-    <LayoutContent title="请求日志" v-loading="loading">
+    <LayoutContent :title="$t('serverPages.websiteMonitor.log')" v-loading="loading">
         <template #rightToolBar><TableRefresh @search="load" /></template>
         <template #main>
             <el-card shadow="never">
                 <el-form :inline="true">
-                    <el-form-item label="时间范围">
+                    <el-form-item :label="$t('serverPages.websiteMonitor.time')">
                         <el-date-picker v-model="range" type="daterange" value-format="YYYY-MM-DD" />
                     </el-form-item>
                     <el-form-item label="IP"><el-input v-model="query.ip" clearable /></el-form-item>
                     <el-form-item label="URI"><el-input v-model="query.uri" clearable /></el-form-item>
-                    <el-form-item label="方法">
+                    <el-form-item :label="$t('serverPages.websiteMonitor.method')">
                         <el-select v-model="query.method" clearable>
                             <el-option v-for="method in methods" :key="method" :label="method" :value="method" />
                         </el-select>
                     </el-form-item>
-                    <el-form-item label="状态码">
+                    <el-form-item :label="$t('serverPages.websiteMonitor.statusCode')">
                         <el-input-number v-model="query.status" :min="0" :max="599" controls-position="right" />
                     </el-form-item>
                     <el-form-item>
-                        <el-button type="primary" @click="load">查询</el-button>
-                        <el-button @click="exportLogs">导出</el-button>
-                        <el-button type="danger" plain @click="clearLogs">清理</el-button>
+                        <el-button type="primary" @click="load">{{ $t('serverPages.websiteMonitor.query') }}</el-button>
+                        <el-button @click="exportLogs">{{ $t('serverPages.websiteMonitor.export') }}</el-button>
+                        <el-button type="danger" plain @click="clearLogs">{{ $t('serverPages.websiteMonitor.clean') }}</el-button>
                     </el-form-item>
                 </el-form>
             </el-card>
             <el-card shadow="never" class="mt-4">
                 <el-table :data="logs" stripe>
-                    <el-table-column prop="occurredAt" label="时间" width="190" />
+                    <el-table-column prop="occurredAt" :label="$t('serverPages.websiteMonitor.time')" width="190" />
                     <el-table-column prop="ip" label="IP" width="150" />
-                    <el-table-column prop="method" label="方法" width="90" />
+                    <el-table-column prop="method" :label="$t('serverPages.websiteMonitor.method')" width="90" />
                     <el-table-column prop="uri" label="URI" min-width="260" />
-                    <el-table-column prop="status" label="状态码" width="90" />
-                    <el-table-column prop="bytes" label="流量" width="100" />
-                    <el-table-column prop="durationMs" label="耗时(ms)" width="110" />
-                    <el-table-column label="操作" width="90">
+                    <el-table-column prop="status" :label="$t('serverPages.websiteMonitor.statusCode')" width="90" />
+                    <el-table-column prop="bytes" :label="$t('serverPages.websiteMonitor.flow')" width="100" />
+                    <el-table-column prop="durationMs" :label="$t('serverPages.websiteMonitor.duration')" width="110" />
+                    <el-table-column :label="$t('serverPages.multiNode.operation')" width="90">
                         <template #default="{ row }">
-                            <el-button link type="primary" @click="detail(row)">详情</el-button>
+                            <el-button link type="primary" @click="detail(row)">{{ $t('serverPages.websiteMonitor.detail') }}</el-button>
                         </template>
                     </el-table-column>
                 </el-table>
@@ -50,7 +50,7 @@
                     />
                 </div>
             </el-card>
-            <el-dialog v-model="detailOpen" title="请求详情" width="720px">
+            <el-dialog v-model="detailOpen" :title="$t('serverPages.websiteMonitor.detail')" width="720px">
                 <pre class="detail">{{ JSON.stringify(selected, null, 2) }}</pre>
             </el-dialog>
         </template>
@@ -59,6 +59,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import i18n from '@/lang';
 import { clearMonitorLogs, monitorLogDetail, monitorLogs } from '@/api/modules/website-monitor';
 const loading = ref(false);
 const logs = ref<any[]>([]);
@@ -84,9 +85,12 @@ const detail = async (row: any) => {
     detailOpen.value = true;
 };
 const clearLogs = async () => {
-    await ElMessageBox.confirm('确认清理当前筛选范围的请求日志？', '清理确认');
+    await ElMessageBox.confirm(
+        i18n.global.t('serverPages.websiteMonitor.clearConfirm'),
+        i18n.global.t('serverPages.websiteMonitor.clean'),
+    );
     await clearMonitorLogs({ ...query, startTime: range.value[0], endTime: range.value[1] });
-    ElMessage.success('请求日志已清理');
+    ElMessage.success(i18n.global.t('serverPages.websiteMonitor.clearSuccess'));
     await load();
 };
 const exportLogs = () => {

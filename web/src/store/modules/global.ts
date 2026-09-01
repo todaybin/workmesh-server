@@ -69,6 +69,7 @@ const GlobalStore = defineStore('GlobalState', {
         masterAlias: '',
         currentNode: 'local',
         currentNodeAddr: '',
+        currentNodeRole: '',
     }),
     getters: {
         isDarkTheme: (state) =>
@@ -88,7 +89,8 @@ const GlobalStore = defineStore('GlobalState', {
             const isChinese = lang === 'zh';
             return isChinese ? CN_DOCS_URL : INTL_DOCS_URL;
         },
-        isMaster: (state) => state.currentNode === 'local',
+        // 角色来自服务启动配置；未加载前保留 local 的兼容判断。
+        isMaster: (state) => (state.currentNodeRole ? state.currentNodeRole === 'primary' : state.currentNode === 'local'),
         isMobile: (state) => state.device === DeviceType.Mobile,
 
         isXpackOrEE: (state) => {

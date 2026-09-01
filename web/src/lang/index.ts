@@ -1,4 +1,5 @@
 import { createI18n } from 'vue-i18n';
+import { getServerPageLocaleMessage } from './server-pages';
 
 type LocaleMessage = Record<string, unknown>;
 type LocaleLoader = () => Promise<{ default: LocaleMessage }>;
@@ -23,7 +24,8 @@ const LOCALE_LOADERS: Record<string, LocaleLoader> = {
 
 const getStoredLocale = () => {
     if (typeof window === 'undefined') return DEFAULT_LOCALE;
-    return localStorage.getItem(STORAGE_KEY) || DEFAULT_LOCALE;
+    const stored = localStorage.getItem(STORAGE_KEY) || DEFAULT_LOCALE;
+    return LOCALE_LOADERS[stored] ? stored : DEFAULT_LOCALE;
 };
 
 const initialLocale = getStoredLocale();
@@ -40,7 +42,10 @@ export const loadLocaleMessages = async (locale: string) => {
         return targetLocale;
     }
     const messagesModule = await loader();
-    const messages = messagesModule.default || {};
+    const messages = {
+        ...(messagesModule.default || {}),
+        ...getServerPageLocaleMessage(targetLocale),
+    };
     if (!i18n) {
         return targetLocale;
     }
@@ -56,7 +61,10 @@ const getInitialMessages = async (): Promise<Record<string, LocaleMessage>> => {
     }
     try {
         const messagesModule = await loader();
-        const messages = messagesModule.default || {};
+        const messages = {
+            ...(messagesModule.default || {}),
+            ...getServerPageLocaleMessage(initialLocale),
+        };
         loadedLocales.add(initialLocale);
         return { [initialLocale]: messages };
     } catch {

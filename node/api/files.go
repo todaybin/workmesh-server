@@ -26,6 +26,11 @@ type fileRequest struct {
 	Paths       []string `json:"paths"`
 	Dst         string   `json:"dst"`
 	ShowHidden  bool     `json:"showHidden"`
+	SortBy      string   `json:"sortBy"`
+	SortOrder   string   `json:"sortOrder"`
+	Search      string   `json:"search"`
+	Page        int      `json:"page"`
+	PageSize    int      `json:"pageSize"`
 }
 
 func decodeFileRequest(r *http.Request) (fileRequest, error) {
@@ -67,6 +72,19 @@ func handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 		fileError(w, http.StatusBadRequest, err)
 		return
 	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		fileError(w, http.StatusNotFound, err)
+		return
+	}
+	if !rootInfo.IsDir() {
+		root = filepath.Dir(root)
+		rootInfo, err = os.Stat(root)
+		if err != nil {
+			fileError(w, http.StatusNotFound, err)
+			return
+		}
+	}
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		fileError(w, http.StatusNotFound, err)
@@ -77,12 +95,20 @@ func handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 		if !req.ShowHidden && strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
+		if strings.TrimSpace(req.Search) != "" && !strings.Contains(strings.ToLower(entry.Name()), strings.ToLower(strings.TrimSpace(req.Search))) {
+			continue
+		}
 		info, e := entry.Info()
 		if e == nil {
 			items = append(items, fileInfo(filepath.Join(root, entry.Name()), info))
 		}
 	}
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
+	// 原系统返回完整的 FileInfo 根对象，前端依赖 data.path 判断当前目录是否有效。
+	result := fileInfo(root, rootInfo)
+	result["items"] = items
+	result["itemTotal"] = len(items)
+	result["total"] = len(items)
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": result})
 }
 
 func handleFilesContent(w http.ResponseWriter, r *http.Request) {

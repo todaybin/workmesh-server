@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+export WORKMESH_SERVER_CONFIG="${WORKMESH_SERVER_CONFIG:-/opt/workmesh-server/config/server.json}"
+export WORKMESH_DATA_DIR="${WORKMESH_DATA_DIR:-/opt/workmesh-server/data}"
+if [[ -f /opt/workmesh-server/config/server.env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /opt/workmesh-server/config/server.env
+  set +a
+fi
+if [[ $# -eq 0 ]]; then
+  exec /opt/workmesh-server/bin/workmesh-server help
+fi
+exec /opt/workmesh-server/bin/workmesh-server "$@"

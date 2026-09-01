@@ -205,7 +205,7 @@ import { computeSize2 } from '@/utils/size';
 import { newUUID } from '@/utils/id';
 import TaskLog from '@/components/log/task/index.vue';
 import { routerToName } from '@/utils/router';
-import { onMounted, reactive, ref } from 'vue';
+import { reactive, ref } from 'vue';
 import i18n from '@/lang';
 
 const taskLogRef = ref();
@@ -339,9 +339,6 @@ const openTaskLog = (taskID: string) => {
     taskLogRef.value.openWithTaskID(taskID);
 };
 
-onMounted(() => {
-    search();
-});
 </script>
 
 <style scoped lang="scss">

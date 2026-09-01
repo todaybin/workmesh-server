@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,12 +96,13 @@ type composeTemplate struct {
 }
 
 type composeRecord struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Path      string    `json:"path"`
-	Pinned    bool      `json:"pinned"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Path         string    `json:"path"`
+	AppInstallID string    `json:"appInstallId,omitempty"`
+	Pinned       bool      `json:"pinned"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type containerState struct {
@@ -133,6 +136,8 @@ func getContainerStore() *containerStore {
 	if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
 		_ = json.Unmarshal(b, &s.state)
 	}
+	// 进程接入公共数据库后，数据库状态优先于旧版 JSON 文件。
+	_ = loadJSONState("container_store_state", &s.state)
 	if s.state.Repositories == nil {
 		s.state.Repositories = []imageRepository{}
 	}
@@ -144,6 +149,26 @@ func getContainerStore() *containerStore {
 	}
 	if s.state.Settings == nil {
 		s.state.Settings = map[string]any{}
+	}
+	var appState appStoreState
+	if loadJSONState("app_store_state", &appState) {
+		installByComposePath := make(map[string]string, len(appState.Apps))
+		for _, app := range appState.Apps {
+			installByComposePath[filepath.Clean(appComposePath(app))] = app.ID
+		}
+		migrated := false
+		for index := range s.state.Composes {
+			if s.state.Composes[index].AppInstallID != "" {
+				continue
+			}
+			if installID := installByComposePath[filepath.Clean(s.state.Composes[index].Path)]; installID != "" {
+				s.state.Composes[index].AppInstallID = installID
+				migrated = true
+			}
+		}
+		if migrated {
+			_ = s.saveLocked()
+		}
 	}
 	containerStoreInstance = s
 	return s
@@ -161,7 +186,13 @@ func (s *containerStore) saveLocked() error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	if err := os.Rename(tmp, s.path); err != nil {
+		return err
+	}
+	if err := saveJSONState("container_store_state", s.state); err != nil {
+		return err
+	}
+	return persistContainerRelational(s.state)
 }
 
 func sanitizeImageRepository(r imageRepository) imageRepository { r.Password = ""; return r }
@@ -177,6 +208,12 @@ func registerContainerRoutes(mux *http.ServeMux) {
 		handleContainerRequest(docker, w, r)
 	})
 	mux.HandleFunc("POST /api/v2/containers/compose/search", handleComposeSearch)
+	mux.HandleFunc("GET /api/v2/containers/compose", func(w http.ResponseWriter, _ *http.Request) {
+		store.mu.RLock()
+		items := append([]composeRecord(nil), store.state.Composes...)
+		store.mu.RUnlock()
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
+	})
 	mux.HandleFunc("POST /api/v2/containers/compose/test", handleComposeTest)
 	mux.HandleFunc("POST /api/v2/containers/compose/operate", handleComposeOperate)
 	mux.HandleFunc("POST /api/v2/containers/compose", func(w http.ResponseWriter, r *http.Request) { handleComposeCreate(w, r, store) })
@@ -184,9 +221,43 @@ func registerContainerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/containers/compose/pin", func(w http.ResponseWriter, r *http.Request) { handleComposePin(w, r, store) })
 	mux.HandleFunc("POST /api/v2/containers/compose/env", handleComposeEnv)
 	mux.HandleFunc("POST /api/v2/containers/compose/clean/log", handleComposeCleanLog)
+	mux.HandleFunc("GET /api/v2/containers/stats/{id}", handleContainerStats)
 	registerContainerRepositoryRoutes(mux, store)
 	registerContainerTemplateRoutes(mux, store)
 	registerContainerSettingsRoutes(mux, store)
+}
+
+func handleContainerStats(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validDockerIdentifier(id) {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "容器标识无效"})
+		return
+	}
+	result, err := runDocker(r, "stats", "--no-stream", "--format", "{{json .}}", id)
+	if err != nil || result.ExitCode != 0 {
+		if err == nil {
+			err = errors.New(result.Stderr)
+		}
+		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &raw); err != nil {
+		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	memory, cache := parseDockerMemoryUsage(valueString(raw, "MemUsage"))
+	ioRead, ioWrite := parsePairBytes(valueString(raw, "BlockIO"))
+	rx, tx := parsePairBytes(valueString(raw, "NetIO"))
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"cpuPercent": parseDockerPercent(valueString(raw, "CPUPerc")), "memory": float64(memory), "cache": float64(cache), "ioRead": ioRead, "ioWrite": ioWrite, "networkRX": rx, "networkTX": tx, "shotTime": time.Now().UTC()}})
+}
+
+func parsePairBytes(value string) (float64, float64) {
+	parts := strings.SplitN(value, "/", 2)
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	return float64(parseDockerBytes(strings.TrimSpace(parts[0]))) / 1024 / 1024, float64(parseDockerBytes(strings.TrimSpace(parts[1]))) / 1024 / 1024
 }
 
 type composeRequest struct {
@@ -408,7 +479,15 @@ func registerContainerRepositoryRoutes(mux *http.ServeMux, s *containerStore) {
 		sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
 	}
-	mux.HandleFunc("GET /api/v2/containers/repo", func(w http.ResponseWriter, _ *http.Request) { list(w, nil) })
+	mux.HandleFunc("GET /api/v2/containers/repo", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.RLock()
+		items := make([]imageRepository, 0, len(s.state.Repositories))
+		for _, item := range s.state.Repositories {
+			items = append(items, sanitizeImageRepository(item))
+		}
+		s.mu.RUnlock()
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": items})
+	})
 	mux.HandleFunc("POST /api/v2/containers/repo/search", list)
 	mux.HandleFunc("POST /api/v2/containers/repo", func(w http.ResponseWriter, r *http.Request) {
 		var in imageRepository
@@ -536,7 +615,12 @@ func registerContainerTemplateRoutes(mux *http.ServeMux, s *containerStore) {
 		sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
 	}
-	mux.HandleFunc("GET /api/v2/containers/template", func(w http.ResponseWriter, _ *http.Request) { list(w, nil) })
+	mux.HandleFunc("GET /api/v2/containers/template", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.RLock()
+		items := append([]composeTemplate(nil), s.state.Templates...)
+		s.mu.RUnlock()
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": items})
+	})
 	mux.HandleFunc("POST /api/v2/containers/template/search", list)
 	mux.HandleFunc("POST /api/v2/containers/template", func(w http.ResponseWriter, r *http.Request) {
 		var in composeTemplate
@@ -683,13 +767,78 @@ func registerContainerSettingsRoutes(mux *http.ServeMux, s *containerStore) {
 	}
 }
 func handleComposeSearch(w http.ResponseWriter, r *http.Request) {
-	var req composeRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+	req, err := requestMap(r)
+	if err != nil {
+		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": err.Error()})
 		return
 	}
-	result, err := composeCommand(r, req, "ps")
-	writeCommandResult(w, result, err)
+	containers, err := dockerContainerRows(r)
+	if err != nil {
+		wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	byProject := map[string][]map[string]any{}
+	for _, item := range containers {
+		project := dockerLabel(item, "com.docker.compose.project")
+		if project != "" {
+			byProject[project] = append(byProject[project], item)
+		}
+	}
+	store := getContainerStore()
+	store.mu.RLock()
+	records := append([]composeRecord(nil), store.state.Composes...)
+	store.mu.RUnlock()
+	info := strings.ToLower(valueString(req, "info", "name"))
+	excludeApps, _ := req["excludeAppStore"].(bool)
+	items := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		if info != "" && !strings.Contains(strings.ToLower(record.Name), info) {
+			continue
+		}
+		projectContainers := byProject[record.Name]
+		createdBy := "WorkMesh"
+		if record.AppInstallID != "" {
+			createdBy = "Apps"
+		}
+		if len(projectContainers) > 0 {
+			if label := dockerLabel(projectContainers[0], "createdBy"); label != "" {
+				createdBy = label
+			}
+		}
+		if excludeApps && strings.EqualFold(createdBy, "Apps") {
+			continue
+		}
+		composeContainers := make([]map[string]any, 0, len(projectContainers))
+		running := 0
+		for _, container := range projectContainers {
+			state := fmt.Sprint(container["state"])
+			if strings.EqualFold(state, "running") {
+				running++
+			}
+			composeContainers = append(composeContainers, map[string]any{
+				"containerID": container["containerID"], "name": container["name"], "createTime": container["createTime"],
+				"state": state, "ports": container["ports"],
+			})
+		}
+		env, _ := os.ReadFile(filepath.Join(filepath.Dir(record.Path), ".env"))
+		_, statErr := os.Stat(record.Path)
+		items = append(items, map[string]any{
+			"name": record.Name, "createdAt": record.CreatedAt.Format("2006-01-02 15:04:05"), "createdBy": createdBy,
+			"containerCount": len(composeContainers), "runningCount": running, "configFile": record.Path,
+			"workdir": filepath.Dir(record.Path), "composeFileExists": statErr == nil, "isPinned": record.Pinned,
+			"path": record.Path, "containers": composeContainers, "env": string(env), "appInstallId": record.AppInstallID,
+		})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		left, _ := items[i]["isPinned"].(bool)
+		right, _ := items[j]["isPinned"].(bool)
+		if left != right {
+			return left
+		}
+		return fmt.Sprint(items[i]["createdAt"]) > fmt.Sprint(items[j]["createdAt"])
+	})
+	pageItems, page, pageSize := paginateMaps(items, intValue(req, "page"), intValue(req, "pageSize"))
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": pageItems, "total": len(items), "page": page, "pageSize": pageSize}})
 }
 func handleComposeTest(w http.ResponseWriter, r *http.Request) {
 	var req composeRequest
@@ -782,11 +931,43 @@ func isContainerRoute(pattern string) bool {
 func handleContainerRequest(docker service.DockerService, w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v2/containers")
 	path = strings.Trim(path, "/")
+	if r.Method == http.MethodPost && path == "search" {
+		handleContainerSearch(w, r)
+		return
+	}
+	if r.Method == http.MethodGet && path == "list/stats" {
+		handleContainerListStats(w, r)
+		return
+	}
+	if r.Method == http.MethodGet && path == "status" {
+		handleContainerStatus(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && path == "image/search" {
+		handleImageSearch(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && path == "network/search" {
+		handleNetworkSearch(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && path == "volume/search" {
+		handleVolumeSearch(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && path == "item/stats" {
+		handleContainerItemStats(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && path == "inspect" {
+		handleContainerInspect(w, r)
+		return
+	}
 	var result model.CommandResult
 	var err error
 
 	switch {
-	case r.Method == http.MethodGet && (path == "docker/status" || path == "status"):
+	case r.Method == http.MethodGet && path == "docker/status":
 		status, statusErr := docker.StatusInfo(r.Context())
 		if statusErr != nil {
 			wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": statusErr.Error()})
@@ -794,7 +975,7 @@ func handleContainerRequest(docker service.DockerService, w http.ResponseWriter,
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": status})
 		return
-	case r.Method == http.MethodGet && (path == "list" || path == "list/stats"):
+	case r.Method == http.MethodGet && path == "list":
 		result, err = docker.List(r.Context())
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "stats/"):
 		id := strings.TrimPrefix(path, "stats/")
@@ -803,18 +984,20 @@ func handleContainerRequest(docker service.DockerService, w http.ResponseWriter,
 			return
 		}
 		result, err = runDocker(r, "stats", "--no-stream", id)
-	case r.Method == http.MethodGet && (path == "image" || path == "image/all"):
-		result, err = runDocker(r, "images", "--no-trunc")
+	case r.Method == http.MethodGet && path == "image":
+		handleImageOptions(w, r)
+		return
+	case r.Method == http.MethodGet && path == "image/all":
+		handleImageAll(w, r)
+		return
 	case r.Method == http.MethodGet && path == "network":
-		result, err = runDocker(r, "network", "ls")
+		handleResourceOptions(w, r, "network")
+		return
 	case r.Method == http.MethodGet && path == "volume":
-		result, err = runDocker(r, "volume", "ls")
-	case r.Method == http.MethodGet && path == "network/search":
-		result, err = runDocker(r, "network", "ls")
-	case r.Method == http.MethodGet && path == "volume/search":
-		result, err = runDocker(r, "volume", "ls")
+		handleResourceOptions(w, r, "volume")
+		return
 	case r.Method == http.MethodGet && (path == "daemonjson" || path == "daemonjson/file"):
-		handleDaemonJSON(w, r)
+		handleDaemonJSON(w, r, path == "daemonjson/file")
 		return
 	case r.Method == http.MethodGet && path == "search/log":
 		handleContainerLogStream(w, r)
@@ -828,6 +1011,614 @@ func handleContainerRequest(docker service.DockerService, w http.ResponseWriter,
 		return
 	}
 	writeCommandResult(w, result, err)
+}
+
+func handleContainerStatus(w http.ResponseWriter, r *http.Request) {
+	items, err := dockerContainerRows(r)
+	if err != nil {
+		wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	data := map[string]any{
+		"isExist": true, "isActive": true, "containerCount": len(items), "created": 0, "running": 0,
+		"paused": 0, "restarting": 0, "removing": 0, "exited": 0, "dead": 0,
+	}
+	composeProjects := map[string]struct{}{}
+	for _, item := range items {
+		state := strings.ToLower(fmt.Sprint(item["state"]))
+		if _, ok := data[state]; ok {
+			data[state] = data[state].(int) + 1
+		}
+		if project := dockerLabel(item, "com.docker.compose.project"); project != "" {
+			composeProjects[project] = struct{}{}
+		}
+	}
+	store := getContainerStore()
+	store.mu.RLock()
+	data["composeCount"] = len(composeProjects)
+	if len(store.state.Composes) > len(composeProjects) {
+		data["composeCount"] = len(store.state.Composes)
+	}
+	data["composeTemplateCount"] = len(store.state.Templates)
+	data["repoCount"] = len(store.state.Repositories)
+	store.mu.RUnlock()
+	for key, args := range map[string][]string{
+		"imageCount": {"images", "-q"}, "networkCount": {"network", "ls", "-q"}, "volumeCount": {"volume", "ls", "-q"},
+	} {
+		result, runErr := runDocker(r, args...)
+		if runErr == nil && result.ExitCode == 0 {
+			data[key] = countNonEmptyLines(result.Stdout)
+		} else {
+			data[key] = 0
+		}
+	}
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": data})
+}
+
+func dockerJSONLines(r *http.Request, args ...string) ([]map[string]any, error) {
+	result, err := runDocker(r, args...)
+	if err != nil || result.ExitCode != 0 {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New(strings.TrimSpace(result.Stderr))
+	}
+	items := make([]map[string]any, 0)
+	for _, line := range strings.Split(strings.TrimSpace(result.Stdout), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var item map[string]any
+		if err := json.Unmarshal([]byte(line), &item); err != nil {
+			return nil, fmt.Errorf("解析 Docker JSON 失败: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func parseDockerCreated(value string) time.Time {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05 -0700 MST", "2006-01-02 15:04:05"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
+}
+
+func resourceDescription(store *containerStore, typ, id string) (string, bool) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	descriptions, _ := store.state.Settings["descriptions"].(map[string]any)
+	if descriptions == nil {
+		return "", false
+	}
+	item, _ := descriptions[typ+":"+id].(map[string]any)
+	if item == nil {
+		return "", false
+	}
+	description, _ := item["description"].(string)
+	pinned, _ := item["isPinned"].(bool)
+	return description, pinned
+}
+
+func handleImageSearch(w http.ResponseWriter, r *http.Request) {
+	req, err := requestMap(r)
+	if err != nil {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	rows, err := dockerJSONLines(r, "image", "ls", "--no-trunc", "--format", "{{json .}}")
+	if err != nil {
+		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	keyword := strings.ToLower(valueString(req, "name", "info"))
+	byID := map[string]map[string]any{}
+	used := map[string]bool{}
+	containerRows, _ := dockerJSONLines(r, "ps", "-a", "--format", "{{json .}}")
+	for _, row := range containerRows {
+		used[strings.ToLower(valueString(row, "Image"))] = true
+	}
+	for _, row := range rows {
+		id := valueString(row, "ID", "Id")
+		if id == "" {
+			continue
+		}
+		repository, tag := valueString(row, "Repository"), valueString(row, "Tag")
+		label := repository
+		if tag != "" && tag != "<none>" {
+			label += ":" + tag
+		}
+		if keyword != "" && !strings.Contains(strings.ToLower(label), keyword) {
+			continue
+		}
+		item := byID[id]
+		if item == nil {
+			item = map[string]any{"id": id, "tags": []string{}, "size": int64(parseDockerBytes(valueString(row, "Size"))), "createdAt": parseDockerCreated(valueString(row, "CreatedAt")), "isUsed": used[strings.ToLower(label)]}
+			byID[id] = item
+		}
+		if label != "" && !strings.Contains(label, "<none>") {
+			item["tags"] = append(item["tags"].([]string), label)
+		}
+	}
+	store := getContainerStore()
+	items := make([]map[string]any, 0, len(byID))
+	for id, item := range byID {
+		description, pinned := resourceDescription(store, "image", strings.TrimPrefix(id, "sha256:"))
+		item["description"], item["isPinned"] = description, pinned
+		items = append(items, item)
+	}
+	orderBy, order := valueString(req, "orderBy"), valueString(req, "order")
+	sort.SliceStable(items, func(i, j int) bool {
+		less := fmt.Sprint(items[i]["createdAt"]) < fmt.Sprint(items[j]["createdAt"])
+		if orderBy == "size" {
+			less = items[i]["size"].(int64) < items[j]["size"].(int64)
+		} else if orderBy == "tags" {
+			less = fmt.Sprint(items[i]["tags"]) < fmt.Sprint(items[j]["tags"])
+		} else if orderBy == "isUsed" {
+			less = !items[i]["isUsed"].(bool) && items[j]["isUsed"].(bool)
+		}
+		if strings.EqualFold(order, "descending") {
+			return !less
+		}
+		return less
+	})
+	pageItems, page, pageSize := paginateMaps(items, intValue(req, "page"), intValue(req, "pageSize"))
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": pageItems, "total": len(items), "page": page, "pageSize": pageSize}})
+}
+
+func handleImageOptions(w http.ResponseWriter, r *http.Request) {
+	rows, err := dockerJSONLines(r, "image", "ls", "--format", "{{json .}}")
+	if err != nil {
+		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	seen := map[string]bool{}
+	items := make([]map[string]any, 0)
+	for _, row := range rows {
+		repo, tag := valueString(row, "Repository"), valueString(row, "Tag")
+		if repo == "" || tag == "<none>" {
+			continue
+		}
+		name := repo + ":" + tag
+		if !seen[name] {
+			seen[name] = true
+			items = append(items, map[string]any{"option": name})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return fmt.Sprint(items[i]["option"]) < fmt.Sprint(items[j]["option"]) })
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": items})
+}
+
+func handleImageAll(w http.ResponseWriter, r *http.Request) {
+	req := map[string]any{"page": 1, "pageSize": 10000, "orderBy": "createdAt", "order": "descending"}
+	body, _ := json.Marshal(req)
+	r2 := r.Clone(r.Context())
+	r2.Body = io.NopCloser(strings.NewReader(string(body)))
+	result := httptest.NewRecorder()
+	handleImageSearch(result, r2)
+	var envelope map[string]any
+	if json.Unmarshal(result.Body.Bytes(), &envelope) != nil {
+		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": "镜像列表解析失败"})
+		return
+	}
+	data, _ := envelope["data"].(map[string]any)
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": data["items"]})
+}
+
+func handleResourceOptions(w http.ResponseWriter, r *http.Request, resource string) {
+	rows, err := dockerJSONLines(r, resource, "ls", "--format", "{{json .}}")
+	if err != nil {
+		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		name := valueString(row, "Name")
+		if name != "" {
+			items = append(items, map[string]any{"option": name})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return fmt.Sprint(items[i]["option"]) < fmt.Sprint(items[j]["option"]) })
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": items})
+}
+
+func handleNetworkSearch(w http.ResponseWriter, r *http.Request) {
+	req, err := requestMap(r)
+	if err != nil {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	rows, err := dockerJSONLines(r, "network", "ls", "--no-trunc", "--format", "{{json .}}")
+	if err != nil {
+		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	keyword := strings.ToLower(valueString(req, "info", "name"))
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		name := valueString(row, "Name")
+		if keyword != "" && !strings.Contains(strings.ToLower(name), keyword) {
+			continue
+		}
+		inspect, inspectErr := dockerJSONLines(r, "network", "inspect", name, "--format", "{{json .}}")
+		if inspectErr != nil || len(inspect) == 0 {
+			continue
+		}
+		detail := inspect[0]
+		ipam, _ := detail["IPAM"].(map[string]any)
+		configs, _ := ipam["Config"].([]any)
+		subnet, gateway := "", ""
+		if len(configs) > 0 {
+			if c, ok := configs[0].(map[string]any); ok {
+				subnet, gateway = valueString(c, "Subnet"), valueString(c, "Gateway")
+			}
+		}
+		labels := make([]string, 0)
+		if values, ok := detail["Labels"].(map[string]any); ok {
+			for k, v := range values {
+				labels = append(labels, k+"="+fmt.Sprint(v))
+			}
+			sort.Strings(labels)
+		}
+		created := parseDockerCreated(valueString(detail, "Created"))
+		items = append(items, map[string]any{"id": valueString(detail, "Id", "ID"), "name": name, "labels": labels, "driver": valueString(detail, "Driver"), "ipamDriver": valueString(ipam, "Driver"), "subnet": subnet, "gateway": gateway, "createdAt": created, "attachable": dockerBoolValue(detail, "Attachable")})
+	}
+	pageItems, page, pageSize := paginateMaps(items, intValue(req, "page"), intValue(req, "pageSize"))
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": pageItems, "total": len(items), "page": page, "pageSize": pageSize}})
+}
+
+func handleVolumeSearch(w http.ResponseWriter, r *http.Request) {
+	req, err := requestMap(r)
+	if err != nil {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	rows, err := dockerJSONLines(r, "volume", "ls", "--format", "{{json .}}")
+	if err != nil {
+		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	keyword := strings.ToLower(valueString(req, "info", "name"))
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		name := valueString(row, "Name")
+		if keyword != "" && !strings.Contains(strings.ToLower(name), keyword) {
+			continue
+		}
+		inspect, inspectErr := dockerJSONLines(r, "volume", "inspect", name, "--format", "{{json .}}")
+		if inspectErr != nil || len(inspect) == 0 {
+			continue
+		}
+		detail := inspect[0]
+		labels := make([]map[string]any, 0)
+		if values, ok := detail["Labels"].(map[string]any); ok {
+			for k, v := range values {
+				labels = append(labels, map[string]any{"key": k, "value": fmt.Sprint(v)})
+			}
+		}
+		options := make([]map[string]any, 0)
+		if values, ok := detail["Options"].(map[string]any); ok {
+			for k, v := range values {
+				options = append(options, map[string]any{"key": k, "value": fmt.Sprint(v)})
+			}
+		}
+		items = append(items, map[string]any{"name": name, "labels": labels, "driver": valueString(detail, "Driver"), "mountpoint": valueString(detail, "Mountpoint"), "createdAt": parseDockerCreated(valueString(detail, "CreatedAt")), "options": options})
+	}
+	pageItems, page, pageSize := paginateMaps(items, intValue(req, "page"), intValue(req, "pageSize"))
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": pageItems, "total": len(items), "page": page, "pageSize": pageSize}})
+}
+
+func handleContainerItemStats(w http.ResponseWriter, r *http.Request) {
+	req, err := requestMap(r)
+	if err != nil {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	name := valueString(req, "name", "id")
+	if name == "" {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "INVALID_NAME"}, "message": "容器名称不能为空"})
+		return
+	}
+	if name != "system" {
+		rows, runErr := dockerJSONLines(r, "inspect", "--size", "--format", "{{json .}}", name)
+		if runErr != nil || len(rows) == 0 {
+			if runErr == nil {
+				runErr = errors.New("容器不存在")
+			}
+			wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": runErr.Error()})
+			return
+		}
+		item := rows[0]
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"sizeRw": numberValue(item, "SizeRw"), "sizeRootFs": numberValue(item, "SizeRootFs")}})
+		return
+	}
+	rows, runErr := dockerJSONLines(r, "system", "df", "--format", "{{json .}}")
+	if runErr != nil {
+		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": runErr.Error()})
+		return
+	}
+	data := map[string]any{"containerUsage": int64(0), "containerReclaimable": int64(0), "imageUsage": int64(0), "imageReclaimable": int64(0), "volumeUsage": int64(0), "volumeReclaimable": int64(0), "buildCacheUsage": int64(0), "buildCacheReclaimable": int64(0)}
+	for _, row := range rows {
+		typ := strings.ToLower(valueString(row, "Type"))
+		size := int64(parseDockerBytes(valueString(row, "Size")))
+		reclaim := int64(parseDockerBytes(strings.TrimSpace(strings.Split(valueString(row, "Reclaimable"), "(")[0])))
+		switch typ {
+		case "images":
+			data["imageUsage"] = data["imageUsage"].(int64) + size
+			data["imageReclaimable"] = data["imageReclaimable"].(int64) + reclaim
+		case "containers":
+			data["containerUsage"] = data["containerUsage"].(int64) + size
+			data["containerReclaimable"] = data["containerReclaimable"].(int64) + reclaim
+		case "local volumes", "volumes":
+			data["volumeUsage"] = data["volumeUsage"].(int64) + size
+			data["volumeReclaimable"] = data["volumeReclaimable"].(int64) + reclaim
+		case "build cache":
+			data["buildCacheUsage"] = data["buildCacheUsage"].(int64) + size
+			data["buildCacheReclaimable"] = data["buildCacheReclaimable"].(int64) + reclaim
+		}
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": data})
+}
+
+func numberValue(item map[string]any, key string) int64 {
+	switch value := item[key].(type) {
+	case float64:
+		return int64(value)
+	case int64:
+		return value
+	case json.Number:
+		v, _ := value.Int64()
+		return v
+	}
+	return 0
+}
+func dockerBoolValue(item map[string]any, key string) bool {
+	value, _ := item[key].(bool)
+	return value
+}
+
+func handleContainerInspect(w http.ResponseWriter, r *http.Request) {
+	req, err := requestMap(r)
+	if err != nil {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	id, typ, detail := valueString(req, "id", "name"), strings.ToLower(valueString(req, "type")), valueString(req, "detail")
+	if id == "" || typ == "" {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "id 和 type 不能为空"})
+		return
+	}
+	if typ == "compose" {
+		store := getContainerStore()
+		store.mu.RLock()
+		records := append([]composeRecord(nil), store.state.Composes...)
+		store.mu.RUnlock()
+		for _, record := range records {
+			if record.Name == id || record.Path == id {
+				path := record.Path
+				if detail != "" {
+					path = detail
+				}
+				content, readErr := os.ReadFile(path)
+				if readErr != nil {
+					wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": readErr.Error()})
+					return
+				}
+				wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": string(content)})
+				return
+			}
+		}
+		wmhttp.JSON(w, 404, map[string]any{"code": "ERR", "message": "Compose 不存在"})
+		return
+	}
+	if !validDockerIdentifier(id) {
+		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "对象标识无效"})
+		return
+	}
+	rows, runErr := dockerJSONLines(r, "inspect", id)
+	if typ == "image" {
+		rows, runErr = dockerJSONLines(r, "image", "inspect", id)
+	} else if typ == "network" {
+		rows, runErr = dockerJSONLines(r, "network", "inspect", id)
+	} else if typ == "volume" {
+		rows, runErr = dockerJSONLines(r, "volume", "inspect", id)
+	}
+	if runErr != nil || len(rows) == 0 {
+		if runErr == nil {
+			runErr = errors.New("对象不存在")
+		}
+		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": runErr.Error()})
+		return
+	}
+	b, _ := json.Marshal(rows[0])
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": string(b)})
+}
+
+func handleContainerListStats(w http.ResponseWriter, r *http.Request) {
+	result, err := runDocker(r, "stats", "--no-stream", "--no-trunc", "--format", "{{json .}}")
+	if err != nil || result.ExitCode != 0 {
+		message := strings.TrimSpace(result.Stderr)
+		if message == "" && err != nil {
+			message = err.Error()
+		}
+		wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": message})
+		return
+	}
+	items := make([]map[string]any, 0)
+	for _, line := range strings.Split(strings.TrimSpace(result.Stdout), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": fmt.Sprintf("解析 Docker 统计失败: %v", err)})
+			return
+		}
+		usage, limit := parseDockerMemoryUsage(valueString(raw, "MemUsage"))
+		items = append(items, map[string]any{
+			"containerID": valueString(raw, "ID", "Container"), "cpuTotalUsage": 0, "systemUsage": 0,
+			"cpuPercent": parseDockerPercent(valueString(raw, "CPUPerc")), "percpuUsage": 0, "memoryCache": 0,
+			"memoryUsage": usage, "memoryLimit": limit, "memoryPercent": parseDockerPercent(valueString(raw, "MemPerc")),
+		})
+	}
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": items})
+}
+
+func parseDockerPercent(value string) float64 {
+	parsed, _ := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(value, "%")), 64)
+	return parsed
+}
+
+func parseDockerMemoryUsage(value string) (uint64, uint64) {
+	parts := strings.SplitN(value, "/", 2)
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	return parseDockerBytes(parts[0]), parseDockerBytes(parts[1])
+}
+
+func parseDockerBytes(value string) uint64 {
+	value = strings.TrimSpace(value)
+	units := []struct {
+		suffix string
+		factor float64
+	}{{"TiB", 1 << 40}, {"GiB", 1 << 30}, {"MiB", 1 << 20}, {"KiB", 1 << 10}, {"TB", 1e12}, {"GB", 1e9}, {"MB", 1e6}, {"kB", 1e3}, {"B", 1}}
+	for _, unit := range units {
+		if strings.HasSuffix(value, unit.suffix) {
+			number, _ := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(value, unit.suffix)), 64)
+			if number > 0 {
+				return uint64(number * unit.factor)
+			}
+			return 0
+		}
+	}
+	return 0
+}
+
+func countNonEmptyLines(value string) int {
+	count := 0
+	for _, line := range strings.Split(value, "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func handleContainerSearch(w http.ResponseWriter, r *http.Request) {
+	req, err := requestMap(r)
+	if err != nil {
+		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	items, err := dockerContainerRows(r)
+	if err != nil {
+		wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error()})
+		return
+	}
+	name := strings.ToLower(valueString(req, "name", "info"))
+	state := strings.ToLower(valueString(req, "state"))
+	excludeApps, _ := req["excludeAppStore"].(bool)
+	filtered := items[:0]
+	for _, item := range items {
+		if name != "" && !strings.Contains(strings.ToLower(fmt.Sprint(item["name"])), name) {
+			continue
+		}
+		if state != "" && state != "all" && !strings.EqualFold(fmt.Sprint(item["state"]), state) {
+			continue
+		}
+		if excludeApps && item["isFromApp"] == true {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	pageItems, page, pageSize := paginateMaps(filtered, intValue(req, "page"), intValue(req, "pageSize"))
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": pageItems, "total": len(filtered), "page": page, "pageSize": pageSize}})
+}
+
+func dockerContainerRows(r *http.Request) ([]map[string]any, error) {
+	result, err := runDocker(r, "ps", "-a", "--no-trunc", "--format", "{{json .}}")
+	if err != nil || result.ExitCode != 0 {
+		message := strings.TrimSpace(result.Stderr)
+		if message == "" && err != nil {
+			message = err.Error()
+		}
+		return nil, errors.New(message)
+	}
+	appContainers := map[string]string{}
+	appStore := getAppStore()
+	appStore.mu.RLock()
+	for _, app := range appStore.state.Apps {
+		for _, name := range strings.Split(app.ContainerName, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				appContainers[name] = app.Name
+			}
+		}
+	}
+	appStore.mu.RUnlock()
+	return parseDockerContainerRows(result.Stdout, appContainers)
+}
+
+func parseDockerContainerRows(output string, appContainers map[string]string) ([]map[string]any, error) {
+	items := make([]map[string]any, 0)
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			return nil, fmt.Errorf("解析 Docker 容器列表失败: %w", err)
+		}
+		name := valueString(raw, "Names", "Name")
+		appName, isFromApp := appContainers[name]
+		ports := []string{}
+		if value := valueString(raw, "Ports"); value != "" {
+			for _, port := range strings.Split(value, ",") {
+				ports = append(ports, strings.TrimSpace(port))
+			}
+		}
+		labels := valueString(raw, "Labels")
+		items = append(items, map[string]any{
+			"containerID": valueString(raw, "ID"), "name": name, "imageName": valueString(raw, "Image"),
+			"createTime": valueString(raw, "CreatedAt"), "state": strings.ToLower(valueString(raw, "State")),
+			"runTime": valueString(raw, "Status"), "network": []string{}, "ports": ports,
+			"isFromApp": isFromApp, "isFromCompose": strings.Contains(labels, "com.docker.compose.project="),
+			"appName": appName, "appInstallName": appName, "labels": labels,
+		})
+	}
+	return items, nil
+}
+
+func dockerLabel(item map[string]any, key string) string {
+	for _, label := range strings.Split(fmt.Sprint(item["labels"]), ",") {
+		name, value, ok := strings.Cut(strings.TrimSpace(label), "=")
+		if ok && name == key {
+			return value
+		}
+	}
+	return ""
+}
+
+func paginateMaps(items []map[string]any, page, pageSize int) ([]map[string]any, int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 1000 {
+		pageSize = 100
+	}
+	start := (page - 1) * pageSize
+	if start >= len(items) {
+		return []map[string]any{}, page, pageSize
+	}
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end], page, pageSize
 }
 
 func handleContainerPost(docker service.DockerService, r *http.Request, path string) (model.CommandResult, error) {
@@ -1144,7 +1935,7 @@ func daemonJSONPath() string {
 	return filepath.Join(dir, "docker-daemon.json")
 }
 
-func handleDaemonJSON(w http.ResponseWriter, _ *http.Request) {
+func handleDaemonJSON(w http.ResponseWriter, _ *http.Request, fileOnly bool) {
 	path := daemonJSONPath()
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -1153,7 +1944,43 @@ func handleDaemonJSON(w http.ResponseWriter, _ *http.Request) {
 		wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error()})
 		return
 	}
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": path, "content": string(b)}})
+	if fileOnly {
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": string(b)})
+		return
+	}
+	var raw map[string]any
+	_ = json.Unmarshal(b, &raw)
+	conf := map[string]any{
+		"isSwarm": false, "version": "-", "registryMirrors": stringSlice(raw["registry-mirrors"]), "insecureRegistries": stringSlice(raw["insecure-registries"]),
+		"liveRestore": boolValue(raw, "live-restore"), "iptables": true, "cgroupDriver": "cgroupfs", "ipv6": boolValue(raw, "ipv6"),
+		"fixedCidrV6": valueString(raw, "fixed-cidr-v6"), "ip6Tables": boolValue(raw, "ip6tables"), "experimental": boolValue(raw, "experimental"),
+	}
+	if value, ok := raw["iptables"].(bool); ok {
+		conf["iptables"] = value
+	}
+	if opts, ok := raw["exec-opts"].([]any); ok {
+		for _, opt := range opts {
+			if text, ok := opt.(string); ok && strings.HasPrefix(text, "native.cgroupdriver=") {
+				conf["cgroupDriver"] = strings.TrimPrefix(text, "native.cgroupdriver=")
+			}
+		}
+	}
+	if logs, ok := raw["log-opts"].(map[string]any); ok {
+		conf["logMaxSize"], conf["logMaxFile"] = valueString(logs, "max-size"), valueString(logs, "max-file")
+	}
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": conf})
+}
+
+func stringSlice(value any) []string {
+	result := []string{}
+	if values, ok := value.([]any); ok {
+		for _, item := range values {
+			if text, ok := item.(string); ok {
+				result = append(result, text)
+			}
+		}
+	}
+	return result
 }
 
 func updateDaemonJSON(r *http.Request) (model.CommandResult, error) {

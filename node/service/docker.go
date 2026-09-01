@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +62,52 @@ func (s DockerService) StatusInfo(ctx context.Context) (model.DockerStatus, erro
 // List 返回容器列表文本，保留 Docker CLI 原始字段避免迁移期间丢失信息。
 func (s DockerService) List(ctx context.Context) (model.CommandResult, error) {
 	return s.commands.Execute(ctx, model.CommandRequest{Program: dockerBinaryOrName(), Args: []string{"ps", "-a", "--no-trunc"}})
+}
+
+// ContainerStates 按应用安装记录中的容器名读取 Docker 状态。
+// Docker 的 name 过滤允许模糊匹配，因此返回前再次进行完整名称匹配。
+func (s DockerService) ContainerStates(ctx context.Context, names []string) (map[string]string, error) {
+	wanted := make(map[string]struct{}, len(names))
+	args := []string{"ps", "-a", "--format", "{{.Names}}\t{{.State}}"}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, exists := wanted[name]; exists {
+			continue
+		}
+		wanted[name] = struct{}{}
+		args = append(args, "--filter", "name="+name)
+	}
+	if len(wanted) == 0 {
+		return map[string]string{}, nil
+	}
+	result, err := s.commands.Execute(ctx, model.CommandRequest{Program: dockerBinaryOrName(), Args: args, Timeout: 10 * time.Second})
+	if err != nil {
+		detail := strings.TrimSpace(result.Stderr)
+		if detail == "" {
+			detail = err.Error()
+		}
+		return nil, fmt.Errorf("查询 Docker 容器状态失败: %s", detail)
+	}
+	return parseContainerStates(result.Stdout, wanted), nil
+}
+
+func parseContainerStates(output string, wanted map[string]struct{}) map[string]string {
+	states := make(map[string]string, len(wanted))
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.SplitN(strings.TrimSpace(line), "\t", 2)
+		if len(fields) != 2 {
+			continue
+		}
+		name := strings.TrimSpace(fields[0])
+		if _, ok := wanted[name]; !ok {
+			continue
+		}
+		states[name] = strings.ToLower(strings.TrimSpace(fields[1]))
+	}
+	return states
 }
 
 // Operate 执行白名单中的容器生命周期操作。

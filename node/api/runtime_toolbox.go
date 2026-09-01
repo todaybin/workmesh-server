@@ -123,6 +123,10 @@ func runtimeErr(w http.ResponseWriter, status int, msg string) {
 	wmhttp.JSON(w, status, map[string]any{"code": "ERR", "message": msg})
 }
 
+func runtimeErrData(w http.ResponseWriter, status int, msg string, data any) {
+	wmhttp.JSON(w, status, map[string]any{"code": "ERR", "message": msg, "data": data})
+}
+
 // RegisterRuntimeToolboxRoutes 注册运行时、终端、SSH 与工具箱接口。
 func RegisterRuntimeToolboxRoutes(mux *http.ServeMux) {
 	s := getRuntimeStore()
@@ -603,25 +607,123 @@ func registerTerminalRoutes(mux *http.ServeMux) {
 
 func registerSSHRoutes(mux *http.ServeMux, s *runtimeStore) {
 	get := func(w http.ResponseWriter, _ *http.Request) {
-		s.mu.RLock()
-		v := s.state.Settings["ssh"]
-		s.mu.RUnlock()
-		if v == nil {
+		var v map[string]any
+		if !loadNodeSetting("ssh", &v) || v == nil {
 			v = map[string]any{}
 		}
+		delete(v, "password")
+		delete(v, "privateKey")
+		delete(v, "passPhrase")
 		runtimeOK(w, v)
 	}
 	mux.HandleFunc("GET /api/v2/settings/ssh/conn", get)
-	for _, p := range []string{"/api/v2/settings/ssh", "/api/v2/settings/ssh/check", "/api/v2/settings/ssh/check/info", "/api/v2/settings/ssh/default"} {
-		mux.HandleFunc("POST "+p, func(w http.ResponseWriter, r *http.Request) {
-			v, _ := runtimeBody(r)
-			delete(v, "password")
-			s.mu.Lock()
-			s.state.Settings["ssh"] = v
-			_ = s.saveLocked()
-			s.mu.Unlock()
-			runtimeOK(w, map[string]any{"connected": true, "config": v})
-		})
+	mux.HandleFunc("POST /api/v2/settings/ssh", func(w http.ResponseWriter, r *http.Request) {
+		v, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, 400, "解析 SSH 配置失败: "+err.Error())
+			return
+		}
+		if err := validateSSHConfig(v); err != nil {
+			runtimeErr(w, 400, err.Error())
+			return
+		}
+		if err := saveNodeSetting("ssh", v); err != nil {
+			runtimeErr(w, 500, "保存 SSH 配置失败: "+err.Error())
+			return
+		}
+		out := cloneMapRuntime(v)
+		delete(out, "password")
+		delete(out, "privateKey")
+		delete(out, "passPhrase")
+		runtimeOK(w, map[string]any{"config": out})
+	})
+	mux.HandleFunc("POST /api/v2/settings/ssh/default", func(w http.ResponseWriter, r *http.Request) {
+		v, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, 400, "解析默认连接配置失败: "+err.Error())
+			return
+		}
+		if err := saveNodeSetting("ssh.default", v); err != nil {
+			runtimeErr(w, 500, "保存默认连接配置失败: "+err.Error())
+			return
+		}
+		runtimeOK(w, v)
+	})
+	mux.HandleFunc("POST /api/v2/settings/ssh/check/info", func(w http.ResponseWriter, r *http.Request) {
+		v, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, 400, "解析 SSH 测试参数失败: "+err.Error())
+			return
+		}
+		runtimeSSHCheck(w, v)
+	})
+	mux.HandleFunc("POST /api/v2/settings/ssh/check", func(w http.ResponseWriter, r *http.Request) {
+		var v map[string]any
+		if !loadNodeSetting("ssh", &v) {
+			runtimeErr(w, 400, "尚未配置 SSH 连接")
+			return
+		}
+		runtimeSSHCheck(w, v)
+	})
+}
+
+func cloneMapRuntime(in map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+func validateSSHConfig(v map[string]any) error {
+	host := runtimeString(v, "host", "addr", "address")
+	if host == "" {
+		return errors.New("SSH 主机地址不能为空")
+	}
+	port := runtimeIntValue(v["port"])
+	if port == 0 {
+		port = 22
+	}
+	if port < 1 || port > 65535 {
+		return errors.New("SSH 端口无效")
+	}
+	return nil
+}
+func runtimeSSHCheck(w http.ResponseWriter, v map[string]any) {
+	if err := validateSSHConfig(v); err != nil {
+		runtimeErr(w, 400, err.Error())
+		return
+	}
+	host := runtimeString(v, "host", "addr", "address")
+	port := runtimeIntValue(v["port"])
+	if port == 0 {
+		port = 22
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(host, fmt.Sprint(port)))
+	result := map[string]any{"host": host, "port": port, "connected": err == nil}
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err != nil {
+		result["error"] = err.Error()
+		runtimeErrData(w, http.StatusBadGateway, "SSH 连接失败", result)
+		return
+	}
+	runtimeOK(w, result)
+}
+
+func runtimeIntValue(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case string:
+		i, _ := strconv.Atoi(strings.TrimSpace(n))
+		return i
+	default:
+		return 0
 	}
 }
 

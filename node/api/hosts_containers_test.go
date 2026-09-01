@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/todaybin/workmesh-server/internal/storage"
 )
 
 func TestHostDiagnostics(t *testing.T) {
@@ -38,6 +40,14 @@ func TestHostCRUDPersists(t *testing.T) {
 	dir := filepath.Join(".tmp", "host-test")
 	_ = os.RemoveAll(dir)
 	t.Setenv("WORKMESH_DATA_DIR", dir)
+	store, err := storage.Open(filepath.Join(dir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := SetSharedStore(store); err != nil {
+		t.Fatal(err)
+	}
 	mux := http.NewServeMux()
 	registerHostRoutes(mux)
 	payload, _ := json.Marshal(map[string]any{"name": "test-host", "address": "127.0.0.1", "port": 22})
@@ -48,6 +58,11 @@ func TestHostCRUDPersists(t *testing.T) {
 	}
 	if len(loadHosts()) != 1 {
 		t.Fatalf("host not persisted")
+	}
+	search := httptest.NewRecorder()
+	mux.ServeHTTP(search, httptest.NewRequest(http.MethodPost, "/api/v2/hosts/search", bytes.NewBufferString(`{"page":1,"pageSize":20}`)))
+	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), `"total":1`) {
+		t.Fatalf("search status=%d body=%s", search.Code, search.Body.String())
 	}
 }
 

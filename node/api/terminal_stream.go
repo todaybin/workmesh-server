@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -42,6 +43,8 @@ const (
 	maxTerminalDimension = 500
 )
 
+var terminalCommandCleanups sync.Map
+
 // handleTerminalStream 建立本地、容器或 SSH 终端的双向 WebSocket 会话。
 func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 	if !requireStreamAuth(w, r, "WORKMESH_TERMINAL_TOKEN", "WORKMESH_STREAM_TOKEN") {
@@ -61,6 +64,7 @@ func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "TERMINAL_PARAMETERS_INVALID"}, "message": err.Error()})
 		return
 	}
+	defer cleanupTerminalCommand(command)
 	ws, err := upgradeStreamWebSocket(w, r)
 	if err != nil {
 		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": err.Error()})
@@ -188,18 +192,33 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 		args = append(args, containerID, program)
 		return exec.CommandContext(ctx, "docker", args...), nil
 	case strings.HasSuffix(path, "/ssh"):
-		host := strings.TrimSpace(r.URL.Query().Get("host"))
-		user := strings.TrimSpace(r.URL.Query().Get("user"))
-		if host == "" || strings.ContainsAny(host, " \t\r\n\x00") || len(host) > 255 {
-			return nil, errors.New("host 参数不能为空且不能包含空白字符")
-		}
-		port := 22
-		if raw := r.URL.Query().Get("port"); raw != "" {
-			value, err := strconv.Atoi(raw)
-			if err != nil || value < 1 || value > 65535 {
-				return nil, errors.New("port 参数无效")
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		var record hostRecord
+		if id != "" {
+			loaded, err := hostWithCredentials(id)
+			if err != nil {
+				return nil, fmt.Errorf("加载 SSH 主机失败: %w", err)
 			}
-			port = value
+			record = loaded
+		} else {
+			// 兼容旧客户端；新客户端必须使用 id，避免重复提交并信任连接参数。
+			record = hostRecord{Address: strings.TrimSpace(r.URL.Query().Get("host")), User: strings.TrimSpace(r.URL.Query().Get("user")), Port: 22}
+			if raw := r.URL.Query().Get("port"); raw != "" {
+				value, err := strconv.Atoi(raw)
+				if err != nil || value < 1 || value > 65535 {
+					return nil, errors.New("port 参数无效")
+				}
+				record.Port = value
+			}
+		}
+		host := strings.TrimSpace(record.Address)
+		user := strings.TrimSpace(record.User)
+		if host == "" || strings.ContainsAny(host, " \t\r\n\x00") || len(host) > 255 {
+			return nil, errors.New("已保存主机的地址无效")
+		}
+		port := record.Port
+		if port < 1 || port > 65535 {
+			return nil, errors.New("已保存主机的 SSH 端口无效")
 		}
 		target := host
 		if user != "" {
@@ -208,7 +227,7 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 			}
 			target = user + "@" + host
 		}
-		// 仅使用 SSH 配置或 Agent 的非交互认证，绝不从 URL 接收密码或私钥。
+		// 认证目标完全来自 node_hosts，绝不从 URL 接收地址、用户名、端口或凭据。
 		args := []string{"-tt", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-p", strconv.Itoa(port), target}
 		if command := strings.TrimSpace(r.URL.Query().Get("command")); command != "" {
 			if len(command) > 4096 || strings.IndexByte(command, 0) >= 0 {
@@ -216,9 +235,64 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 			}
 			args = append(args, command)
 		}
+		if record.PrivateKey != "" {
+			if record.PassPhrase != "" {
+				return nil, errors.New("带口令私钥需要先导入服务器 SSH Agent")
+			}
+			identity, cleanup, err := temporarySSHIdentity(record.PrivateKey)
+			if err != nil {
+				return nil, err
+			}
+			args = append([]string{"-i", identity, "-o", "IdentitiesOnly=yes"}, args...)
+			cmd := exec.CommandContext(ctx, "ssh", args...)
+			terminalCommandCleanups.Store(cmd, cleanup)
+			return cmd, nil
+		}
+		if record.Password != "" {
+			if _, err := exec.LookPath("sshpass"); err != nil {
+				return nil, errors.New("密码认证需要服务器安装 sshpass，或改用私钥/SSH Agent")
+			}
+			cmd := exec.CommandContext(ctx, "sshpass", append([]string{"-e", "ssh"}, args...)...)
+			cmd.Env = append(os.Environ(), "SSHPASS="+record.Password)
+			return cmd, nil
+		}
 		return exec.CommandContext(ctx, "ssh", args...), nil
 	default:
 		return nil, errors.New("终端类型不受支持")
+	}
+}
+
+func temporarySSHIdentity(privateKey string) (string, func(), error) {
+	dataRoot := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
+	if dataRoot == "" {
+		return "", nil, errors.New("未配置 WORKMESH_DATA_DIR，无法安全创建 SSH 临时密钥")
+	}
+	dir := filepath.Join(dataRoot, ".tmp")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", nil, fmt.Errorf("创建 SSH 临时目录失败: %w", err)
+	}
+	file, err := os.CreateTemp(dir, "ssh-identity-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("创建 SSH 临时密钥失败: %w", err)
+	}
+	name := file.Name()
+	if err := file.Chmod(0o600); err == nil {
+		_, err = file.WriteString(privateKey)
+	}
+	closeErr := file.Close()
+	if err != nil || closeErr != nil {
+		_ = os.Remove(name)
+		if err == nil {
+			err = closeErr
+		}
+		return "", nil, fmt.Errorf("写入 SSH 临时密钥失败: %w", err)
+	}
+	return name, func() { _ = os.Remove(name) }, nil
+}
+
+func cleanupTerminalCommand(command *exec.Cmd) {
+	if cleanup, ok := terminalCommandCleanups.LoadAndDelete(command); ok {
+		cleanup.(func())()
 	}
 }
 

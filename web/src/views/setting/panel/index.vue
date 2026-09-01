@@ -6,28 +6,28 @@
                     <el-row>
                         <el-col :span="1"><br /></el-col>
                         <el-col :xs="24" :sm="20" :md="15" :lg="12" :xl="12">
-                            <el-form-item v-if="gatewayStatus.bindingRequired !== false" label="Gateway 账号">
+                            <el-form-item v-if="gatewayStatus.bindingRequired !== false" :label="$t('serverPages.gateway.username')">
                                 <div class="gateway-binding-row">
                                     <template v-if="gatewayStatus.configured">
                                         <el-input :model-value="gatewayAccountDisplay" disabled />
-                                        <el-button type="danger" plain @click="unbindGateway">解绑</el-button>
+                                        <el-button type="danger" plain @click="unbindGateway">{{ $t('serverPages.gateway.unbind') }}</el-button>
                                     </template>
                                     <template v-else>
-                                        <el-input v-model="gatewayLoginForm.username" placeholder="Gateway 用户名" />
+                                        <el-input v-model="gatewayLoginForm.username" :placeholder="$t('serverPages.gateway.username')" />
                                         <el-input
                                             v-model="gatewayLoginForm.password"
                                             type="password"
                                             show-password
-                                            placeholder="Gateway 密码"
+                                            :placeholder="$t('serverPages.gateway.password')"
                                         />
                                         <el-button type="primary" :loading="gatewayBinding" @click="bindGateway">
-                                            绑定
+                                            {{ $t('serverPages.gateway.bind') }}
                                         </el-button>
                                     </template>
                                 </div>
                                 <span v-if="!gatewayStatus.configured" class="input-help">
-                                    没有 Gateway 账号？
-                                    <a :href="gatewayRegisterURL" target="_blank" rel="noopener">注册账号</a>
+                                    {{ $t('serverPages.gateway.noAccount') }}
+                                    <a :href="gatewayRegisterURL" target="_blank" rel="noopener">{{ $t('serverPages.gateway.register') }}</a>
                                 </span>
                             </el-form-item>
                             <el-form-item :label="$t('setting.theme')" prop="theme">
@@ -269,7 +269,7 @@ const gatewayLoginForm = reactive({ username: '', password: '' });
 const gatewayBinding = ref(false);
 const gatewayAccountDisplay = computed(() => {
     const account = gatewayStatus.account || '';
-    if (!account) return '未绑定 Gateway 账号';
+    if (!account) return i18n.global.t('serverPages.gateway.notBound');
     if (account.length <= 4) return `${account.slice(0, 1)}****`;
     return `${account.slice(0, 3)}****${account.slice(-4)}`;
 });
@@ -410,8 +410,8 @@ const search = async () => {
 const unbindGateway = async () => {
     try {
         await ElMessageBox.confirm(
-            '解绑后当前设备将停止向 Gateway 心跳，但不会退出 Node 本地账号。是否继续？',
-            '解绑 Gateway 账号',
+            i18n.global.t('serverPages.gateway.unbindConfirm'),
+            i18n.global.t('serverPages.gateway.unbindTitle'),
             {
                 confirmButtonText: i18n.global.t('commons.button.confirm'),
                 cancelButtonText: i18n.global.t('commons.button.cancel'),
@@ -422,10 +422,10 @@ const unbindGateway = async () => {
         await unbindWorkMeshGateway();
         clearWorkMeshGatewayStatusCache();
         gatewayStatus.configured = false;
-        MsgSuccess('Gateway 账号已解绑');
+        MsgSuccess(i18n.global.t('serverPages.gateway.unbindSuccess'));
         window.location.reload();
     } catch (error: any) {
-        if (error !== 'cancel' && error !== 'close') MsgError(error?.message || '解绑失败');
+        if (error !== 'cancel' && error !== 'close') MsgError(error?.message || i18n.global.t('serverPages.gateway.unbindFailed'));
     } finally {
         loading.value = false;
     }
@@ -433,7 +433,7 @@ const unbindGateway = async () => {
 
 const bindGateway = async () => {
     if (!gatewayLoginForm.username || !gatewayLoginForm.password) {
-        MsgError('请输入 Gateway 用户名和密码');
+        MsgError(i18n.global.t('serverPages.gateway.credentialsRequired'));
         return;
     }
     gatewayBinding.value = true;
@@ -444,17 +444,17 @@ const bindGateway = async () => {
         });
         clearWorkMeshGatewayStatusCache();
         gatewayLoginForm.password = '';
-        MsgSuccess('Gateway 账号绑定成功');
+        MsgSuccess(i18n.global.t('serverPages.gateway.bindSuccess'));
         window.location.reload();
     } catch (error: any) {
         if (error?.response?.status === 401 || error?.response?.data?.details?.errCode === 'LOCAL_AUTH_REQUIRED') {
-            MsgError('本地登录会话已失效，请重新登录');
+            MsgError(i18n.global.t('serverPages.gateway.sessionExpired'));
             globalStore.setLogStatus(false);
             globalStore.clearAuthInfo();
             await router.replace({ name: 'login' });
             return;
         }
-        MsgError(error?.message || 'Gateway 账号绑定失败');
+        MsgError(error?.message || i18n.global.t('serverPages.gateway.bindFailed'));
     } finally {
         gatewayBinding.value = false;
     }

@@ -70,6 +70,7 @@ export interface GlobalState {
     masterAlias: string;
     currentNode: string;
     currentNodeAddr: string;
+    currentNodeRole: 'primary' | 'secondary' | '';
 }
 
 export interface MenuState {

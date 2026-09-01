@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,12 +18,28 @@ import (
 	"text/template"
 )
 
-const defaultLocale = "zh"
+var defaultLocale = "zh"
 
-var supportedLocales = []string{"zh", "zh-Hant", "en", "pt-BR", "ja", "ru", "ms", "ko", "lo", "tr", "es-ES", "fa"}
+type localeDefinition struct {
+	Code    string   `json:"code"`
+	File    string   `json:"file"`
+	Aliases []string `json:"aliases"`
+}
+
+type localeManifestDefinition struct {
+	Default string             `json:"default"`
+	Locales []localeDefinition `json:"locales"`
+}
+
+var supportedLocales []string
+var localeAliases map[string]string
+var localeFiles map[string]string
 
 //go:embed lang/*.yaml
 var languageFS embed.FS
+
+//go:embed locales.json
+var localeManifest []byte
 
 var (
 	catalogOnce sync.Once
@@ -32,6 +49,7 @@ var (
 
 // SupportedLocales 返回服务端内置的规范语言代码副本。
 func SupportedLocales() []string {
+	initLocaleManifest()
 	result := make([]string, len(supportedLocales))
 	copy(result, supportedLocales)
 	return result
@@ -39,13 +57,7 @@ func SupportedLocales() []string {
 
 // NormalizeLocale 从 BCP 47 语言代码或 Accept-Language 请求头选择可用语言。
 func NormalizeLocale(value string) string {
-	aliases := map[string]string{
-		"zh": "zh", "zh-cn": "zh", "zh-hans": "zh",
-		"zh-hant": "zh-Hant", "zh-tw": "zh-Hant", "zh-hk": "zh-Hant",
-		"en": "en", "pt": "pt-BR", "pt-br": "pt-BR", "ja": "ja",
-		"ru": "ru", "ms": "ms", "ko": "ko", "lo": "lo", "tr": "tr",
-		"es": "es-ES", "es-es": "es-ES", "fa": "fa",
-	}
+	initLocaleManifest()
 	bestLocale, bestQuality := "", -1.0
 	for order, item := range strings.Split(value, ",") {
 		parts := strings.Split(item, ";")
@@ -66,13 +78,13 @@ func NormalizeLocale(value string) string {
 		if quality <= 0 {
 			continue
 		}
-		locale, ok := aliases[languageCode]
+		locale, ok := localeAliases[languageCode]
 		if !ok {
 			if languageCode == "*" {
 				locale = defaultLocale
 				ok = true
 			} else if separator := strings.IndexByte(languageCode, '-'); separator > 0 {
-				locale, ok = aliases[languageCode[:separator]]
+				locale, ok = localeAliases[languageCode[:separator]]
 			}
 		}
 		if ok && (quality > bestQuality || (quality == bestQuality && bestLocale == "" && order == 0)) {
@@ -264,9 +276,10 @@ func Format(locale, key string, data map[string]any) (string, error) {
 }
 
 func loadCatalogs() {
+	initLocaleManifest()
 	catalogs = make(map[string]map[string]string, len(supportedLocales))
 	for _, locale := range supportedLocales {
-		content, err := languageFS.ReadFile("lang/" + locale + ".yaml")
+		content, err := languageFS.ReadFile("lang/" + localeFiles[locale])
 		if err != nil {
 			catalogErr = fmt.Errorf("加载语言目录 %q 失败: %w", locale, err)
 			return
@@ -278,6 +291,34 @@ func loadCatalogs() {
 		}
 		catalogs[locale] = catalog
 	}
+}
+
+var localeManifestOnce sync.Once
+
+func initLocaleManifest() {
+	localeManifestOnce.Do(func() {
+		var manifest localeManifestDefinition
+		if err := json.Unmarshal(localeManifest, &manifest); err != nil {
+			panic(fmt.Sprintf("解析语言清单失败: %v", err))
+		}
+		if value := strings.TrimSpace(manifest.Default); value != "" {
+			defaultLocale = value
+		}
+		localeAliases = make(map[string]string, len(manifest.Locales)*2)
+		localeFiles = make(map[string]string, len(manifest.Locales))
+		for _, item := range manifest.Locales {
+			code := strings.TrimSpace(item.Code)
+			if code == "" || strings.TrimSpace(item.File) == "" {
+				continue
+			}
+			supportedLocales = append(supportedLocales, code)
+			localeFiles[code] = item.File
+			localeAliases[strings.ToLower(code)] = code
+			for _, alias := range item.Aliases {
+				localeAliases[strings.ToLower(strings.TrimSpace(alias))] = code
+			}
+		}
+	})
 }
 
 // 语言文件采用单层标量 YAML；专用解析器避免每次请求读取文件。

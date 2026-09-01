@@ -478,6 +478,8 @@ import { useCan } from '@/composables/useMenuManagePermission';
 const router = useRouter();
 import { useGlobalStore } from '@/composables/useGlobalStore';
 const {
+    globalStore,
+    currentNode,
     showEntranceWarn,
     defaultNetwork,
     defaultIO,
@@ -837,10 +839,12 @@ const refreshDashboard = async () => {
 };
 
 const jumpPanel = (row: any) => {
-    let entrance = row.securityEntrance.startsWith('/') ? row.securityEntrance.slice(1) : row.securityEntrance;
-    entrance = entrance ? '/' + entrance : '';
-    let addr = row.addr.endsWith('/') ? row.addr.slice(0, -1) : row.addr;
-    window.open(addr + entrance, '_blank', 'noopener,noreferrer');
+    // 节点地址仅用于展示；访问始终回到当前公网入口，由服务端按节点 ID relay。
+    const targetNode = String(row.nodeId || row.id || row.name || '').trim();
+    if (!targetNode) return;
+    currentNode.value = targetNode;
+    globalStore.currentNodeAddr = '';
+    routerToNameWithQuery('home', { t: Date.now() });
 };
 
 const onLoadCurrentInfo = async () => {

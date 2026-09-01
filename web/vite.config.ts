@@ -1,4 +1,5 @@
 import { resolve } from 'path';
+import { existsSync, readFileSync } from 'fs';
 import { wrapperEnv } from './src/utils/get-env.ts';
 import viteCompression from 'vite-plugin-compression';
 import eslintPlugin from 'vite-plugin-eslint2';
@@ -51,11 +52,29 @@ const __APP_INFO__ = {
     lastBuildTime: dayjs().format('YYYY-MM-DD HH:mm:ss'),
 };
 
+function loadServerConfigProxyTarget(): string {
+    const configPath = resolve(import.meta.dirname, '../config/server.json');
+    if (!existsSync(configPath)) return '';
+    try {
+        const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
+            listenAddress?: string;
+            listenPort?: number;
+        };
+        if (!config.listenPort || config.listenPort < 1 || config.listenPort > 65535) return '';
+        const address = String(config.listenAddress || '127.0.0.1').trim();
+        const host = address === '0.0.0.0' || address === '::' || address === '[::]' ? '127.0.0.1' : address;
+        return `http://${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${config.listenPort}/`;
+    } catch {
+        return '';
+    }
+}
+
 export default defineConfig(async ({ mode }: ConfigEnv): Promise<UserConfig> => {
     const env = loadEnv(mode, process.cwd());
     const viteEnv = wrapperEnv(env);
     const isProduction = mode === 'production';
     const reportPlugin = viteEnv.VITE_REPORT ? (await import('rollup-plugin-visualizer')).visualizer() : false;
+    const apiProxyTarget = String(viteEnv.VITE_API_PROXY_TARGET || '').trim() || loadServerConfigProxyTarget();
 
     return {
         resolve: {
@@ -83,13 +102,16 @@ export default defineConfig(async ({ mode }: ConfigEnv): Promise<UserConfig> => 
             sourcemapIgnoreList: (sourcePath) => {
                 return sourcePath.includes('node_modules');
             },
-            proxy: {
-                '/api/v2': {
-                    target: viteEnv.VITE_API_PROXY_TARGET || 'http://localhost:9999/',
-                    changeOrigin: true,
-                    ws: true,
-                },
-            },
+            // 开发代理目标必须由环境或启动器显式提供；不猜测后端端口，避免与生产配置脱节。
+            proxy: apiProxyTarget
+                ? {
+                      '/api/v2': {
+                          target: apiProxyTarget,
+                          changeOrigin: true,
+                          ws: true,
+                      },
+                  }
+                : undefined,
         },
         plugins: [
             patchCodeFilterOverflow(),

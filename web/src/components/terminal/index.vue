@@ -26,6 +26,7 @@ import { TerminalStore } from '@/store';
 import { MsgError } from '@/utils/message';
 import { checkStreamAuth } from '@/utils/stream-auth';
 import { useGlobalStore } from '@/composables/useGlobalStore';
+import { buildSameOriginWebSocketUrl } from '@/api/transport';
 const { currentNode } = useGlobalStore();
 
 const terminalElement = ref<HTMLDivElement | null>(null);
@@ -249,15 +250,11 @@ function changeTerminalSize() {
 
 const initWebSocket = async (endpoint_: string, args: string = '') => {
     const token = ++initWebSocketToken;
-    const href = window.location.href;
-    const protocol = href.split('//')[0] === 'http:' ? 'ws' : 'wss';
-    const host = href.split('//')[1].split('/')[0];
-    const endpoint = endpoint_.replace(/^\/+/, '');
     let node = args.indexOf('id=') !== -1 ? 'local' : currentNode.value;
-    let conn = `${protocol}://${host}/${endpoint}?cols=${term.value.cols}&rows=${term.value.rows}&${args}&operateNode=${node}`;
-    if (args.indexOf('operateNode=') !== -1) {
-        conn = `${protocol}://${host}/${endpoint}?cols=${term.value.cols}&rows=${term.value.rows}&${args}`;
-    }
+    const query = new URLSearchParams(args);
+    query.set('cols', String(term.value.cols));
+    query.set('rows', String(term.value.rows));
+    const conn = buildSameOriginWebSocketUrl(endpoint_, node, query);
     const authError = await checkStreamAuth(conn);
     if (token !== initWebSocketToken || !termReady.value) {
         return;

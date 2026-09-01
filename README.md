@@ -3,6 +3,8 @@
 
 # WorkMesh Server
 
+统一架构说明见 [`docs/architecture/unified-server.md`](docs/architecture/unified-server.md)。control 与 node 是同一进程内的业务分区，共享一个 SQLite、认证上下文和生命周期。
+
 WorkMesh Server 是面向单机和多节点环境的自主运行服务，提供主机、容器、网站、数据库、文件、备份、计划任务、终端、日志、SSL、运行时和 AI 工作流管理能力。
 
 ## 运行

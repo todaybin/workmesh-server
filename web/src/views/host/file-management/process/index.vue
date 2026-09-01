@@ -70,6 +70,7 @@ import { ElMessageBox } from 'element-plus';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import i18n from '@/lang';
 import { checkStreamAuth } from '@/utils/stream-auth';
+import { buildSameOriginWebSocketUrl } from '@/api/transport';
 const { currentNode: globalCurrentNode } = useGlobalStore();
 
 let processSocket: WebSocket | null = null;
@@ -113,11 +114,8 @@ const onClose = () => {};
 
 const initProcess = async () => {
     const token = ++initProcessToken;
-    let href = window.location.href;
-    let protocol = href.split('//')[0] === 'http:' ? 'ws' : 'wss';
-    let ipLocal = href.split('//')[1].split('/')[0];
     let currentNode = globalCurrentNode.value;
-    const url = `${protocol}://${ipLocal}/api/v2/files/wget/process?operateNode=${currentNode}`;
+    const url = buildSameOriginWebSocketUrl('/files/wget/process', currentNode);
     const authError = await checkStreamAuth(url, currentNode);
     if (token !== initProcessToken || !open.value) {
         return;

@@ -237,7 +237,7 @@
 
 <script lang="ts" setup>
 import { ElMessageBox, FormInstance } from 'element-plus';
-import { onMounted, reactive, ref } from 'vue';
+import { reactive, ref } from 'vue';
 import CodemirrorPro from '@/components/codemirror-pro/index.vue';
 import Mirror from '@/views/container/setting/mirror/index.vue';
 import Registry from '@/views/container/setting/registry/index.vue';
@@ -520,7 +520,4 @@ const search = async () => {
     form.dockerSockPath = settingRes.data.dockerSockPath || 'unix:///var/run/docker.sock';
 };
 
-onMounted(() => {
-    search();
-});
 </script>

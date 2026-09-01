@@ -1,29 +1,29 @@
 <template>
     <div class="gateway-bind-page">
         <div class="gateway-bind-content">
-            <h2>绑定 WorkMesh Gateway</h2>
-            <p class="gateway-bind-description">登录独立的 Gateway 账号以启用节点上的 WorkMesh 功能。</p>
+            <h2>{{ $t('serverPages.gateway.bindTitle') }}</h2>
+            <p class="gateway-bind-description">{{ $t('serverPages.gateway.bindDescription') }}</p>
             <el-form label-position="top" @submit.prevent="bindGateway">
-                <el-form-item label="Gateway 用户名">
-                    <el-input v-model="form.username" autocomplete="username" placeholder="请输入 Gateway 用户名" />
+                <el-form-item :label="$t('serverPages.gateway.username')">
+                    <el-input v-model="form.username" autocomplete="username" :placeholder="$t('serverPages.gateway.username')" />
                 </el-form-item>
-                <el-form-item label="Gateway 密码">
+                    <el-form-item :label="$t('serverPages.gateway.password')">
                     <el-input
                         v-model="form.password"
                         type="password"
                         show-password
                         autocomplete="current-password"
-                        placeholder="请输入 Gateway 密码"
+                        :placeholder="$t('serverPages.gateway.password')"
                         @keyup.enter="bindGateway"
                     />
                 </el-form-item>
                 <el-button type="primary" :loading="loading" class="bind-button" @click="bindGateway">
-                    绑定并继续
+                    {{ $t('serverPages.gateway.bind') }}
                 </el-button>
             </el-form>
             <div class="gateway-register">
-                没有 Gateway 账号？
-                <a :href="registerURL" target="_blank" rel="noopener">注册账号</a>
+                {{ $t('serverPages.gateway.noAccount') }}
+                <a :href="registerURL" target="_blank" rel="noopener">{{ $t('serverPages.gateway.register') }}</a>
             </div>
         </div>
     </div>
@@ -33,6 +33,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import i18n from '@/lang';
 import { clearWorkMeshGatewayStatusCache, getWorkMeshGatewayStatus } from '@/api/modules/workmesh';
 import { gatewayLoginApi } from '@/api/modules/auth';
 
@@ -47,7 +48,7 @@ const isLocalAuthRequired = (error: any) =>
 
 const bindGateway = async () => {
     if (!form.username.trim() || !form.password) {
-        ElMessage.error('请输入 Gateway 用户名和密码');
+        ElMessage.error(i18n.global.t('serverPages.gateway.credentialsRequired'));
         return;
     }
     loading.value = true;
@@ -58,15 +59,15 @@ const bindGateway = async () => {
             gatewayUrl: gatewayURL.value,
         });
         clearWorkMeshGatewayStatusCache();
-        ElMessage.success('Gateway 账号绑定成功');
+        ElMessage.success(i18n.global.t('serverPages.gateway.bindSuccess'));
         await router.replace({ name: 'home' });
     } catch (error: any) {
         if (isLocalAuthRequired(error)) {
-            ElMessage.error('本地登录会话已失效，请重新登录');
+            ElMessage.error(i18n.global.t('serverPages.gateway.sessionExpired'));
             await router.replace({ name: 'login' });
             return;
         }
-        ElMessage.error(error?.message || 'Gateway 账号绑定失败');
+        ElMessage.error(error?.message || i18n.global.t('serverPages.gateway.bindFailed'));
     } finally {
         loading.value = false;
     }
