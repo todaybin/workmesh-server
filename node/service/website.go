@@ -1420,15 +1420,16 @@ func (s *WebsiteService) OperateOpenResty(ctx context.Context, operation string)
 		if name == "" {
 			return status, errors.New("OpenResty 容器标识无效")
 		}
+		docker := dockerBinaryOrName()
 		switch operation {
 		case "start":
-			cmd = exec.CommandContext(ctx, "docker", "start", name)
+			cmd = exec.CommandContext(ctx, docker, "start", name)
 		case "restart":
-			cmd = exec.CommandContext(ctx, "docker", "restart", name)
+			cmd = exec.CommandContext(ctx, docker, "restart", name)
 		case "stop":
-			cmd = exec.CommandContext(ctx, "docker", "stop", name)
+			cmd = exec.CommandContext(ctx, docker, "stop", name)
 		default:
-			cmd = exec.CommandContext(ctx, "docker", "exec", name, "nginx", "-s", "reload")
+			cmd = exec.CommandContext(ctx, docker, "exec", name, "nginx", "-s", "reload")
 		}
 	} else {
 		switch operation {

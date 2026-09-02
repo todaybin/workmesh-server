@@ -98,7 +98,11 @@ func registerWebsiteAdvancedRoutes(mux *http.ServeMux, svc *service.WebsiteServi
 		_, openresty := findApp(store.state.Apps, "openresty")
 		_, catalogApp := findApp(store.state.Catalog, "openresty")
 		store.mu.RUnlock()
-		if openresty.ID == "" {
+		// OpenResty may be provisioned outside the app store (for example the
+		// bundled WAF image).  Use the same runtime probe as the status API so
+		// a running container is treated as installed even without apps.json.
+		probe := service.NewWebsiteService("").ProbeOpenResty(r.Context())
+		if openresty.ID == "" && !probe.Available {
 			appName := catalogApp.Name
 			if appName == "" {
 				appName = "OpenResty"
