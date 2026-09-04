@@ -13,6 +13,8 @@ export namespace Runtime {
         resource: string;
         version: string;
         status: string;
+        message?: string;
+        error?: string;
         codeDir: string;
         port: string;
         appID: number;

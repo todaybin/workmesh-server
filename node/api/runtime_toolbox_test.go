@@ -575,6 +575,40 @@ func TestRuntimeValidationAndStatusSync(t *testing.T) {
 	}
 }
 
+func TestRuntimePortDefaultsAcrossLanguageRuntimes(t *testing.T) {
+	for _, runtimeType := range []string{"go", "java", "dotnet", "python", "node"} {
+		t.Run(runtimeType, func(t *testing.T) {
+			item, err := runtimeRecordFromRequest(map[string]any{
+				"name": "runtime-" + runtimeType, "type": runtimeType, "version": "1", "install": true,
+				"port": 8080, "params": map[string]any{"HOST_IP": "0.0.0.0"},
+			})
+			if err != nil {
+				t.Fatalf("port default failed: %v", err)
+			}
+			if item.Port != 8080 || item.Params["APP_PORT"] != 8080 {
+				t.Fatalf("unexpected normalized ports: host=%d params=%#v", item.Port, item.Params)
+			}
+		})
+	}
+	item, err := runtimeRecordFromRequest(map[string]any{
+		"name": "runtime-exposed", "type": "node", "version": "1", "install": true,
+		"exposedPorts": []any{map[string]any{"hostPort": 9000, "containerPort": 3000, "protocol": "tcp"}},
+	})
+	if err != nil || item.Port != 9000 || item.Params["APP_PORT"] != 3000 {
+		t.Fatalf("exposed port default failed: item=%#v err=%v", item, err)
+	}
+	item, err = runtimeRecordFromRequest(map[string]any{
+		"name": "runtime-param", "type": "java", "version": "1", "install": true,
+		"port": 8080, "params": map[string]any{"APP_PORT": "9090"},
+	})
+	if err != nil || item.Port != 8080 || item.Params["APP_PORT"] != 9090 {
+		t.Fatalf("APP_PORT precedence failed: item=%#v err=%v", item, err)
+	}
+	if _, err := runtimeRecordFromRequest(map[string]any{"name": "runtime-missing", "type": "python", "version": "1", "install": true}); err == nil {
+		t.Fatal("missing runtime port must fail")
+	}
+}
+
 func TestPHPConfigurationRoutesReadUpdateAndRollbackBoundary(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("WORKMESH_DATA_DIR", dataDir)

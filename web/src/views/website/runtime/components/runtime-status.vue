@@ -1,5 +1,5 @@
 <template>
-    <el-popover v-if="showMessage" placement="bottom" :width="400" trigger="hover" :content="row.message">
+    <el-popover v-if="showMessage" placement="bottom" :width="400" trigger="hover" :content="row.message || row.error || ''">
         <template #reference>
             <Status :key="row.status" :status="row.status" />
         </template>

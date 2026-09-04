@@ -61,6 +61,7 @@ type runtimeRecord struct {
 	ExtraHosts      []any          `json:"extraHosts,omitempty"`
 	TaskID          string         `json:"taskID,omitempty"`
 	TaskStatus      string         `json:"taskStatus,omitempty"`
+	Message         string         `json:"message,omitempty"`
 	Error           string         `json:"error,omitempty"`
 	InstallPath     string         `json:"path,omitempty"`
 	ComposePath     string         `json:"composePath,omitempty"`
@@ -224,6 +225,7 @@ func getRuntimeStore() *runtimeStore {
 		case "creating", "building", "recreating", "installing", "downloading", "pulling", "starting":
 			s.state.Runtimes[index].Status = "Error"
 			s.state.Runtimes[index].TaskStatus = "failed"
+			s.state.Runtimes[index].Message = "系统重启导致任务中断"
 			s.state.Runtimes[index].Error = "系统重启导致任务中断"
 			s.state.Runtimes[index].UpdatedAt = time.Now().UTC()
 			interrupted = true
@@ -468,6 +470,9 @@ func runtimeRecordFromRequest(v map[string]any) (runtimeRecord, error) {
 	if item.Port < 0 || item.Port > 65535 {
 		return runtimeRecord{}, errors.New("端口必须在 1-65535 范围内")
 	}
+	if err := normalizeRuntimePorts(&item, runtimeInstallRequested(v, item)); err != nil {
+		return runtimeRecord{}, err
+	}
 	if item.CodeDir != "" {
 		clean, err := filepath.Abs(filepath.Clean(item.CodeDir))
 		if err != nil {
@@ -528,6 +533,61 @@ func runtimeNumberValue(raw any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// normalizeRuntimePorts keeps the host and container port variables in sync
+// with the 1Panel runtime contract. All language runtime templates expose
+// ${APP_PORT} inside the container and ${PANEL_APP_PORT_HTTP} on the host.
+func normalizeRuntimePorts(item *runtimeRecord, required bool) error {
+	if item == nil || normalizeRuntimeTypeFilter(item.Type) == "php" {
+		return nil
+	}
+	if item.Params == nil {
+		item.Params = map[string]any{}
+	}
+	containerPort := 0
+	if raw, exists := item.Params["APP_PORT"]; exists {
+		value, ok := runtimeNumberValue(raw)
+		if !ok || value < 1 || value > 65535 {
+			return errors.New("APP_PORT 必须在 1-65535 范围内")
+		}
+		containerPort = value
+	}
+	if containerPort == 0 && len(item.ExposedPorts) > 0 {
+		if value, ok := runtimeNumberValue(runtimeMapValue(item.ExposedPorts[0], "containerPort")); ok {
+			containerPort = value
+		}
+	}
+	if containerPort == 0 {
+		containerPort = item.Port
+	}
+	if containerPort == 0 {
+		if required {
+			return errors.New("运行时容器端口不能为空，请设置 params.APP_PORT、exposedPorts.containerPort 或 port")
+		}
+		return nil
+	}
+	if containerPort < 1 || containerPort > 65535 {
+		return errors.New("APP_PORT 必须在 1-65535 范围内")
+	}
+	item.Params["APP_PORT"] = containerPort
+	if item.Port == 0 && len(item.ExposedPorts) > 0 {
+		item.Port, _ = runtimeNumberValue(runtimeMapValue(item.ExposedPorts[0], "hostPort"))
+	}
+	if item.Port == 0 {
+		item.Port = containerPort
+	}
+	if item.Port < 1 || item.Port > 65535 {
+		return errors.New("端口必须在 1-65535 范围内")
+	}
+	return nil
+}
+
+func runtimeMapValue(raw any, key string) any {
+	if value, ok := raw.(map[string]any); ok {
+		return value[key]
+	}
+	return nil
 }
 
 func validateRuntimeCreateLocked(items []runtimeRecord, candidate runtimeRecord) error {
@@ -722,9 +782,9 @@ func updateRuntimeTask(s *runtimeStore, id, status, message string) runtimeRecor
 		item.UpdatedAt = time.Now().UTC()
 		switch strings.ToLower(strings.TrimSpace(status)) {
 		case "running":
-			item.Status, item.Error = "Running", ""
+			item.Status, item.Message, item.Error = "Running", "", ""
 		case "failed", "error":
-			item.Status, item.Error = "Error", message
+			item.Status, item.Message, item.Error = "Error", message, message
 		case "building":
 			item.Status = "Building"
 		case "recreating":
@@ -737,6 +797,9 @@ func updateRuntimeTask(s *runtimeStore, id, status, message string) runtimeRecor
 			item.Status = "Creating"
 		default:
 			item.Status = "Creating"
+		}
+		if strings.TrimSpace(message) != "" && strings.ToLower(strings.TrimSpace(status)) != "running" {
+			item.Message = message
 		}
 		s.state.Runtimes[i] = item
 		_ = s.saveLocked()
@@ -840,36 +903,10 @@ func runRuntimeInstallTask(s *runtimeStore, item runtimeRecord) {
 		return
 	}
 	item.ComposePath, item.DockerCompose = composePath, compose
-	env := map[string]any{}
-	for key, value := range item.Params {
-		env[key] = value
-	}
-	for _, raw := range item.Environments {
-		entry, _ := raw.(map[string]any)
-		if key := runtimeString(entry, "key"); validEnvKey(key) {
-			env[key] = fmt.Sprint(entry["value"])
-		}
-	}
-	if item.Container != "" {
-		env["CONTAINER_NAME"] = item.Container
-	}
-	if item.Port > 0 {
-		env["PANEL_APP_PORT_HTTP"] = item.Port
-	}
-	if item.CodeDir != "" {
-		env["CODE_DIR"] = item.CodeDir
-	}
-	websiteDirValue, websiteDirSet := env["PANEL_WEBSITE_DIR"]
-	if !websiteDirSet || strings.TrimSpace(fmt.Sprint(websiteDirValue)) == "" {
-		websiteDir := strings.TrimSpace(item.CodeDir)
-		if websiteDir == "" {
-			websiteDir = "/www/wwwroot"
-		}
-		env["PANEL_WEBSITE_DIR"] = websiteDir
-	}
-	tzValue, tzSet := env["TZ"]
-	if !tzSet || strings.TrimSpace(fmt.Sprint(tzValue)) == "" {
-		env["TZ"] = "Asia/Shanghai"
+	env, envErr := runtimeEnvironment(item)
+	if envErr != nil {
+		update("failed", envErr.Error())
+		return
 	}
 	switch normalizeRuntimeTypeFilter(item.Type) {
 	case "php":
@@ -880,16 +917,6 @@ func runRuntimeInstallTask(s *runtimeStore, item runtimeRecord) {
 		}
 		item.Image = "1panel-php-fpm:" + phpVersion
 		env["IMAGE_NAME"] = item.Image
-	case "java":
-		env["JAVA_VERSION"] = item.Version
-	case "node":
-		env["NODE_VERSION"] = item.Version
-	case "go":
-		env["GO_VERSION"] = item.Version
-	case "python":
-		env["PYTHON_VERSION"] = item.Version
-	case "dotnet":
-		env["DOTNET_VERSION"] = item.Version
 	}
 	if err := writeRuntimeEnv(filepath.Join(installDir, ".env"), env); err != nil {
 		update("failed", "写入环境变量失败: "+err.Error())
@@ -1266,8 +1293,9 @@ func syncRuntimeContainerStatus(s *runtimeStore) error {
 		if !exists {
 			continue
 		}
-		if s.state.Runtimes[index].Status != value.status || s.state.Runtimes[index].Error != value.err {
+		if s.state.Runtimes[index].Status != value.status || s.state.Runtimes[index].Error != value.err || s.state.Runtimes[index].Message != value.err {
 			s.state.Runtimes[index].Status = value.status
+			s.state.Runtimes[index].Message = value.err
 			s.state.Runtimes[index].Error = value.err
 			s.state.Runtimes[index].UpdatedAt = time.Now().UTC()
 			changed = true
@@ -1485,12 +1513,22 @@ func registerRuntimeRoutes(mux *http.ServeMux, s *runtimeStore) {
 		}
 		operation := runtimeString(body, "operation", "operate")
 		if err := operateRuntimeContainer(s.commandExecutor(), item, operation); err != nil {
+			s.mu.Lock()
+			if index >= 0 && index < len(s.state.Runtimes) {
+				s.state.Runtimes[index].Status = "Error"
+				s.state.Runtimes[index].TaskStatus = "failed"
+				s.state.Runtimes[index].Message = err.Error()
+				s.state.Runtimes[index].Error = err.Error()
+				s.state.Runtimes[index].UpdatedAt = time.Now().UTC()
+				_ = s.saveLocked()
+			}
+			s.mu.Unlock()
 			runtimeErr(w, http.StatusBadGateway, err.Error())
 			return
 		}
 		s.mu.Lock()
 		item.Status = runtimeStatusForOperation(operation)
-		item.Error = ""
+		item.Message, item.Error, item.TaskStatus = "", "", ""
 		item.UpdatedAt = time.Now().UTC()
 		s.state.Runtimes[index] = item
 		saveErr := s.saveLocked()
@@ -1558,7 +1596,7 @@ func registerRuntimeRoutes(mux *http.ServeMux, s *runtimeStore) {
 			runtimeErr(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		updated.Status, updated.Error, updated.UpdatedAt = "Running", "", time.Now().UTC()
+		updated.Status, updated.Message, updated.Error, updated.TaskStatus, updated.UpdatedAt = "Running", "", "", "", time.Now().UTC()
 		s.mu.Lock()
 		s.state.Runtimes[index] = updated
 		saveErr := s.saveLocked()
@@ -1808,6 +1846,9 @@ func mergeRuntimeUpdate(current runtimeRecord, body map[string]any) (runtimeReco
 		}
 		updated.Image = "1panel-php-fpm:" + phpVersion
 	}
+	if err := normalizeRuntimePorts(&updated, runtimeInstallRequested(body, updated)); err != nil {
+		return runtimeRecord{}, err
+	}
 	if err := validateRuntimeCollections(updated); err != nil {
 		return runtimeRecord{}, err
 	}
@@ -1818,6 +1859,9 @@ func mergeRuntimeUpdate(current runtimeRecord, body map[string]any) (runtimeReco
 }
 
 func runtimeEnvironment(item runtimeRecord) (map[string]any, error) {
+	if err := normalizeRuntimePorts(&item, normalizeRuntimeTypeFilter(item.Type) != "php"); err != nil {
+		return nil, err
+	}
 	values := cloneRuntimeMap(item.Params)
 	for _, raw := range item.Environments {
 		entry, _ := raw.(map[string]any)
@@ -1825,8 +1869,13 @@ func runtimeEnvironment(item runtimeRecord) (map[string]any, error) {
 			values[key] = fmt.Sprint(entry["value"])
 		}
 	}
+	if appPort, ok := item.Params["APP_PORT"]; ok {
+		values["APP_PORT"] = appPort
+	}
 	values["CONTAINER_NAME"] = item.Container
-	values["PANEL_APP_PORT_HTTP"] = item.Port
+	if item.Port > 0 {
+		values["PANEL_APP_PORT_HTTP"] = item.Port
+	}
 	values["CODE_DIR"] = item.CodeDir
 	// Compose 使用这两个变量构造 PHP 及通用运行时挂载/时区；缺失时 Compose
 	// 会把变量替换为空字符串，生成非法的 `:/www/` 挂载。
@@ -2246,7 +2295,7 @@ func registerPHPExtensionOperationRoutes(mux *http.ServeMux, s *runtimeStore) {
 			finish := func() error {
 				s.mu.Lock()
 				defer s.mu.Unlock()
-				updated.Status, updated.Error, updated.TaskStatus, updated.UpdatedAt = "Running", "", "success", time.Now().UTC()
+				updated.Status, updated.Message, updated.Error, updated.TaskStatus, updated.UpdatedAt = "Running", "", "", "success", time.Now().UTC()
 				for runtimeIndex := range s.state.Runtimes {
 					if s.state.Runtimes[runtimeIndex].ID == updated.ID {
 						s.state.Runtimes[runtimeIndex] = updated
@@ -2789,7 +2838,7 @@ func registerPHPConfigurationRoutes(mux *http.ServeMux, s *runtimeStore) {
 			runtimeErr(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		updated.Status, updated.Error, updated.UpdatedAt = "Running", "", time.Now().UTC()
+		updated.Status, updated.Message, updated.Error, updated.UpdatedAt = "Running", "", "", time.Now().UTC()
 		s.mu.Lock()
 		s.state.Runtimes[index] = updated
 		saveErr := s.saveLocked()
