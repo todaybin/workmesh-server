@@ -15,9 +15,12 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -202,19 +205,22 @@ func getAppStore() *appStore {
 }
 
 func (s *appStore) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
-		return err
-	}
-	b, err := json.Marshal(s.state)
-	if err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err = os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		return err
+	// 公共 SQLite 初始化后只写数据库，旧 apps.json 仅作为一次性迁移输入。
+	if sharedDB() == nil {
+		if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
+			return err
+		}
+		b, err := json.Marshal(s.state)
+		if err != nil {
+			return err
+		}
+		tmp := s.path + ".tmp"
+		if err = os.WriteFile(tmp, b, 0o600); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, s.path); err != nil {
+			return err
+		}
 	}
 	if err := saveJSONState("app_store_state", s.state); err != nil {
 		return err
@@ -233,6 +239,56 @@ func appBody(r *http.Request) map[string]any {
 	return value
 }
 
+// decodeAppSearchBody parses the search contract strictly.  The legacy
+// handlers intentionally accept an empty body, but search requests must not
+// silently turn malformed JSON into an unfiltered query.
+func decodeAppSearchBody(r *http.Request) (map[string]any, error) {
+	if r.Body == nil {
+		return map[string]any{}, nil
+	}
+	var value map[string]any
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 2<<20))
+	if err := decoder.Decode(&value); err != nil {
+		if errors.Is(err, io.EOF) {
+			return map[string]any{}, nil
+		}
+		return nil, fmt.Errorf("请求 JSON 无效: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, errors.New("请求 JSON 只能包含一个对象")
+	}
+	if value == nil {
+		return nil, errors.New("请求 JSON 必须是对象")
+	}
+	return value, nil
+}
+
+func appSearchPage(body map[string]any) (int, int, error) {
+	page, pageSize := 1, 50
+	parse := func(key string, fallback int) (int, error) {
+		raw, ok := body[key]
+		if !ok || raw == nil {
+			return fallback, nil
+		}
+		value, ok := raw.(float64)
+		if !ok || value < 1 || value != float64(int(value)) || value > 10000 {
+			return 0, fmt.Errorf("%s 必须是正整数", key)
+		}
+		return int(value), nil
+	}
+	var err error
+	if page, err = parse("page", page); err != nil {
+		return 0, 0, err
+	}
+	if pageSize, err = parse("pageSize", pageSize); err != nil {
+		return 0, 0, err
+	}
+	if pageSize > 200 {
+		return 0, 0, errors.New("pageSize 不能超过 200")
+	}
+	return page, pageSize, nil
+}
+
 func appValue(v map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value, ok := v[key].(string); ok && strings.TrimSpace(value) != "" {
@@ -243,6 +299,52 @@ func appValue(v map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeRuntimeTypeFilter(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case ".net", "dot-net", "dotnet":
+		return "dotnet"
+	case "nodejs", "node.js":
+		return "node"
+	default:
+		return value
+	}
+}
+
+func appMatchesType(app appRecord, wanted string) bool {
+	wanted = normalizeRuntimeTypeFilter(wanted)
+	actual := normalizeRuntimeTypeFilter(app.Type)
+	if actual == wanted {
+		return true
+	}
+	if actual != "" && actual != "app" && strings.Contains(actual, wanted) {
+		return true
+	}
+	for _, candidate := range []string{strings.ToLower(strings.TrimSpace(app.Key)), strings.ToLower(strings.TrimSpace(app.Name))} {
+		if candidate == wanted || strings.HasPrefix(candidate, wanted+"-") || strings.HasPrefix(candidate, wanted+" ") {
+			return true
+		}
+	}
+	/*
+		Do not infer a language from arbitrary application names such as
+		phpmyadmin; only an explicit runtime type/tag or a language-prefixed key
+		is a match.
+	*/
+	for _, tag := range app.Tags {
+		if normalizeRuntimeTypeFilter(tag) == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func appMatchesRuntimeCatalog(app appRecord, wanted string) bool {
+	if !appMatchesType(app, wanted) {
+		return false
+	}
+	return normalizeRuntimeTypeFilter(wanted) != "php" || strings.EqualFold(strings.TrimSpace(app.Key), "php")
 }
 
 func appOK(w http.ResponseWriter, d any) { runtimeOK(w, d) }
@@ -327,7 +429,11 @@ func appRecordDataLocalized(a appRecord, locale string, metadata []appTagRecord)
 		status = "Normal"
 	}
 	description := localizedDescription(a.Description, locale, a.ShortDescZh, a.ShortDescEn)
-	item := map[string]any{"id": id, "key": a.Key, "name": a.Name, "version": a.Version, "status": status, "message": a.Message, "containerName": appConfiguredContainerName(a), "appKey": a.Key, "appName": a.Name, "appStatus": normalizeAppStatus(status), "ready": 1, "total": 1, "canUpdate": canUpdate, "favorite": false, "sortOrder": a.SortOrder, "updatedAt": a.UpdatedAt, "config": a.Config, "type": a.Type, "description": description, "shortDescZh": a.ShortDescZh, "shortDescEn": a.ShortDescEn, "tags": localizedAppTags(a.Tags, metadata, locale), "limit": a.Limit, "recommend": a.Recommend, "gpuSupport": a.GpuSupport, "batchInstallSupport": a.BatchInstallSupport, "architectures": a.Architectures, "memoryRequired": a.MemoryRequired, "website": a.Website, "github": a.Github, "readMe": a.ReadMe, "icon": a.IconURL}
+	resource := appValue(a.Config, "resource", "source")
+	if resource == "" {
+		resource = "remote"
+	}
+	item := map[string]any{"id": id, "key": a.Key, "name": a.Name, "version": a.Version, "status": status, "message": a.Message, "containerName": appConfiguredContainerName(a), "appKey": a.Key, "appName": a.Name, "appStatus": normalizeAppStatus(status), "ready": 1, "total": 1, "canUpdate": canUpdate, "favorite": false, "sortOrder": a.SortOrder, "updatedAt": a.UpdatedAt, "config": a.Config, "type": a.Type, "resource": resource, "source": resource, "description": description, "shortDescZh": a.ShortDescZh, "shortDescEn": a.ShortDescEn, "tags": localizedAppTags(a.Tags, metadata, locale), "limit": a.Limit, "recommend": a.Recommend, "gpuSupport": a.GpuSupport, "batchInstallSupport": a.BatchInstallSupport, "architectures": a.Architectures, "memoryRequired": a.MemoryRequired, "website": a.Website, "github": a.Github, "readMe": a.ReadMe, "icon": a.IconURL}
 	item["installed"] = false
 	if n, err := strconv.ParseInt(id, 10, 64); err == nil {
 		item["id"] = n
@@ -708,7 +814,7 @@ func (s *appStore) refreshCatalogLocked() (bool, error) {
 	return true, nil
 }
 
-// RegisterAppRoutes 注册应用目录与已安装应用接口，所有写操作都会原子持久化到 apps.json。
+// RegisterAppRoutes 注册应用目录与已安装应用接口；运行时状态统一持久化到公共 SQLite。
 func RegisterAppRoutes(mux *http.ServeMux) {
 	s := getAppStore()
 	listInstalled := func(w http.ResponseWriter, r *http.Request) {
@@ -744,7 +850,11 @@ func RegisterAppRoutes(mux *http.ServeMux) {
 		appOK(w, map[string]any{"items": items, "total": len(items), "page": 1, "pageSize": 50})
 	}
 	searchCatalog := func(w http.ResponseWriter, r *http.Request) {
-		body := appBody(r)
+		body, parseErr := decodeAppSearchBody(r)
+		if parseErr != nil {
+			runtimeErr(w, http.StatusBadRequest, parseErr.Error())
+			return
+		}
 		name := strings.ToLower(appValue(body, "name", "key"))
 		path := strings.TrimPrefix(r.URL.Path, "/api/v2/apps/")
 		if strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG")) == "" && path != "sync/local" {
@@ -764,25 +874,82 @@ func RegisterAppRoutes(mux *http.ServeMux) {
 				s.state.Catalog = append([]appRecord(nil), s.state.Apps...)
 			}
 		}
-		page := 1
-		pageSize := 50
-		if value, ok := body["page"].(float64); ok && value >= 1 {
-			page = int(value)
+		page, pageSize, pageErr := appSearchPage(body)
+		if pageErr != nil {
+			s.mu.Unlock()
+			runtimeErr(w, http.StatusBadRequest, pageErr.Error())
+			return
 		}
-		if value, ok := body["pageSize"].(float64); ok && value >= 1 {
-			pageSize = int(value)
+		typeFilter := strings.ToLower(strings.TrimSpace(appValue(body, "type")))
+		typeFilter = normalizeRuntimeTypeFilter(typeFilter)
+		resourceFilter := strings.ToLower(strings.TrimSpace(appValue(body, "resource")))
+		recommendFilter, hasRecommend := body["recommend"]
+		recommendOnly := false
+		if hasRecommend {
+			if value, ok := recommendFilter.(bool); ok {
+				recommendOnly = value
+			} else {
+				s.mu.Unlock()
+				runtimeErr(w, http.StatusBadRequest, "recommend 必须是布尔值")
+				return
+			}
 		}
-		if pageSize > 200 {
-			pageSize = 200
+		showCurrentArch := false
+		if raw, ok := body["showCurrentArch"]; ok {
+			value, valid := raw.(bool)
+			if !valid {
+				s.mu.Unlock()
+				runtimeErr(w, http.StatusBadRequest, "showCurrentArch 必须是布尔值")
+				return
+			}
+			showCurrentArch = value
+		}
+		var requestedTags []any
+		if rawTags, exists := body["tags"]; exists {
+			var valid bool
+			requestedTags, valid = rawTags.([]any)
+			if !valid {
+				s.mu.Unlock()
+				runtimeErr(w, http.StatusBadRequest, "tags 必须是字符串数组")
+				return
+			}
+			if len(requestedTags) == 0 {
+				requestedTags = nil
+			}
 		}
 		filtered := make([]appRecord, 0, len(s.state.Catalog))
 		for _, app := range s.state.Catalog {
+			if typeFilter != "" && typeFilter != "all" && !appMatchesRuntimeCatalog(app, typeFilter) {
+				continue
+			}
+			resource := strings.ToLower(appValue(app.Config, "resource", "source"))
+			if resource == "" {
+				resource = "remote"
+			}
+			if resourceFilter != "" && resourceFilter != "all" && resource != resourceFilter {
+				continue
+			}
+			if recommendOnly && app.Recommend == 0 {
+				continue
+			}
+			if showCurrentArch && len(app.Architectures) > 0 {
+				archOK := false
+				for _, arch := range app.Architectures {
+					if strings.EqualFold(strings.TrimSpace(arch), runtime.GOARCH) || (runtime.GOARCH == "amd64" && strings.EqualFold(strings.TrimSpace(arch), "x86_64")) {
+						archOK = true
+						break
+					}
+				}
+				if !archOK {
+					continue
+				}
+			}
 			if name != "" && !strings.Contains(strings.ToLower(app.Name+" "+app.Key), name) {
 				continue
 			}
-			if tags, ok := body["tags"].([]any); ok && len(tags) > 0 {
+			if requestedTags != nil {
 				matched := false
-				for _, raw := range tags {
+				for _, raw := range requestedTags {
 					if tag, ok := raw.(string); ok {
 						for _, candidate := range app.Tags {
 							if strings.EqualFold(tag, candidate) {
@@ -948,22 +1115,7 @@ func RegisterAppRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/apps/details/{id}", func(w http.ResponseWriter, r *http.Request) { appCatalogGet(w, s, r, r.PathValue("id"), "") })
 	mux.HandleFunc("GET /api/v2/apps/services/{key}", func(w http.ResponseWriter, r *http.Request) {
 		key := r.PathValue("key")
-		s.mu.RLock()
-		_, item := findApp(s.state.Apps, key)
-		s.mu.RUnlock()
-		services := make([]map[string]any, 0)
-		if item.ID != "" {
-			if raw, ok := item.Config["services"].([]any); ok {
-				for _, service := range raw {
-					if value, ok := service.(map[string]any); ok {
-						services = append(services, value)
-					}
-				}
-			}
-			if len(services) == 0 {
-				services = append(services, map[string]any{"label": item.Name, "value": item.Key, "status": item.Status, "appKey": item.Key})
-			}
-		}
+		services := appServices(r.Context(), s, key)
 		appOK(w, services)
 	})
 	mux.HandleFunc("GET /api/v2/apps/icon/{key}", func(w http.ResponseWriter, r *http.Request) { appIcon(w, s, r.PathValue("key")) })
@@ -990,7 +1142,7 @@ func RegisterAppRoutes(mux *http.ServeMux) {
 	}
 	// 自定义应用商店和跨节点安装是前端真实调用的扩展接口。
 	mux.HandleFunc("POST /api/v2/custom/app/sync", func(w http.ResponseWriter, r *http.Request) {
-		appOK(w, map[string]any{"accepted": true, "taskID": appValue(appBody(r), "taskID")})
+		handleCustomAppSync(w, r, s)
 	})
 	mux.HandleFunc("GET /api/v2/custom/app/config", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.RLock()
@@ -1012,6 +1164,7 @@ func appCatalogGet(w http.ResponseWriter, s *appStore, r *http.Request, id, vers
 	if index < 0 {
 		index, item = findApp(s.state.Apps, id)
 	}
+	catalog := append([]appRecord(nil), s.state.Catalog...)
 	metadata := append([]appTagRecord(nil), s.state.CatalogTags...)
 	s.mu.RUnlock()
 	if index < 0 {
@@ -1048,6 +1201,9 @@ func appCatalogGet(w http.ResponseWriter, s *appStore, r *http.Request, id, vers
 	}
 	if selected.Version != "" {
 		params = selected.Params
+		if normalizeRuntimeTypeFilter(item.Type) == "php" {
+			params = phpRuntimeCatalogParams(catalog, selected)
+		}
 	} else if item.Config != nil {
 		if configured, ok := item.Config["params"]; ok {
 			params = configured
@@ -1060,6 +1216,7 @@ func appCatalogGet(w http.ResponseWriter, s *appStore, r *http.Request, id, vers
 	if compose == "" && selected.ComposeURL != "" {
 		compose = fetchRemoteCompose(selected.ComposeURL)
 	}
+	data["image"] = appRuntimeImage(item, compose)
 	// 原版安装表单直接读取详情顶层字段；details 保留为兼容扩展字段。
 	data["params"] = params
 	data["dockerCompose"] = compose
@@ -1069,6 +1226,60 @@ func appCatalogGet(w http.ResponseWriter, s *appStore, r *http.Request, id, vers
 	data["hostMode"] = false
 	data["details"] = map[string]any{"id": selected.ID, "version": selected.Version, "type": item.Type, "params": params, "dockerCompose": compose, "downloadUrl": selected.DownloadURL}
 	appOK(w, data)
+}
+
+// phpRuntimeCatalogParams 使用 1Panel 通用 PHP 应用中同主版本的表单定义，
+// 为 PHP 5/7/8 独立版本应用补齐扩展、版本和扩展源字段。
+func phpRuntimeCatalogParams(catalog []appRecord, selected appVersionRecord) map[string]any {
+	major := strings.SplitN(strings.TrimSpace(selected.Version), ".", 2)[0]
+	for _, app := range catalog {
+		if !strings.EqualFold(app.Key, "php") {
+			continue
+		}
+		for _, candidate := range app.Versions {
+			if strings.EqualFold(strings.TrimSpace(candidate.Version), major) && len(candidate.Params) > 0 {
+				return candidate.Params
+			}
+		}
+	}
+	return selected.Params
+}
+
+// appRuntimeImage is the image repository portion expected by the runtime
+// forms, which append the selected version themselves.  Runtime Compose files
+// use environment placeholders, so the value is derived from the service
+// type when no concrete image is present.
+func appRuntimeImage(app appRecord, compose string) string {
+	for _, line := range strings.Split(compose, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "image:") {
+			continue
+		}
+		image := strings.TrimSpace(strings.TrimPrefix(trimmed, "image:"))
+		image = strings.Trim(image, "\"'")
+		if image != "" && !strings.Contains(image, "${") {
+			if index := strings.LastIndex(image, ":"); index > strings.LastIndex(image, "/") {
+				image = image[:index]
+			}
+			return image
+		}
+	}
+	switch normalizeRuntimeTypeFilter(app.Type) {
+	case "php":
+		return "1panel-php-fpm"
+	case "java":
+		return "1panel/java"
+	case "node":
+		return "1panel/node"
+	case "go":
+		return "golang"
+	case "python":
+		return "python"
+	case "dotnet":
+		return "mcr.microsoft.com/dotnet/aspnet"
+	default:
+		return ""
+	}
 }
 
 func fetchRemoteCompose(url string) string {
@@ -1109,6 +1320,20 @@ func appInstalledGet(w http.ResponseWriter, s *appStore, r *http.Request, id str
 }
 
 func handleAppPost(w http.ResponseWriter, s *appStore, r *http.Request, path string, body map[string]any) {
+	// 部分旧客户端把安装标识和操作放在查询串，统一补入同一参数对象。
+	if strings.TrimSpace(appValue(body, "installId", "installID", "appInstallId", "id")) == "" {
+		for _, key := range []string{"installId", "installID", "appInstallId", "id"} {
+			if value := strings.TrimSpace(r.URL.Query().Get(key)); value != "" {
+				body[key] = value
+				break
+			}
+		}
+	}
+	if strings.TrimSpace(appValue(body, "operate", "operation")) == "" {
+		if value := strings.TrimSpace(r.URL.Query().Get("operate")); value != "" {
+			body["operate"] = value
+		}
+	}
 	switch path {
 	case "install":
 		id := appValue(body, "appInstallId", "id", "appId", "key", "name")
@@ -1235,7 +1460,11 @@ func handleAppPost(w http.ResponseWriter, s *appStore, r *http.Request, path str
 			probe.IsExist, probe.IsActive, probe.Status = true, normalizeAppStatus(item.Status) == "Running", normalizeAppStatus(item.Status)
 			probe.Version = item.Version
 		}
-		appOK(w, map[string]any{"name": id, "version": probe.Version, "isExist": probe.IsExist, "isActive": probe.IsActive, "status": probe.Status, "app": probe.App, "appInstallId": item.ID, "containerName": appConfiguredContainerName(item), "httpPort": 80, "httpsPort": 443, "websiteDir": "/www/wwwroot"})
+		containerName := appConfiguredContainerName(item)
+		if containerName == "" && strings.HasPrefix(probe.Binary, "docker://") {
+			containerName = strings.TrimPrefix(probe.Binary, "docker://")
+		}
+		appOK(w, map[string]any{"name": id, "version": probe.Version, "isExist": probe.IsExist, "isActive": probe.IsActive, "status": probe.Status, "app": probe.App, "appInstallId": item.ID, "containerName": containerName, "httpPort": 80, "httpsPort": 443, "websiteDir": "/www/wwwroot"})
 	case "installed/loadport":
 		id := appValue(body, "name", "key")
 		s.mu.RLock()
@@ -1243,9 +1472,21 @@ func handleAppPost(w http.ResponseWriter, s *appStore, r *http.Request, path str
 		s.mu.RUnlock()
 		appOK(w, item.Config["port"])
 	case "installed/conninfo":
-		appOK(w, map[string]any{"status": "unknown", "username": "", "password": "", "privilege": false, "containerName": appValue(body, "name"), "serviceName": appValue(body, "name"), "systemIP": "127.0.0.1", "port": 0})
+		appOK(w, appConnectionInfo(r.Context(), s, body))
 	case "installed/conf":
-		appOK(w, map[string]any{"type": appValue(body, "type"), "name": appValue(body, "name"), "params": make([]any, 0), "dockerCompose": ""})
+		id := appValue(body, "appInstallId", "installId", "id", "name")
+		s.mu.RLock()
+		_, item := findApp(s.state.Apps, id)
+		s.mu.RUnlock()
+		if item.ID == "" {
+			runtimeErr(w, http.StatusNotFound, "应用安装记录不存在")
+			return
+		}
+		params := map[string]any{}
+		for key, value := range item.Config {
+			params[key] = value
+		}
+		appOK(w, map[string]any{"type": item.Key, "name": item.Name, "params": params, "dockerCompose": appComposePath(item)})
 	case "installed/op":
 		handleAppOperation(w, s, body)
 	case "installed/port/change", "installed/params/update", "installed/config/update":
@@ -1277,6 +1518,29 @@ func handleAppPost(w http.ResponseWriter, s *appStore, r *http.Request, path str
 		}
 		s.mu.RUnlock()
 		appOK(w, versions)
+	case "installed/sync":
+		s.mu.RLock()
+		ids := make([]string, 0, len(s.state.Apps))
+		for _, item := range s.state.Apps {
+			ids = append(ids, item.ID)
+		}
+		s.mu.RUnlock()
+		failed := make([]map[string]any, 0)
+		for _, id := range ids {
+			item, exists, err := s.syncAppInstallStatus(r.Context(), id, true)
+			if err != nil {
+				failed = append(failed, map[string]any{"id": id, "error": err.Error()})
+				continue
+			}
+			if exists {
+				_ = item
+			}
+		}
+		if len(failed) > 0 {
+			runtimeErrData(w, http.StatusBadGateway, "同步部分应用状态失败", map[string]any{"failed": failed, "total": len(ids)})
+			return
+		}
+		appOK(w, map[string]any{"synced": len(ids), "total": len(ids)})
 	case "installed/ignore":
 		s.mu.Lock()
 		s.state.Ignored = append(s.state.Ignored, body)
@@ -1297,7 +1561,7 @@ func handleAppPost(w http.ResponseWriter, s *appStore, r *http.Request, path str
 		s.mu.Unlock()
 		appOK(w, map[string]any{"cancelled": true})
 	default:
-		appOK(w, map[string]any{"accepted": true, "config": body})
+		notImplementedError(w, "该应用操作尚未接入真实业务")
 	}
 }
 
@@ -1308,6 +1572,108 @@ func appStatusCountsAsInstalled(status string) bool {
 	default:
 		return false
 	}
+}
+
+// appServices 按正式版规则从数据库资源和已安装应用记录生成服务列表，禁止伪造默认服务。
+func appServices(ctx context.Context, s *appStore, key string) []map[string]any {
+	key = strings.ToLower(strings.TrimSpace(key))
+	types := []string{key}
+	switch key {
+	case "mysql":
+		types = []string{"mysql", "mysql-cluster", "mariadb"}
+	case "postgres", "postgresql":
+		types = []string{"postgres", "postgresql", "postgresql-cluster"}
+	case "redis":
+		types = []string{"redis", "redis-cluster"}
+	}
+	dbs := make([]service.Database, 0)
+	for _, typ := range types {
+		dbs = append(dbs, databaseService.Search(ctx, typ, "")...)
+	}
+	services := make([]map[string]any, 0, len(dbs))
+	for _, db := range dbs {
+		config := map[string]any{}
+		from := db.From
+		status := "Running"
+		if db.AppInstallID > 0 {
+			from = "local"
+			s.mu.RLock()
+			_, install := findApp(s.state.Apps, strconv.FormatInt(db.AppInstallID, 10))
+			if install.ID == "" {
+				for _, candidate := range s.state.Apps {
+					if appValue(candidate.Config, "databaseID", "dbID") == strconv.FormatInt(db.AppInstallID, 10) {
+						install = candidate
+						break
+					}
+				}
+			}
+			s.mu.RUnlock()
+			if install.ID != "" {
+				status = normalizeAppStatus(install.Status)
+				for k, v := range install.Config {
+					config[k] = v
+				}
+			}
+		} else {
+			from = "remote"
+			if db.Username != "" {
+				config["PANEL_DB_ROOT_USER"] = db.Username
+			}
+			if db.Password != "" {
+				config["PANEL_DB_ROOT_PASSWORD"] = db.Password
+			}
+		}
+		if from == "" {
+			from = "local"
+		}
+		services = append(services, map[string]any{"label": db.Name, "value": db.Name, "config": config, "from": from, "status": status})
+	}
+	if len(dbs) > 0 {
+		return services
+	}
+	// 非数据库应用返回实际运行中的安装实例，不再返回固定占位项。
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, install := range s.state.Apps {
+		if !strings.EqualFold(install.Key, key) || !appStatusCountsAsInstalled(install.Status) {
+			continue
+		}
+		config := map[string]any{}
+		for k, v := range install.Config {
+			config[k] = v
+		}
+		value := appValue(install.Config, "serviceName", "SERVICE_NAME")
+		if value == "" {
+			value = install.Name
+		}
+		services = append(services, map[string]any{"label": install.Name, "value": value, "config": config, "from": "local", "status": strings.ToLower(normalizeAppStatus(install.Status))})
+	}
+	return services
+}
+
+// appConnectionInfo 返回真实安装或数据库资源的连接信息，敏感字段仅在仓储中存在时返回。
+func appConnectionInfo(ctx context.Context, s *appStore, body map[string]any) map[string]any {
+	typ := appValue(body, "type", "key", "appKey")
+	name := appValue(body, "name", "serviceName", "database")
+	if item, ok := databaseService.FindConnection(ctx, typ, name); ok {
+		return map[string]any{"status": "Running", "username": item.Username, "password": item.Password, "privilege": true, "containerName": "", "serviceName": item.Name, "systemIP": item.Host, "port": item.Port}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, item := findApp(s.state.Apps, appValue(body, "appInstallId", "installId", "id", "name"))
+	if item.ID == "" && typ != "" {
+		for _, candidate := range s.state.Apps {
+			if strings.EqualFold(candidate.Key, typ) && (name == "" || strings.EqualFold(candidate.Name, name)) {
+				item = candidate
+				break
+			}
+		}
+	}
+	if item.ID == "" {
+		return map[string]any{"status": "", "username": "", "password": "", "privilege": false, "containerName": "", "serviceName": "", "systemIP": "", "port": 0}
+	}
+	port := appConfiguredInt(item.Config, 0, "port", "servicePort", "PANEL_APP_PORT")
+	return map[string]any{"status": normalizeAppStatus(item.Status), "username": appValue(item.Config, "username", "user", "PANEL_DB_ROOT_USER"), "password": appValue(item.Config, "password", "PANEL_DB_ROOT_PASSWORD"), "privilege": true, "containerName": appConfiguredContainerName(item), "serviceName": appValue(item.Config, "serviceName", "SERVICE_NAME"), "systemIP": appValue(item.Config, "host", "systemIP"), "port": port}
 }
 
 func findCatalogDetail(catalog []appRecord, detailID string) (appRecord, appVersionRecord, bool) {
@@ -1434,10 +1800,14 @@ func appTaskProgress(status string) int {
 		return 20
 	case "installing":
 		return 40
+	case "building":
+		return 60
 	case "pulling":
 		return 65
 	case "starting":
 		return 85
+	case "recreating":
+		return 90
 	case "running", "failed":
 		return 100
 	default:
@@ -1605,11 +1975,29 @@ func ensureDockerNetwork(name string) error {
 }
 
 func downloadAppArchive(ctx context.Context, source, target string) error {
+	return downloadAppArchiveWithProgress(ctx, source, target, nil)
+}
+
+// downloadAppArchiveWithProgress 下载应用归档并按有限频率报告进度，避免任务日志被单字节写入淹没。
+func downloadAppArchiveWithProgress(ctx context.Context, source, target string, progress func(downloaded, total int64)) error {
+	parsed, err := validateAppArchiveURL(source)
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {
 		return err
 	}
-	resp, err := (&http.Client{Timeout: 30 * time.Minute}).Do(req)
+	client := &http.Client{Timeout: 30 * time.Minute, CheckRedirect: func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return errors.New("运行时归档重定向次数过多")
+		}
+		if !strings.EqualFold(next.URL.Hostname(), parsed.Hostname()) {
+			return errors.New("运行时归档禁止跨主机重定向")
+		}
+		return nil
+	}}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -1617,12 +2005,17 @@ func downloadAppArchive(ctx context.Context, source, target string) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
+	const maxArchiveBytes int64 = 512 << 20
+	if resp.ContentLength > maxArchiveBytes {
+		return fmt.Errorf("应用归档超过 %d 字节限制", maxArchiveBytes)
+	}
 	tmp := target + ".tmp"
 	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(file, io.LimitReader(resp.Body, 2<<30))
+	writer := &archiveProgressWriter{writer: file, total: resp.ContentLength, nextReport: 1 << 20, report: progress}
+	written, copyErr := io.Copy(writer, io.LimitReader(resp.Body, maxArchiveBytes+1))
 	closeErr := file.Close()
 	if copyErr != nil {
 		_ = os.Remove(tmp)
@@ -1632,7 +2025,64 @@ func downloadAppArchive(ctx context.Context, source, target string) error {
 		_ = os.Remove(tmp)
 		return closeErr
 	}
+	if written > maxArchiveBytes {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("应用归档超过 %d 字节限制", maxArchiveBytes)
+	}
 	return os.Rename(tmp, target)
+}
+
+type archiveProgressWriter struct {
+	writer     io.Writer
+	total      int64
+	written    int64
+	nextReport int64
+	report     func(downloaded, total int64)
+}
+
+func (w *archiveProgressWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	w.written += int64(n)
+	if w.report != nil && (w.written >= w.nextReport || err != nil) {
+		w.report(w.written, w.total)
+		for w.nextReport <= w.written {
+			w.nextReport += 1 << 20
+		}
+	}
+	return n, err
+}
+
+func validateAppArchiveURL(source string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(source))
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, errors.New("应用归档地址无效")
+	}
+	if parsed.Scheme != "https" {
+		if parsed.Scheme != "http" || !strings.EqualFold(os.Getenv("WORKMESH_ALLOW_LOCAL_APP_ARCHIVES"), "true") {
+			return nil, errors.New("应用归档只允许 HTTPS 地址")
+		}
+		ip := net.ParseIP(parsed.Hostname())
+		if parsed.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return nil, errors.New("本地 HTTP 应用归档只允许回环地址")
+		}
+	}
+	allowed := map[string]struct{}{}
+	for _, candidate := range []string{appStoreRemoteBase(), os.Getenv("WORKMESH_APP_MIRROR")} {
+		if value, parseErr := url.Parse(strings.TrimSpace(candidate)); parseErr == nil && value.Hostname() != "" {
+			allowed[strings.ToLower(value.Hostname())] = struct{}{}
+		}
+	}
+	for _, host := range strings.Split(os.Getenv("WORKMESH_APP_ARCHIVE_HOSTS"), ",") {
+		if host = strings.ToLower(strings.TrimSpace(host)); host != "" {
+			allowed[host] = struct{}{}
+		}
+	}
+	if parsed.Scheme == "https" {
+		if _, ok := allowed[strings.ToLower(parsed.Hostname())]; !ok {
+			return nil, errors.New("应用归档主机不在允许列表")
+		}
+	}
+	return parsed, nil
 }
 
 func extractTarGz(archivePath, destination string) error {
@@ -1647,6 +2097,7 @@ func extractTarGz(archivePath, destination string) error {
 	}
 	defer gz.Close()
 	reader := tar.NewReader(gz)
+	var extracted int64
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -1659,6 +2110,9 @@ func extractTarGz(archivePath, destination string) error {
 		if name == "." || name == ".." || filepath.IsAbs(name) || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("压缩包包含非法路径: %s", header.Name)
 		}
+		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink || header.Typeflag == tar.TypeChar || header.Typeflag == tar.TypeBlock || header.Typeflag == tar.TypeFifo {
+			return fmt.Errorf("压缩包包含不安全文件类型: %s", header.Name)
+		}
 		target := filepath.Join(destination, name)
 		switch header.Typeflag {
 		case tar.TypeDir:
@@ -1666,6 +2120,9 @@ func extractTarGz(archivePath, destination string) error {
 				return err
 			}
 		case tar.TypeReg:
+			if header.Size < 0 || header.Size > 512<<20 || extracted+header.Size > 512<<20 {
+				return errors.New("压缩包解压内容超过 512 MiB 限制")
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return err
 			}
@@ -1673,11 +2130,17 @@ func extractTarGz(archivePath, destination string) error {
 			if err != nil {
 				return err
 			}
-			_, copyErr := io.Copy(out, io.LimitReader(reader, 512<<20))
+			written, copyErr := io.Copy(out, io.LimitReader(reader, header.Size+1))
 			_ = out.Close()
 			if copyErr != nil {
 				return copyErr
 			}
+			if written != header.Size {
+				return errors.New("压缩包文件大小不匹配")
+			}
+			extracted += written
+		default:
+			return fmt.Errorf("压缩包包含不支持的文件类型: %s", header.Name)
 		}
 	}
 }
@@ -1706,7 +2169,7 @@ func appComposePath(item appRecord) string {
 func composeServiceContainers(path string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	result, err := (service.CommandService{}).Execute(ctx, model.CommandRequest{Program: "docker", Args: []string{"compose", "-f", path, "ps", "--format", "{{.Name}}"}, Dir: filepath.Dir(path), Timeout: 30 * time.Second})
+	result, err := (service.CommandService{}).Execute(ctx, model.CommandRequest{Program: service.DockerBinary(), Args: []string{"compose", "-f", path, "ps", "--format", "{{.Name}}"}, Dir: filepath.Dir(path), Timeout: 30 * time.Second})
 	if err != nil || result.ExitCode != 0 {
 		return ""
 	}
@@ -1727,7 +2190,7 @@ func writeComposeEnv(path string, params map[string]any) error {
 }
 
 func handleAppOperation(w http.ResponseWriter, s *appStore, body map[string]any) {
-	id := appValue(body, "installId", "appInstallId", "id")
+	id := appValue(body, "installId", "installID", "appInstallId", "id")
 	operation := strings.ToLower(appValue(body, "operate", "operation"))
 	if id == "" {
 		runtimeErr(w, http.StatusBadRequest, "应用安装标识不能为空")
@@ -1737,23 +2200,26 @@ func handleAppOperation(w http.ResponseWriter, s *appStore, body map[string]any)
 		runtimeErr(w, http.StatusBadRequest, "应用操作不能为空")
 		return
 	}
-	s.mu.Lock()
-	index, item := findApp(s.state.Apps, id)
-	if index < 0 {
-		s.mu.Unlock()
+	s.mu.RLock()
+	_, item := findApp(s.state.Apps, id)
+	s.mu.RUnlock()
+	if item.ID == "" {
 		runtimeErr(w, http.StatusNotFound, "应用不存在: "+id)
 		return
 	}
 	remove := false
 	switch operation {
 	case "stop", "停止":
-		item.Status = "stopped"
-	case "start", "启动", "restart", "重启":
-		item.Status = "running"
+		operation = "stop"
+	case "start", "启动", "restart", "重启", "reload", "重载":
+		if operation == "启动" {
+			operation = "start"
+		} else if operation == "重启" || operation == "重载" || operation == "reload" {
+			operation = "restart"
+		}
 	case "uninstall", "delete", "卸载":
 		remove = true
 	default:
-		s.mu.Unlock()
 		runtimeErr(w, http.StatusBadRequest, "不支持的应用操作: "+operation)
 		return
 	}
@@ -1766,26 +2232,88 @@ func handleAppOperation(w http.ResponseWriter, s *appStore, body map[string]any)
 			composePath = ""
 		}
 	}
+	if composePath == "" && !remove && len(appContainerNames(item)) == 0 {
+		runtimeErr(w, http.StatusBadRequest, "应用 Compose 文件和容器均不存在")
+		return
+	}
 	if composePath != "" {
 		op := operation
-		if op == "uninstall" || op == "delete" || op == "鍗歌浇" {
+		if remove {
 			op = "down"
 		}
-		if op == "start" || op == "stop" || op == "restart" || op == "down" {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			result, execErr := (service.CommandService{}).Execute(ctx, model.CommandRequest{Program: "docker", Args: []string{"compose", "-f", composePath, op}, Dir: filepath.Dir(composePath), Timeout: 5 * time.Minute})
-			cancel()
+		// 原版 start 使用 compose up -d，可创建缺失容器；不能使用 docker start 或 compose start。
+		args := []string{"compose"}
+		if project := appValue(item.Config, "composeProject", "projectName"); project != "" {
+			args = append(args, "--project-name", project)
+		}
+		args = append(args, "-f", composePath)
+		if op == "start" {
+			args = append(args, "up", "-d")
+		} else {
+			args = append(args, op)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		result, execErr := (service.CommandService{}).Execute(ctx, model.CommandRequest{Program: service.DockerBinary(), Args: args, Dir: filepath.Dir(composePath), Timeout: 5 * time.Minute})
+		cancel()
+		if execErr != nil || result.ExitCode != 0 {
+			message := strings.TrimSpace(result.Stderr)
+			if message == "" && execErr != nil {
+				message = execErr.Error()
+			}
+			runtimeErr(w, http.StatusBadGateway, "Docker Compose 操作失败: "+message)
+			return
+		}
+	} else if !remove {
+		// 无 Compose 文件的历史安装记录仍按真实容器执行生命周期操作。
+		command := operation
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		for _, container := range appContainerNames(item) {
+			result, execErr := (service.CommandService{}).Execute(ctx, model.CommandRequest{Program: service.DockerBinary(), Args: []string{command, container}, Timeout: 5 * time.Minute})
 			if execErr != nil || result.ExitCode != 0 {
-				s.mu.Unlock()
+				cancel()
 				message := strings.TrimSpace(result.Stderr)
 				if message == "" && execErr != nil {
 					message = execErr.Error()
 				}
-				runtimeErr(w, http.StatusBadGateway, "Docker Compose 操作失败: "+message)
+				runtimeErr(w, http.StatusBadGateway, "Docker 容器操作失败: "+message)
 				return
 			}
 		}
+		cancel()
 	}
+	if !remove {
+		// Compose 文件可能未记录容器名，操作成功后从真实项目状态发现服务容器。
+		if composePath != "" {
+			if discovered := composeServiceContainers(composePath); discovered != "" {
+				s.mu.Lock()
+				if index, current := findApp(s.state.Apps, id); index >= 0 {
+					current.ContainerName = discovered
+					if current.Config == nil {
+						current.Config = map[string]any{}
+					}
+					current.Config["composePath"] = composePath
+					s.state.Apps[index] = current
+				}
+				s.mu.Unlock()
+			}
+		}
+		synced, exists, err := s.syncAppInstallStatus(context.Background(), id, true)
+		if err != nil {
+			runtimeErr(w, http.StatusBadGateway, "同步应用容器状态失败: "+err.Error())
+			return
+		}
+		if exists {
+			item = synced
+		}
+	}
+	s.mu.Lock()
+	index, _ := findApp(s.state.Apps, id)
+	if index < 0 {
+		s.mu.Unlock()
+		runtimeErr(w, http.StatusNotFound, "应用不存在: "+id)
+		return
+	}
+	item = s.state.Apps[index]
 	item.UpdatedAt = time.Now().UTC()
 	if remove {
 		s.state.Apps = append(s.state.Apps[:index], s.state.Apps[index+1:]...)
@@ -1853,6 +2381,18 @@ func appContainerNames(item appRecord) []string {
 func appConfiguredInt(config map[string]any, fallback int, keys ...string) int {
 	for _, key := range keys {
 		switch value := config[key].(type) {
+		case int:
+			if value > 0 {
+				return value
+			}
+		case int64:
+			if value > 0 {
+				return int(value)
+			}
+		case uint64:
+			if value > 0 {
+				return int(value)
+			}
 		case float64:
 			if value > 0 {
 				return int(value)
@@ -2079,4 +2619,69 @@ func isAppRoute(pattern string) bool {
 		p = parts[1]
 	}
 	return p == "/api/v2/apps" || strings.HasPrefix(p, "/api/v2/apps/")
+}
+
+// handleCustomAppSync 将配置的自定义应用归档复制到本机资源目录；未配置真实归档时返回 503。
+// 该接口不接受浏览器上传内容，归档必须由受控部署流程放置并通过环境变量指定。
+func handleCustomAppSync(w http.ResponseWriter, r *http.Request, s *appStore) {
+	source := strings.TrimSpace(os.Getenv("WORKMESH_CUSTOM_APP_ARCHIVE"))
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("WORKMESH_CUSTOM_APP_PACKAGE"))
+	}
+	if source == "" {
+		domainError(w, http.StatusServiceUnavailable, "CUSTOM_APP_SOURCE_UNAVAILABLE", "未配置自定义应用商店归档")
+		return
+	}
+	info, err := os.Stat(source)
+	if err != nil || !info.Mode().IsRegular() {
+		if err == nil {
+			err = errors.New("归档不是普通文件")
+		}
+		domainError(w, http.StatusBadRequest, "CUSTOM_APP_SOURCE_INVALID", "自定义应用归档不可用: "+err.Error())
+		return
+	}
+	const maxArchive = 512 << 20
+	if info.Size() <= 0 || info.Size() > maxArchive {
+		domainError(w, http.StatusBadRequest, "CUSTOM_APP_SOURCE_INVALID", "自定义应用归档大小无效")
+		return
+	}
+	destDir := filepath.Join(filepath.Dir(s.path), "custom-app")
+	if err := os.MkdirAll(destDir, 0o750); err != nil {
+		domainError(w, http.StatusInternalServerError, "CUSTOM_APP_SAVE_FAILED", "创建自定义应用目录失败: "+err.Error())
+		return
+	}
+	dest := filepath.Join(destDir, "apps.tar.gz")
+	tmp := dest + ".tmp-" + idToken()
+	in, err := os.Open(source)
+	if err != nil {
+		domainError(w, http.StatusBadRequest, "CUSTOM_APP_SOURCE_INVALID", "读取自定义应用归档失败: "+err.Error())
+		return
+	}
+	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err == nil {
+		_, err = io.Copy(out, io.LimitReader(in, maxArchive+1))
+		if closeErr := out.Close(); err == nil {
+			err = closeErr
+		}
+	}
+	_ = in.Close()
+	if err == nil {
+		if copied, statErr := os.Stat(tmp); statErr != nil || copied.Size() != info.Size() {
+			err = errors.New("归档复制大小校验失败")
+		}
+	}
+	if err == nil {
+		err = os.Rename(tmp, dest)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		domainError(w, http.StatusInternalServerError, "CUSTOM_APP_SAVE_FAILED", "保存自定义应用归档失败: "+err.Error())
+		return
+	}
+	taskID := strings.TrimSpace(appValue(appBody(r), "taskID", "taskId"))
+	if taskID == "" {
+		taskID = idToken()
+	}
+	ensureAppTaskLog(taskID, "", "custom-app", "completed", "自定义应用归档同步完成")
+	appOK(w, map[string]any{"taskID": taskID, "path": dest, "size": info.Size(), "synced": true})
 }

@@ -4,14 +4,17 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -112,6 +115,12 @@ func (r *NodeRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		writeRelayError(w, http.StatusNotFound, "目标节点不存在: "+target)
 		return
 	}
+	if strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
+		if err := r.forwardWebSocket(w, req, node); err != nil {
+			writeRelayError(w, http.StatusBadGateway, err.Error())
+		}
+		return
+	}
 	if err := r.forward(w, req, node); err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, errRelayBodyTooLarge) {
@@ -119,6 +128,108 @@ func (r *NodeRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		writeRelayError(w, status, err.Error())
 	}
+}
+
+// forwardWebSocket 在节点间建立原始 TCP 隧道。HTTP Client 无法转发升级后的双向帧，
+// 因此这里显式完成签名握手，再把双方连接字节流双向复制。
+func (r *NodeRelay) forwardWebSocket(w http.ResponseWriter, req *http.Request, node relayNode) error {
+	base, err := relayBaseURL(node)
+	if err != nil {
+		return err
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return err
+	}
+	query := req.URL.Query()
+	query.Del("operateNode")
+	path := req.URL.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	requestTarget := pathWithQuery(path, query)
+	ctx, cancel := context.WithTimeout(req.Context(), r.options.Timeout)
+	defer cancel()
+	dialer := &net.Dialer{Timeout: r.options.Timeout}
+	var upstream net.Conn
+	if strings.EqualFold(u.Scheme, "https") {
+		upstream, err = tls.DialWithDialer(dialer, "tcp", u.Host, &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12})
+	} else {
+		upstream, err = dialer.DialContext(ctx, "tcp", u.Host)
+	}
+	if err != nil {
+		return fmt.Errorf("连接目标节点失败: %w", err)
+	}
+	defer upstream.Close()
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	nonce := randomRelayNonce()
+	signature := ""
+	if len(r.options.Secret) > 0 {
+		signature = link.Sign(r.options.Secret, req.Method, requestTarget, timestamp, nonce, nil)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %s HTTP/1.1\r\nHost: %s\r\n", req.Method, requestTarget, u.Host)
+	for key, values := range req.Header {
+		lower := strings.ToLower(key)
+		if lower == "host" || strings.HasPrefix(lower, "x-workmesh-") || lower == "content-length" {
+			continue
+		}
+		for _, value := range values {
+			fmt.Fprintf(&b, "%s: %s\r\n", key, value)
+		}
+	}
+	b.WriteString("X-WorkMesh-Forwarded: 1\r\n")
+	b.WriteString("X-WorkMesh-Node-ID: " + r.options.NodeID + "\r\n")
+	b.WriteString("X-WorkMesh-Timestamp: " + timestamp + "\r\n")
+	b.WriteString("X-WorkMesh-Nonce: " + nonce + "\r\n")
+	b.WriteString("X-WorkMesh-Role-Epoch: ")
+	epoch, epochErr := r.currentEpoch(ctx)
+	if epochErr != nil {
+		return epochErr
+	}
+	fmt.Fprintf(&b, "%d\r\n", epoch)
+	if signature != "" {
+		b.WriteString("X-WorkMesh-Signature: " + signature + "\r\n")
+	}
+	b.WriteString("\r\n")
+	if _, err := io.WriteString(upstream, b.String()); err != nil {
+		return err
+	}
+	reader := bufio.NewReader(upstream)
+	resp, err := http.ReadResponse(reader, req)
+	if err != nil {
+		return fmt.Errorf("目标节点 WebSocket 握手失败: %w", err)
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		defer resp.Body.Close()
+		return fmt.Errorf("目标节点返回 HTTP %d", resp.StatusCode)
+	}
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		return errors.New("当前服务器不支持 WebSocket 隧道")
+	}
+	clientConn, clientRW, err := hijacker.Hijack()
+	if err != nil {
+		return err
+	}
+	defer clientConn.Close()
+	if _, err := clientRW.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + resp.Header.Get("Sec-WebSocket-Accept") + "\r\n\r\n"); err != nil {
+		return err
+	}
+	if err := clientRW.Flush(); err != nil {
+		return err
+	}
+	// Reader 可能已经预读了握手后的帧，先转发缓冲区再进入双向复制。
+	copyConn := func(dst net.Conn, src io.Reader) { _, _ = io.Copy(dst, src) }
+	if reader.Buffered() > 0 {
+		n := reader.Buffered()
+		buf, _ := reader.Peek(n)
+		_, _ = clientConn.Write(buf)
+		_, _ = reader.Discard(n)
+	}
+	go copyConn(upstream, clientConn)
+	copyConn(clientConn, reader)
+	return nil
 }
 
 var errRelayBodyTooLarge = errors.New("节点透传请求体超过 8 MiB 限制")

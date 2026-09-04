@@ -16,7 +16,7 @@ export namespace Website {
         autoRenew: boolean;
         appinstall?: NewAppInstall;
         webSiteSSL: SSL;
-        runtimeID: number;
+        runtimeID?: string;
         rewrite: string;
         user: string;
         group: string;
@@ -90,6 +90,8 @@ export namespace Website {
         remark: string;
         appType: string;
         appInstallId: number;
+        runtimeID?: string;
+        runtimeType?: string;
         webSiteGroupId: number;
         proxy: string;
         proxyType: string;
@@ -571,7 +573,7 @@ export namespace Website {
 
     export interface PHPVersionChange {
         websiteID: number;
-        runtimeID: number;
+        runtimeID: string;
     }
 
     export interface DirConfig {

@@ -76,7 +76,7 @@ const versionReq = reactive<Website.PHPVersionChange>({
 });
 const versions = ref([]);
 const loading = ref(false);
-const oldRuntimeID = ref(0);
+const oldRuntimeID = ref<string | undefined>(undefined);
 const website = ref({
     type: '',
     openBaseDir: false,

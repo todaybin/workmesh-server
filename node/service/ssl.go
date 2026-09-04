@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/x509"
 	"database/sql"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -26,7 +25,6 @@ import (
 type SSLService struct {
 	mu     sync.RWMutex
 	root   string
-	path   string
 	serial uint
 	items  map[uint]model.WebsiteSSL
 	db     *sql.DB
@@ -39,7 +37,7 @@ func NewSSLService() *SSLService {
 	if root == "" {
 		root = "./data"
 	}
-	s := &SSLService{root: root, path: filepath.Join(root, "ssl.json"), items: make(map[uint]model.WebsiteSSL), db: currentWebsiteDB()}
+	s := &SSLService{root: root, items: make(map[uint]model.WebsiteSSL), db: currentWebsiteDB()}
 	if s.db == nil {
 		if opened, err := storage.Open(filepath.Join(root, "workmesh.db")); err == nil {
 			s.owner, s.db = opened, opened.DB()
@@ -52,38 +50,36 @@ func NewSSLService() *SSLService {
 	return s
 }
 
-// sslPersisted 保存证书元数据及私钥。私钥只存在本地状态文件，不通过 API 返回。
-type sslPersisted struct {
-	Item       model.WebsiteSSL `json:"item"`
-	PrivateKey string           `json:"privateKey,omitempty"`
-}
-
-type sslState struct {
-	Serial uint           `json:"serial"`
-	Items  []sslPersisted `json:"items"`
-}
-
 func (s *SSLService) load() {
-	var b []byte
-	if s.db != nil {
-		_ = s.db.QueryRow("SELECT payload FROM website_state WHERE state_key='ssl-certificates'").Scan(&b)
-	} else {
+	if s.db == nil {
 		return
 	}
-	if len(b) == 0 {
-		return
-	}
-	var state sslState
-	if json.Unmarshal(b, &state) != nil {
-		return
-	}
-	s.serial = state.Serial
-	for _, value := range state.Items {
-		value.Item.PrivateKey = value.PrivateKey
-		s.items[value.Item.ID] = value.Item
-		if value.Item.ID > s.serial {
-			s.serial = value.Item.ID
+	rows, err := s.db.Query(`SELECT id,primary_domain,private_key,pem,domains,provider,acme_account_id,dns_account_id,auto_renew,expire_date,start_date,status,message,key_type,push_dir,dir,description,push_node,nodes,created_at,updated_at FROM website_ssls ORDER BY id`)
+	if err == nil {
+		for rows.Next() {
+			var item model.WebsiteSSL
+			var id, acmeID, dnsID int64
+			var autoRenew, pushDir, pushNode int
+			var expire, start, created, updated string
+			if rows.Scan(&id, &item.PrimaryDomain, &item.PrivateKey, &item.Certificate, &item.Domains, &item.Provider, &acmeID, &dnsID, &autoRenew, &expire, &start, &item.Status, &item.Message, &item.KeyType, &pushDir, &item.Dir, &item.Description, &pushNode, &item.Nodes, &created, &updated) == nil {
+				item.ID = uint(id)
+				item.PEM = item.Certificate
+				item.AcmeAccountID = uint(acmeID)
+				item.DnsAccountID = uint(dnsID)
+				item.AutoRenew = autoRenew != 0
+				item.PushDir = pushDir != 0
+				item.PushNode = pushNode != 0
+				item.ExpireDate, _ = time.Parse(time.RFC3339Nano, expire)
+				item.StartDate, _ = time.Parse(time.RFC3339Nano, start)
+				item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+				item.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+				s.items[item.ID] = item
+				if item.ID > s.serial {
+					s.serial = item.ID
+				}
+			}
 		}
+		rows.Close()
 	}
 }
 
@@ -91,19 +87,22 @@ func (s *SSLService) persistLocked() error {
 	if s.db == nil {
 		return errors.New("网站公共数据库未初始化")
 	}
-	state := sslState{Serial: s.serial, Items: make([]sslPersisted, 0, len(s.items))}
-	for _, item := range s.items {
-		privateKey := item.PrivateKey
-		item.PrivateKey = ""
-		state.Items = append(state.Items, sslPersisted{Item: item, PrivateKey: privateKey})
-	}
-	sort.Slice(state.Items, func(i, j int) bool { return state.Items[i].Item.ID < state.Items[j].Item.ID })
-	b, err := json.MarshalIndent(state, "", "  ")
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT INTO website_state(state_key,payload,updated_at) VALUES('ssl-certificates',?,?) ON CONFLICT(state_key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at`, b, time.Now().UTC().Format(time.RFC3339Nano))
-	return err
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	for _, item := range s.items {
+		_, err = tx.Exec(`INSERT INTO website_ssls(id,primary_domain,private_key,pem,domains,provider,acme_account_id,dns_account_id,auto_renew,expire_date,start_date,status,message,key_type,push_dir,dir,description,push_node,nodes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET primary_domain=excluded.primary_domain,private_key=excluded.private_key,pem=excluded.pem,domains=excluded.domains,provider=excluded.provider,acme_account_id=excluded.acme_account_id,dns_account_id=excluded.dns_account_id,auto_renew=excluded.auto_renew,expire_date=excluded.expire_date,start_date=excluded.start_date,status=excluded.status,message=excluded.message,key_type=excluded.key_type,push_dir=excluded.push_dir,dir=excluded.dir,description=excluded.description,push_node=excluded.push_node,nodes=excluded.nodes,updated_at=excluded.updated_at`, item.ID, item.PrimaryDomain, item.PrivateKey, item.Certificate, item.Domains, item.Provider, item.AcmeAccountID, item.DnsAccountID, boolInt(item.AutoRenew), formatTime(item.ExpireDate), formatTime(item.StartDate), item.Status, item.Message, item.KeyType, boolInt(item.PushDir), item.Dir, item.Description, boolInt(item.PushNode), item.Nodes, formatTime(item.CreatedAt), formatTime(item.UpdatedAt))
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // Create 保存证书申请配置，证书申请由 ACME 适配器异步完成。
@@ -114,7 +113,8 @@ func (s *SSLService) Create(_ context.Context, req model.WebsiteSSLCreateRequest
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.serial++
-	item := model.WebsiteSSL{ID: s.serial, PrimaryDomain: req.PrimaryDomain, Domains: req.OtherDomains, Provider: req.Provider, AcmeAccountID: req.AcmeAccountID, DnsAccountID: req.DnsAccountID, AutoRenew: req.AutoRenew, KeyType: req.KeyType, Description: req.Description, Status: "pending"}
+	now := time.Now().UTC()
+	item := model.WebsiteSSL{ID: s.serial, PrimaryDomain: req.PrimaryDomain, Domains: req.OtherDomains, Provider: req.Provider, AcmeAccountID: req.AcmeAccountID, DnsAccountID: req.DnsAccountID, AutoRenew: req.AutoRenew, KeyType: req.KeyType, Description: req.Description, Status: "pending", Type: "acme", CreatedAt: now, UpdatedAt: now}
 	s.items[item.ID] = item
 	if err := s.persistLocked(); err != nil {
 		delete(s.items, item.ID)
@@ -133,6 +133,7 @@ func (s *SSLService) List(_ context.Context, domain string) []model.WebsiteSSL {
 			result = append(result, publicSSL(item))
 		}
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID > result[j].ID })
 	return result
 }
 
@@ -173,11 +174,17 @@ func (s *SSLService) Upload(_ context.Context, req model.WebsiteSSLUploadRequest
 	item.ID = req.ID
 	item.PrimaryDomain = firstDomain(certificate)
 	item.Certificate = req.Certificate
+	item.PEM = req.Certificate
 	item.PrivateKey = req.PrivateKey
 	item.StartDate = certificate.NotBefore
 	item.ExpireDate = certificate.NotAfter
 	item.Status = "active"
 	item.Message = "证书已导入"
+	item.Type = req.Type
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = time.Now().UTC()
+	}
+	item.UpdatedAt = time.Now().UTC()
 	if req.Description != "" {
 		item.Description = req.Description
 	}
@@ -217,8 +224,9 @@ func (s *SSLService) Update(_ context.Context, req model.WebsiteSSLUpdateRequest
 	if strings.TrimSpace(req.PrimaryDomain) == "" {
 		return errors.New("主域名不能为空")
 	}
-	item.PrimaryDomain, item.Domains, item.Provider = req.PrimaryDomain, req.OtherDomains, req.Provider
+	item.PrimaryDomain, item.Domains, item.Provider = strings.TrimSpace(req.PrimaryDomain), req.OtherDomains, req.Provider
 	item.AutoRenew, item.Description = req.AutoRenew, req.Description
+	item.UpdatedAt = time.Now().UTC()
 	s.items[req.ID] = item
 	if err := s.persistLocked(); err != nil {
 		return fmt.Errorf("保存证书设置失败: %w", err)

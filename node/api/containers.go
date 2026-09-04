@@ -43,6 +43,8 @@ type containerRequest struct {
 	Paths      []string  `json:"paths"`
 	Names      []string  `json:"names"`
 	PruneType  string    `json:"pruneType"`
+	TaskID     string    `json:"taskID"`
+	WithTagAll bool      `json:"withTagAll"`
 	Dockerfile string    `json:"dockerfile"`
 	TagName    string    `json:"tagName"`
 }
@@ -175,19 +177,22 @@ func getContainerStore() *containerStore {
 }
 
 func (s *containerStore) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
-		return err
-	}
-	b, err := json.Marshal(s.state)
-	if err != nil {
-		return err
-	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		return err
+	// 公共 SQLite 可用时停止写入重复 containers.json；该文件只允许作为一次性迁移输入。
+	if sharedDB() == nil {
+		if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
+			return err
+		}
+		b, err := json.Marshal(s.state)
+		if err != nil {
+			return err
+		}
+		tmp := s.path + ".tmp"
+		if err := os.WriteFile(tmp, b, 0o600); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, s.path); err != nil {
+			return err
+		}
 	}
 	if err := saveJSONState("container_store_state", s.state); err != nil {
 		return err
@@ -275,6 +280,7 @@ type composeRequest struct {
 }
 
 var dockerIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}$`)
+var taskIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
 func validDockerIdentifier(value string) bool {
 	return dockerIdentifier.MatchString(strings.TrimSpace(value)) && !strings.ContainsAny(value, "\x00\r\n")
@@ -1740,7 +1746,7 @@ func handleContainerPost(docker service.DockerService, r *http.Request, path str
 		if pruneType == "buildcache" {
 			pruneType = "builder"
 		}
-		return runDocker(r, pruneType, "prune", "-f")
+		return runContainerPrune(r, body, pruneType)
 	case path == "clean/log":
 		if !validDockerIdentifier(container) {
 			return model.CommandResult{}, errContainerParameter
@@ -1775,6 +1781,39 @@ func handleContainerPost(docker service.DockerService, r *http.Request, path str
 		// Compose、模板和仓库等路径保留明确的可观测错误，避免伪造执行成功。
 		return model.CommandResult{}, unsupportedContainerOperation(path)
 	}
+}
+
+func runContainerPrune(r *http.Request, body containerRequest, pruneType string) (model.CommandResult, error) {
+	args := []string{pruneType, "prune", "-f"}
+	if body.WithTagAll && (pruneType == "image" || pruneType == "builder") {
+		args = append(args, "-a")
+	}
+	taskID := strings.TrimSpace(body.TaskID)
+	if taskID != "" && !taskIdentifier.MatchString(taskID) {
+		return model.CommandResult{}, &containerError{"任务 ID 无效"}
+	}
+	if taskID != "" {
+		ensureAppTaskLog(taskID, "", "docker-prune", "executing", "开始清理 Docker "+pruneType)
+	}
+	result, err := runDocker(r, args...)
+	if taskID == "" {
+		return result, err
+	}
+	if output := strings.TrimSpace(result.Stdout); output != "" {
+		appendAppTaskLog(taskID, output)
+	}
+	if err != nil {
+		message := strings.TrimSpace(result.Stderr)
+		if message == "" {
+			message = err.Error()
+		}
+		ensureAppTaskLog(taskID, "", "docker-prune", "failed", message)
+		appendAppTaskLog(taskID, "[TASK-END]")
+		return result, errors.New(message)
+	}
+	ensureAppTaskLog(taskID, "", "docker-prune", "running", "Docker 清理完成")
+	appendAppTaskLog(taskID, "[TASK-END]")
+	return result, nil
 }
 
 func validEnvKey(key string) bool {
@@ -1921,7 +1960,8 @@ func handleDockerResourceOperation(r *http.Request, resource, path, name string)
 }
 
 func runDocker(r *http.Request, args ...string) (model.CommandResult, error) {
-	return (service.CommandService{}).Execute(r.Context(), model.CommandRequest{Program: "docker", Args: args})
+	// 统一使用 Docker CLI 路径发现逻辑，避免服务进程 PATH 精简导致 stop/start 失败。
+	return (service.CommandService{}).Execute(r.Context(), model.CommandRequest{Program: service.DockerBinary(), Args: args, Timeout: 5 * time.Minute})
 }
 
 func daemonJSONPath() string {

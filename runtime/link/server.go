@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	defaultProtocolVersion = "v1"
+	defaultProtocolVersion = "v2"
 	defaultClockSkew       = 5 * time.Minute
 	defaultNonceTTL        = 10 * time.Minute
 	maxRequestBytes        = 8 << 20

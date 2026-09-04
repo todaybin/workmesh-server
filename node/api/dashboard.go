@@ -11,20 +11,26 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
 // dashboardQuickJump 是控制面首页的轻量默认快捷入口。
 var dashboardQuickJump = []map[string]any{
-	{"id": 1, "name": "terminal", "alias": "terminal", "title": "终端", "detail": "打开系统终端", "recommend": 1, "isShow": true, "router": "/terminal"},
-	{"id": 2, "name": "container", "alias": "container", "title": "容器", "detail": "管理 Docker 容器", "recommend": 1, "isShow": true, "router": "/container"},
-	{"id": 3, "name": "website", "alias": "website", "title": "网站", "detail": "管理网站与域名", "recommend": 0, "isShow": true, "router": "/website"},
+	{"id": 1, "name": "Agent", "title": "aiTools.agents.agent", "detail": "0", "recommend": 1, "isShow": true, "router": "/ai/agents/agent"},
+	{"id": 2, "name": "Website", "title": "menu.website", "detail": "0", "recommend": 10, "isShow": true, "router": "/websites"},
+	{"id": 3, "name": "Database", "title": "menu.database", "detail": "0", "recommend": 30, "isShow": true, "router": "/databases"},
+	{"id": 4, "name": "Cronjob", "title": "menu.cronjob", "detail": "0", "recommend": 50, "isShow": false, "router": "/cronjobs"},
+	{"id": 5, "name": "AppInstalled", "title": "home.appInstalled", "detail": "0", "recommend": 70, "isShow": true, "router": "/apps/installed"},
+	{"id": 6, "name": "File", "title": "home.quickDir", "detail": "/", "recommend": 90, "isShow": false, "router": "/hosts/files"},
 }
 
 func handleDashboardOS(w http.ResponseWriter, _ *http.Request) {
@@ -52,19 +58,23 @@ func handleDashboardOS(w http.ResponseWriter, _ *http.Request) {
 }
 
 func handleDashboardBase(w http.ResponseWriter, r *http.Request) {
-	current := dashboardCurrent(r.Context())
+	ioOption, netOption := dashboardOptionsFromRequest(r)
+	current := dashboardCurrent(r.Context(), ioOption, netOption)
 	host, _ := os.Hostname()
 	cpu := dashboardCPUInfo()
 	distro := runtime.GOOS
 	if value, ok := cpu["prettyDistro"].(string); ok && value != "" {
 		distro = value
 	}
+	counts := dashboardQuickCounts()
 	data := map[string]any{
 		"hostname": host, "os": runtime.GOOS, "platform": runtime.GOOS, "platformFamily": runtime.GOOS,
 		"platformVersion": "", "prettyDistro": distro, "kernelArch": runtime.GOARCH,
 		"kernelVersion": "", "virtualizationSystem": "", "ipV4Addr": dashboardIPv4(), "httpProxy": "",
 		"cpuCores": runtime.NumCPU(), "cpuLogicalCores": runtime.NumCPU(), "cpuModelName": cpu["model"], "cpuMhz": cpu["mhz"],
-		"currentInfo": current, "quickJump": dashboardQuickJumps(),
+		"websiteNumber": counts["Website"], "agentNumber": counts["Agent"], "databaseNumber": counts["Database"],
+		"cronjobNumber": counts["Cronjob"], "appInstalledNumber": counts["AppInstalled"],
+		"currentInfo": current, "quickJump": dashboardQuickJumpsWithCounts(counts),
 	}
 	if dataRaw, err := os.ReadFile("/proc/version"); err == nil {
 		data["kernelVersion"] = strings.TrimSpace(string(dataRaw))
@@ -73,7 +83,8 @@ func handleDashboardBase(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDashboardCurrent(w http.ResponseWriter, r *http.Request) {
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": dashboardCurrent(r.Context())})
+	ioOption, netOption := dashboardOptionsFromRequest(r)
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": dashboardCurrent(r.Context(), ioOption, netOption)})
 }
 
 func handleDashboardNode(w http.ResponseWriter, r *http.Request) { handleDashboardCurrent(w, r) }
@@ -87,36 +98,140 @@ func handleDashboardTopMem(w http.ResponseWriter, _ *http.Request) {
 }
 
 func handleDashboardQuickOption(w http.ResponseWriter, _ *http.Request) {
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": dashboardQuickJumps()})
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": dashboardQuickJumpsWithCounts(dashboardQuickCounts())})
+}
+
+func dashboardOptionsFromRequest(r *http.Request) (string, string) {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	for i, part := range parts {
+		if (part == "base" || part == "current") && i+2 < len(parts) {
+			return parts[i+1], parts[i+2]
+		}
+	}
+	return "all", "all"
+}
+
+func dashboardQuickCounts() map[string]int {
+	counts := map[string]int{"Agent": 0, "Website": 0, "Database": 0, "Cronjob": 0, "AppInstalled": 0}
+	if store := getAppStore(); store != nil {
+		store.mu.RLock()
+		for _, app := range store.state.Apps {
+			if appStatusCountsAsInstalled(app.Status) {
+				counts["AppInstalled"]++
+			}
+		}
+		store.mu.RUnlock()
+	}
+	counts["Website"] = service.NewWebsiteService("").Count("")
+	counts["Cronjob"] = len(sharedCronjobs.List(context.Background()))
+	// Agent and database resources are represented by their persisted domain collections.
+	store := getDomainStore()
+	store.mu.RLock()
+	if raw, ok := store.state.Settings["agents"].([]any); ok {
+		counts["Agent"] = len(raw)
+	}
+	if raw, ok := store.state.Settings["databases"].([]any); ok {
+		counts["Database"] = len(raw)
+	}
+	store.mu.RUnlock()
+	return counts
+}
+
+func dashboardQuickJumpsWithCounts(counts map[string]int) []map[string]any {
+	items := dashboardQuickJumps()
+	for _, item := range items {
+		name := fmt.Sprint(item["name"])
+		if value, ok := counts[name]; ok {
+			item["detail"] = strconv.Itoa(value)
+		}
+	}
+	return items
 }
 
 func handleDashboardLauncher(w http.ResponseWriter, _ *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": dashboardAppLaunchers()})
 }
 
-// dashboardAppLaunchers 按原系统从已安装应用生成启动器，并保留系统快捷入口。
+// dashboardAppLaunchers 按应用目录聚合安装实例，保持首页应用卡片契约。
 func dashboardAppLaunchers() []map[string]any {
-	items := dashboardQuickJumps()
 	store := getAppStore()
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	for _, app := range store.state.Apps {
-		if strings.TrimSpace(app.ID) == "" || strings.EqualFold(app.Status, "failed") {
+	catalog := store.state.Catalog
+	if len(catalog) == 0 {
+		catalog = store.state.Apps
+	}
+	installedByKey := make(map[string][]map[string]any)
+	for _, install := range store.state.Apps {
+		if strings.TrimSpace(install.ID) == "" || strings.TrimSpace(install.Key) == "" || strings.EqualFold(install.Status, "failed") {
 			continue
 		}
-		port := appConfiguredInt(app.Config, 0, "httpPort", "port", "PANEL_APP_PORT_HTTP")
-		router := "/apps/" + app.ID
-		if port > 0 {
-			router = fmt.Sprintf("http://127.0.0.1:%d", port)
-		}
-		items = append(items, map[string]any{
-			"id": app.ID, "installID": app.ID, "detailID": app.ID, "name": app.Name, "key": app.Key,
-			"title": app.Name, "version": app.Version, "status": normalizeAppStatus(app.Status),
-			"path": appInstallPath(app), "httpPort": port, "httpsPort": appConfiguredInt(app.Config, 0, "httpsPort", "PANEL_APP_PORT_HTTPS"),
-			"router": router, "isShow": true, "recommend": app.Recommend,
+		installedByKey[install.Key] = append(installedByKey[install.Key], map[string]any{
+			"installID": install.ID,
+			"detailID":  install.ID,
+			"name":      install.Name,
+			"version":   install.Version,
+			"status":    normalizeAppStatus(install.Status),
+			"path":      appInstallPath(install),
+			"webUI":     appValue(install.Config, "webUI", "WebUI", "url"),
+			"httpPort":  appConfiguredInt(install.Config, 0, "httpPort", "port", "PANEL_APP_PORT_HTTP"),
+			"httpsPort": appConfiguredInt(install.Config, 0, "httpsPort", "PANEL_APP_PORT_HTTPS"),
 		})
 	}
-	return items
+	visibility := dashboardLauncherVisibility()
+	result := make([]map[string]any, 0, len(catalog))
+	seen := make(map[string]bool)
+	for _, app := range catalog {
+		key := strings.TrimSpace(app.Key)
+		if key == "" || seen[key] {
+			continue
+		}
+		details := installedByKey[key]
+		if visible, ok := visibility[key]; ok && !visible {
+			continue
+		}
+		if len(details) == 0 && app.Recommend <= 0 {
+			continue
+		}
+		item := appRecordDataLocalized(app, "", store.state.CatalogTags)
+		item["key"] = key
+		item["type"] = app.Type
+		item["appType"] = app.Type
+		item["isInstall"] = len(details) > 0
+		item["detail"] = details
+		result = append(result, item)
+		seen[key] = true
+	}
+	// 保留目录缺失但已安装的应用，便于目录同步异常时仍可管理实例。
+	for key, details := range installedByKey {
+		if seen[key] {
+			continue
+		}
+		if visible, ok := visibility[key]; ok && !visible {
+			continue
+		}
+		install := appRecord{Key: key, Name: key}
+		for _, candidate := range store.state.Apps {
+			if candidate.Key == key {
+				install = candidate
+				break
+			}
+		}
+		item := appRecordDataLocalized(install, "", nil)
+		item["appType"] = install.Type
+		item["isInstall"] = true
+		item["detail"] = details
+		result = append(result, item)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		installedI, _ := result[i]["isInstall"].(bool)
+		installedJ, _ := result[j]["isInstall"].(bool)
+		if installedI != installedJ {
+			return installedI
+		}
+		return fmt.Sprint(result[i]["recommend"]) < fmt.Sprint(result[j]["recommend"])
+	})
+	return result
 }
 
 func handleDashboardLauncherOption(w http.ResponseWriter, r *http.Request) {
@@ -128,11 +243,21 @@ func handleDashboardLauncherOption(w http.ResponseWriter, r *http.Request) {
 	filter := strings.ToLower(valueString(request, "filter", "name", "key"))
 	visibility := dashboardLauncherVisibility()
 	options := make([]map[string]any, 0)
-	for _, item := range dashboardConfiguredQuickJumps() {
-		key := strings.TrimSpace(fmt.Sprint(item["name"]))
-		if key == "" {
-			key = strings.TrimSpace(fmt.Sprint(item["key"]))
+	store := getAppStore()
+	store.mu.RLock()
+	keys := make(map[string]struct{})
+	for _, item := range store.state.Catalog {
+		if key := strings.TrimSpace(item.Key); key != "" {
+			keys[key] = struct{}{}
 		}
+	}
+	for _, item := range store.state.Apps {
+		if key := strings.TrimSpace(item.Key); key != "" {
+			keys[key] = struct{}{}
+		}
+	}
+	store.mu.RUnlock()
+	for key := range keys {
 		if key == "" || (filter != "" && !strings.Contains(strings.ToLower(key), filter)) {
 			continue
 		}
@@ -142,6 +267,20 @@ func handleDashboardLauncherOption(w http.ResponseWriter, r *http.Request) {
 		}
 		options = append(options, map[string]any{"key": key, "isShow": isShow})
 	}
+	// Keep explicitly persisted entries visible in the settings response even when
+	// their app/shortcut is currently unavailable. This preserves the user's
+	// choice across install/uninstall cycles and matches the original panel.
+	seen := make(map[string]bool, len(options))
+	for _, item := range options {
+		seen[fmt.Sprint(item["key"])] = true
+	}
+	for key, isShow := range visibility {
+		if key == "" || seen[key] || (filter != "" && !strings.Contains(strings.ToLower(key), filter)) {
+			continue
+		}
+		options = append(options, map[string]any{"key": key, "isShow": isShow})
+	}
+	sort.Slice(options, func(i, j int) bool { return fmt.Sprint(options[i]["key"]) < fmt.Sprint(options[j]["key"]) })
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": options})
 }
 
@@ -336,11 +475,80 @@ func normalizeDashboardQuickJumps(raw any) ([]map[string]any, error) {
 }
 
 func handleDashboardRestart(w http.ResponseWriter, r *http.Request) {
-	// 重启涉及生产进程生命周期，接口只确认请求，不由 HTTP 线程直接终止自身。
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"accepted": true, "operation": r.PathValue("operation")}})
+	operation := strings.TrimSpace(r.PathValue("operation"))
+	if operation == "" {
+		// 兼容旧的冒号路径在未转换时仍可从 URL 末段取得操作名。
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) > 0 {
+			operation = parts[len(parts)-1]
+		}
+	}
+	if operation == "" {
+		domainError(w, http.StatusBadRequest, "RESTART_OPERATION_REQUIRED", "重启操作不能为空")
+		return
+	}
+	if runtime.GOOS == "windows" {
+		domainError(w, http.StatusServiceUnavailable, "RESTART_UNSUPPORTED", "当前平台不支持服务重启")
+		return
+	}
+	systemctl, err := exec.LookPath("systemctl")
+	if err != nil {
+		domainError(w, http.StatusServiceUnavailable, "SYSTEMD_UNAVAILABLE", "systemd 不可用: "+err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if operation == "system" {
+		if os.Getenv("WORKMESH_ALLOW_SYSTEM_REBOOT") != "1" {
+			domainError(w, http.StatusServiceUnavailable, "RESTART_NOT_AUTHORIZED", "系统重启未获显式授权")
+			return
+		}
+		cmd := exec.CommandContext(ctx, systemctl, "reboot")
+		if err := cmd.Start(); err != nil {
+			domainError(w, http.StatusBadGateway, "RESTART_START_FAILED", "启动系统重启失败: "+err.Error())
+			return
+		}
+		wmhttp.JSON(w, http.StatusAccepted, map[string]any{"code": 200, "data": map[string]any{"operation": operation, "accepted": true}})
+		return
+	}
+	if os.Getenv("WORKMESH_ALLOW_RESTART") != "1" {
+		domainError(w, http.StatusServiceUnavailable, "RESTART_NOT_AUTHORIZED", "服务重启未获显式授权")
+		return
+	}
+	serviceName := strings.TrimSpace(os.Getenv("WORKMESH_SERVICE_NAME"))
+	if operation == "1panel-agent" {
+		serviceName = strings.TrimSpace(os.Getenv("WORKMESH_AGENT_SERVICE_NAME"))
+		if serviceName == "" {
+			serviceName = "workmesh-server-agent.service"
+		}
+	} else if operation == "1panel" || operation == "workmesh-server" {
+		if serviceName == "" {
+			serviceName = "workmesh-server.service"
+		}
+	} else {
+		domainError(w, http.StatusBadRequest, "RESTART_OPERATION_INVALID", "不支持的重启操作: "+operation)
+		return
+	}
+	if err := exec.CommandContext(ctx, systemctl, "is-active", "--quiet", serviceName).Run(); err != nil {
+		domainError(w, http.StatusServiceUnavailable, "SERVICE_NOT_RUNNING", "服务未运行: "+serviceName)
+		return
+	}
+	cmd := exec.CommandContext(ctx, systemctl, "restart", serviceName)
+	if err := cmd.Start(); err != nil {
+		domainError(w, http.StatusBadGateway, "RESTART_START_FAILED", "启动服务重启失败: "+err.Error())
+		return
+	}
+	wmhttp.JSON(w, http.StatusAccepted, map[string]any{"code": 200, "data": map[string]any{"operation": operation, "service": serviceName, "accepted": true}})
 }
 
-func dashboardCurrent(_ context.Context) map[string]any {
+func dashboardCurrent(_ context.Context, options ...string) map[string]any {
+	ioOption, netOption := "all", "all"
+	if len(options) > 0 && strings.TrimSpace(options[0]) != "" {
+		ioOption = strings.TrimSpace(options[0])
+	}
+	if len(options) > 1 && strings.TrimSpace(options[1]) != "" {
+		netOption = strings.TrimSpace(options[1])
+	}
 	var load1, load5, load15 float64
 	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
 		parts := strings.Fields(string(data))
@@ -383,7 +591,7 @@ func dashboardCurrent(_ context.Context) map[string]any {
 	if memTotal > memAvail {
 		used = memTotal - memAvail
 	}
-	network := dashboardNetwork()
+	network := dashboardNetwork(netOption)
 	cpuInfo := dashboardCPUInfo()
 	cpuUsage := numberOrZero(cpuInfo["usedPercent"])
 	cpuPercent, _ := cpuInfo["perCore"].([]float64)
@@ -394,7 +602,7 @@ func dashboardCurrent(_ context.Context) map[string]any {
 	if len(detailed) < 8 {
 		detailed = append(detailed, make([]float64, 8-len(detailed))...)
 	}
-	io := dashboardIO()
+	io := dashboardIO(ioOption)
 	swapUsed := uint64(0)
 	if swapTotal > swapFree {
 		swapUsed = swapTotal - swapFree
@@ -415,15 +623,21 @@ func dashboardCurrent(_ context.Context) map[string]any {
 		"memoryTotal": memTotal, "memoryAvailable": memAvail, "memoryUsed": used, "memoryFree": memFree,
 		"memoryShard": uint64(0), "memoryCache": memCache,
 		"memoryUsedPercent": percent(used, memTotal), "swapMemoryTotal": swapTotal, "swapMemoryAvailable": swapFree, "swapMemoryUsed": swapUsed,
-		"swapMemoryUsedPercent": percent(swapUsed, swapTotal), "diskData": dashboardDisks(), "gpuData": dashboardAccelerators("gpu"), "npuData": dashboardAccelerators("npu"), "xpuData": dashboardAccelerators("xpu"),
+		"swapMemoryUsedPercent": percent(swapUsed, swapTotal), "diskData": dashboardDisks(),
+		// 保留旧字段以兼容类型契约；首页已移除未使用的加速器和进程面板。
+		"gpuData": []map[string]any{}, "npuData": []map[string]any{}, "xpuData": []map[string]any{},
 		"ioReadBytes": io["readBytes"], "ioWriteBytes": io["writeBytes"], "ioCount": io["count"], "ioReadTime": io["readTime"], "ioWriteTime": io["writeTime"],
-		"topCPUItems": dashboardProcesses(), "topMemItems": dashboardProcesses(),
+		"topCPUItems": []map[string]any{}, "topMemItems": []map[string]any{},
 		"netBytesSent": network["bytesSent"], "netBytesRecv": network["bytesRecv"], "shotTime": time.Now().UTC(),
 	}
 }
 
 // dashboardNetwork 从 Linux 内核接口汇总网络字节；其他系统返回明确的 unsupported 状态。
-func dashboardNetwork() map[string]any {
+func dashboardNetwork(selected ...string) map[string]any {
+	option := "all"
+	if len(selected) > 0 && strings.TrimSpace(selected[0]) != "" {
+		option = strings.TrimSpace(selected[0])
+	}
 	result := map[string]any{"bytesSent": uint64(0), "bytesRecv": uint64(0), "interfaces": make([]map[string]any, 0), "supported": false}
 	file, err := os.Open("/proc/net/dev")
 	if err != nil {
@@ -449,11 +663,23 @@ func dashboardNetwork() map[string]any {
 		if e1 != nil || e2 != nil {
 			continue
 		}
+		name := strings.TrimSpace(parts[0])
 		recv += rx
 		sent += tx
-		interfaces = append(interfaces, map[string]any{"name": strings.TrimSpace(parts[0]), "bytesRecv": rx, "bytesSent": tx})
+		interfaces = append(interfaces, map[string]any{"name": name, "bytesRecv": rx, "bytesSent": tx})
+		if option != "all" && option == name {
+			result["bytesRecv"], result["bytesSent"] = rx, tx
+		}
 	}
-	result["bytesSent"], result["bytesRecv"], result["interfaces"] = sent, recv, interfaces
+	if option != "all" {
+		if _, ok := result["bytesRecv"].(uint64); !ok {
+			result["bytesRecv"], result["bytesSent"] = uint64(0), uint64(0)
+		}
+	}
+	if option == "all" {
+		result["bytesSent"], result["bytesRecv"] = sent, recv
+	}
+	result["interfaces"] = interfaces
 	return result
 }
 
@@ -466,6 +692,7 @@ func dashboardDisks() []map[string]any {
 	}
 	defer file.Close()
 	seen := make(map[string]struct{})
+	seenDevice := make(map[string]struct{})
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
@@ -475,11 +702,20 @@ func dashboardDisks() []map[string]any {
 		if len(disks) >= 64 {
 			break
 		}
-		mount := fields[1]
+		device, filesystem, mount := fields[0], fields[2], fields[1]
+		if !dashboardShouldIncludeMount(device, filesystem, mount) {
+			continue
+		}
 		if _, ok := seen[mount]; ok {
 			continue
 		}
+		// 一个本地分区可能通过 bind mount 出现在多个目录；首页只展示一次，
+		// 避免同一块磁盘被重复计算和占满状态卡片。
+		if _, ok := seenDevice[device]; ok {
+			continue
+		}
 		seen[mount] = struct{}{}
+		seenDevice[device] = struct{}{}
 		// 前端契约使用 path/usedPercent；mount 作为兼容字段保留。无法跨平台读取磁盘用量时明确返回 0，避免 NaN/undefined 传播。
 		total, free, available := dashboardDiskUsage(mount)
 		used := uint64(0)
@@ -487,12 +723,45 @@ func dashboardDisks() []map[string]any {
 			used = total - free
 		}
 		disks = append(disks, map[string]any{
-			"path": mount, "mount": mount, "type": fields[2], "device": fields[0], "filesystem": fields[2],
+			"path": mount, "mount": mount, "type": filesystem, "device": device, "filesystem": filesystem,
 			"available": available, "usedPercent": percent(used, total), "free": free, "total": total, "used": used,
 			"inodesTotal": uint64(0), "inodesUsed": uint64(0), "inodesFree": uint64(0), "inodesUsedPercent": float64(0),
 		})
 	}
 	return disks
+}
+
+// dashboardShouldIncludeMount 保持与原节点首页一致：只显示本地块设备，
+// 不把容器层、内核伪文件系统、网络盘和运行时目录当作用户磁盘。
+func dashboardShouldIncludeMount(device, filesystem, mount string) bool {
+	device = strings.TrimSpace(device)
+	filesystem = strings.ToLower(strings.TrimSpace(filesystem))
+	mount = strings.TrimSpace(mount)
+	if device == "" || filesystem == "" || mount == "" || mount == "-" {
+		return false
+	}
+	if !strings.HasPrefix(device, "/dev/") {
+		return false
+	}
+	if strings.Contains(mount, "/docker/") || strings.Contains(mount, "/containerd/") || strings.Contains(mount, "/podman/") || strings.HasPrefix(mount, "/snap/") {
+		return false
+	}
+	for _, excluded := range []string{"/mnt/cdrom", "/boot", "/boot/efi", "/dev", "/dev/shm", "/run/lock", "/run", "/run/shm", "/run/user"} {
+		if mount == excluded || strings.HasPrefix(mount, excluded+"/") {
+			return false
+		}
+	}
+	// These filesystems can be backed by a device but represent a container,
+	// userspace or kernel mount rather than a local disk users should monitor.
+	switch filesystem {
+	case "overlay", "aufs", "squashfs", "tmpfs", "devtmpfs", "proc", "sysfs", "sysfs2", "devpts", "cgroup", "cgroup2", "mqueue", "pstore", "securityfs", "debugfs", "tracefs", "fusectl", "configfs", "efivarfs", "hugetlbfs", "binfmt_misc", "nsfs", "autofs", "rpc_pipefs":
+		return false
+	}
+	// Network and FUSE filesystems are mounted resources, not local disks.
+	if strings.HasPrefix(filesystem, "fuse") || strings.Contains(filesystem, "nfs") || strings.Contains(filesystem, "cifs") || filesystem == "sshfs" {
+		return false
+	}
+	return true
 }
 
 // dashboardAccelerators 统一描述可选硬件能力，未检测到驱动时明确返回原因。
@@ -513,6 +782,28 @@ func dashboardUptime() uint64 {
 	return 0
 }
 func dashboardProcesses() []map[string]any {
+	if output, err := exec.Command("ps", "-eo", "pid=,comm=,user=,pcpu=,rss=,args=").Output(); err == nil {
+		items := make([]map[string]any, 0, 128)
+		for _, line := range strings.Split(string(output), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 5 {
+				continue
+			}
+			pid, err := strconv.Atoi(fields[0])
+			if err != nil || pid <= 0 {
+				continue
+			}
+			percentValue, _ := strconv.ParseFloat(fields[3], 64)
+			rssKB, _ := strconv.ParseUint(fields[4], 10, 64)
+			items = append(items, map[string]any{"name": fields[1], "pid": pid, "percent": percentValue, "memory": rssKB * 1024, "cmd": strings.Join(fields[5:], " "), "user": fields[2]})
+			if len(items) >= 256 {
+				break
+			}
+		}
+		if len(items) > 0 {
+			return items
+		}
+	}
 	memory := uint64(0)
 	if raw, err := os.ReadFile("/proc/self/statm"); err == nil {
 		fields := strings.Fields(string(raw))
@@ -628,7 +919,11 @@ func dashboardCPUInfo() map[string]any {
 }
 
 // dashboardIO 汇总 Linux 块设备累计读写量，避免每次请求执行外部命令。
-func dashboardIO() map[string]any {
+func dashboardIO(selected ...string) map[string]any {
+	option := "all"
+	if len(selected) > 0 && strings.TrimSpace(selected[0]) != "" {
+		option = strings.TrimSpace(selected[0])
+	}
 	result := map[string]any{"readBytes": uint64(0), "writeBytes": uint64(0), "count": uint64(0), "readTime": uint64(0), "writeTime": uint64(0)}
 	data, err := os.ReadFile("/proc/diskstats")
 	if err != nil {
@@ -641,6 +936,9 @@ func dashboardIO() map[string]any {
 			continue
 		}
 		name := fields[2]
+		if option != "all" && option != name {
+			continue
+		}
 		if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "ram") || dashboardIsPartition(name) {
 			continue
 		}

@@ -164,7 +164,7 @@ func (c *HTTPClient) Refresh(ctx context.Context) (Authorization, error) {
 		Scopes      []string `json:"scopes"`
 		Refreshable bool     `json:"refreshable"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/api/workmesh/v1/nodes/authorization/refresh", nil, &response); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/api/workmesh/v2/nodes/authorization/refresh", nil, &response); err != nil {
 		return Authorization{}, err
 	}
 	if response.Token != "" {
@@ -178,7 +178,7 @@ func (c *HTTPClient) Refresh(ctx context.Context) (Authorization, error) {
 
 // Revoke 撤销当前节点授权。
 func (c *HTTPClient) Revoke(ctx context.Context) error {
-	return c.do(ctx, http.MethodPost, "/api/workmesh/v1/nodes/authorization/revoke", nil, nil)
+	return c.do(ctx, http.MethodPost, "/api/workmesh/v2/nodes/authorization/revoke", nil, nil)
 }
 
 func (c *HTTPClient) do(ctx context.Context, method, endpoint string, input, output any) error {
@@ -204,7 +204,7 @@ func (c *HTTPClient) do(ctx context.Context, method, endpoint string, input, out
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-WorkMesh-Protocol-Version", "v1")
+	request.Header.Set("X-WorkMesh-Protocol-Version", "v2")
 	request.Header.Set("X-WorkMesh-Request-Id", randomID())
 	now := time.Now().UTC()
 	protocolTimestamp := fmt.Sprintf("%d", now.Unix())

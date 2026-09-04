@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -32,7 +33,7 @@ const (
 
 // containerLogCommand 允许测试注入受控的 Docker 进程构造器；生产环境始终执行 docker 二进制。
 var containerLogCommand = func(ctx context.Context, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, "docker", args...)
+	return exec.CommandContext(ctx, service.DockerBinary(), args...)
 }
 
 func handleContainerLogStream(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +94,7 @@ func handleContainerLogStream(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			case <-heartbeatDone:
+				return
 			case <-ctx.Done():
 				return
 			}

@@ -126,13 +126,13 @@ func lookupApplicationBinary(name, key string, explicit bool) (string, error) {
 		return "", os.ErrNotExist
 	}
 	candidates := map[string][]string{
-		"openresty": {"/usr/local/openresty/nginx/sbin/nginx", "/usr/local/openresty/bin/openresty", "/www/server/openresty/nginx/sbin/nginx", "/www/server/openresty/bin/openresty", "/www/server/nginx/sbin/nginx", "/usr/local/nginx/sbin/nginx", "/opt/openresty/nginx/sbin/nginx", "/opt/openresty/bin/openresty", "/usr/sbin/nginx"},
-		"nginx":     {"/usr/local/openresty/nginx/sbin/nginx", "/usr/local/openresty/bin/openresty", "/www/server/openresty/nginx/sbin/nginx", "/www/server/openresty/bin/openresty", "/www/server/nginx/sbin/nginx", "/usr/local/nginx/sbin/nginx", "/opt/openresty/nginx/sbin/nginx", "/opt/openresty/bin/openresty", "/usr/sbin/nginx"},
-		"mysql":     {"/usr/sbin/mysqld", "/usr/libexec/mysqld", "/usr/sbin/mariadbd", "/usr/libexec/mariadbd"},
-		"mariadb":   {"/usr/sbin/mariadbd", "/usr/libexec/mariadbd"},
-		"postgres":  {"/usr/lib/postgresql/bin/postgres", "/usr/lib/postgresql/16/bin/postgres", "/usr/lib/postgresql/15/bin/postgres"},
+		"openresty":  {"/usr/local/openresty/nginx/sbin/nginx", "/usr/local/openresty/bin/openresty", "/www/server/openresty/nginx/sbin/nginx", "/www/server/openresty/bin/openresty", "/www/server/nginx/sbin/nginx", "/usr/local/nginx/sbin/nginx", "/opt/openresty/nginx/sbin/nginx", "/opt/openresty/bin/openresty", "/usr/sbin/nginx"},
+		"nginx":      {"/usr/local/openresty/nginx/sbin/nginx", "/usr/local/openresty/bin/openresty", "/www/server/openresty/nginx/sbin/nginx", "/www/server/openresty/bin/openresty", "/www/server/nginx/sbin/nginx", "/usr/local/nginx/sbin/nginx", "/opt/openresty/nginx/sbin/nginx", "/opt/openresty/bin/openresty", "/usr/sbin/nginx"},
+		"mysql":      {"/usr/sbin/mysqld", "/usr/libexec/mysqld", "/usr/sbin/mariadbd", "/usr/libexec/mariadbd"},
+		"mariadb":    {"/usr/sbin/mariadbd", "/usr/libexec/mariadbd"},
+		"postgres":   {"/usr/lib/postgresql/bin/postgres", "/usr/lib/postgresql/16/bin/postgres", "/usr/lib/postgresql/15/bin/postgres"},
 		"postgresql": {"/usr/lib/postgresql/bin/postgres", "/usr/lib/postgresql/16/bin/postgres", "/usr/lib/postgresql/15/bin/postgres"},
-		"redis":     {"/usr/bin/redis-server", "/usr/local/bin/redis-server"},
+		"redis":      {"/usr/bin/redis-server", "/usr/local/bin/redis-server"},
 	}
 	for _, path := range candidates[key] {
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
@@ -176,6 +176,8 @@ func probeOpenRestyContainer(ctx context.Context) (ApplicationStatus, bool) {
 }
 
 func parseOpenRestyContainerList(output string) (ApplicationStatus, bool) {
+	configured := strings.ToLower(strings.TrimSpace(os.Getenv("WORKMESH_OPENRESTY_CONTAINER")))
+	configuredImage := strings.ToLower(strings.TrimSpace(os.Getenv("WORKMESH_OPENRESTY_IMAGE")))
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.SplitN(strings.TrimSpace(line), "\t", 3)
 		if len(fields) < 2 {
@@ -183,7 +185,13 @@ func parseOpenRestyContainerList(output string) (ApplicationStatus, bool) {
 		}
 		name, image := strings.TrimSpace(fields[0]), strings.TrimSpace(fields[1])
 		joined := strings.ToLower(name + " " + image)
-		if !strings.Contains(joined, "openresty") && !strings.Contains(joined, "nginx") {
+		if configured != "" && strings.EqualFold(name, configured) { /* 显式容器名优先 */
+		} else if configuredImage != "" && strings.Contains(strings.ToLower(image), configuredImage) {
+		} else if strings.Contains(joined, "1panel/openresty") || strings.HasPrefix(strings.ToLower(name), "1panel-openresty") {
+			// /opt/1panel 的旧 OpenResty 不属于 WorkMesh，不能被新系统误识别。
+			continue
+		} else if (!strings.Contains(joined, "workmesh") && !strings.Contains(joined, "waf")) ||
+			(!strings.Contains(joined, "openresty") && !strings.Contains(joined, "nginx")) {
 			continue
 		}
 		version := containerImageVersion(image)

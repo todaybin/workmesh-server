@@ -120,7 +120,7 @@ func (s *GatewayStateStore) Start(ctx context.Context, capabilities []string) {
 				return
 			}
 			s.mu.RLock()
-			request := gateway.RegisterRequest{NodeID: s.status.NodeID, Role: s.status.Role, ProtocolVersion: "v1", Capabilities: capabilities}
+			request := gateway.RegisterRequest{NodeID: s.status.NodeID, Role: s.status.Role, ProtocolVersion: "v2", Capabilities: capabilities}
 			s.mu.RUnlock()
 			auth, err := s.client.Register(ctx, request)
 			s.mu.Lock()
@@ -317,7 +317,7 @@ func (s *GatewayStateStore) loginHandler(w http.ResponseWriter, r *http.Request)
 	}
 	if !bound {
 		registered, registerErr := client.Register(r.Context(), gateway.RegisterRequest{
-			NodeID: nodeID, DisplayName: nodeID, Role: role, ProtocolVersion: "v1", Capabilities: append([]string(nil), gatewayCapabilities...),
+			NodeID: nodeID, DisplayName: nodeID, Role: role, ProtocolVersion: "v2", Capabilities: append([]string(nil), gatewayCapabilities...),
 		})
 		if registerErr != nil {
 			writeError(w, http.StatusBadGateway, fmt.Errorf("Gateway 节点注册失败: %w", registerErr))
@@ -460,7 +460,7 @@ func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Reque
 			s.mu.RUnlock()
 		}
 		if registerRequest.ProtocolVersion == "" {
-			registerRequest.ProtocolVersion = "v1"
+			registerRequest.ProtocolVersion = "v2"
 		}
 		if len(registerRequest.Capabilities) == 0 {
 			registerRequest.Capabilities = append([]string(nil), gatewayCapabilities...)

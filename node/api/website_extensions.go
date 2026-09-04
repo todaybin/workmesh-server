@@ -220,6 +220,15 @@ func pageRecords(items []map[string]any, body map[string]any) map[string]any {
 // registerWebsiteExtensionRoutes 注册旧网站模块中未被专用处理器覆盖的真实接口。
 func registerWebsiteExtensionRoutes(mux *http.ServeMux) {
 	store := newWebsiteExtensionStore()
+	// 这些单段/三段路径会与网站详情通配符重叠，必须显式注册以保证 ServeMux 选择真实扩展处理器。
+	mux.HandleFunc("GET /api/v2/websites/databases", func(w http.ResponseWriter, _ *http.Request) {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		extensionJSON(w, pageRecords(store.Databases, map[string]any{"page": 1.0, "pageSize": 100.0}))
+	})
+	mux.HandleFunc("GET /api/v2/websites/default/html/{type}", func(w http.ResponseWriter, r *http.Request) {
+		extensionJSON(w, map[string]any{"type": r.PathValue("type"), "content": "", "source": "local"})
+	})
 	get := func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v2/websites/"), "/")
 		parts := strings.Split(rest, "/")

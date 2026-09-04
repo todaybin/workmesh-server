@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -20,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -176,6 +178,9 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 		}
 		return exec.CommandContext(ctx, shell, "-c", command), nil
 	case strings.HasSuffix(path, "/container"):
+		if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("source")), "database") {
+			return databaseTerminalCommand(ctx, r)
+		}
 		containerID := strings.TrimSpace(r.URL.Query().Get("containerid"))
 		program := strings.TrimSpace(r.URL.Query().Get("command"))
 		if !validDockerIdentifier(containerID) || !validTerminalProgram(program) {
@@ -190,7 +195,7 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 			args = append(args, "-u", user)
 		}
 		args = append(args, containerID, program)
-		return exec.CommandContext(ctx, "docker", args...), nil
+		return exec.CommandContext(ctx, service.DockerBinary(), args...), nil
 	case strings.HasSuffix(path, "/ssh"):
 		id := strings.TrimSpace(r.URL.Query().Get("id"))
 		var record hostRecord
@@ -262,6 +267,100 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 	}
 }
 
+// databaseTerminalCommand 按原版规则从数据库资源和应用安装记录解析容器及客户端命令。
+func databaseTerminalCommand(ctx context.Context, r *http.Request) (*exec.Cmd, error) {
+	databaseType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("databaseType")))
+	databaseName := strings.TrimSpace(r.URL.Query().Get("database"))
+	if databaseType == "" || databaseName == "" {
+		return nil, errors.New("database 和 databaseType 参数不能为空")
+	}
+	aliases := map[string][]string{
+		"mysql":              {"mysql", "mysql-cluster"},
+		"mysql-cluster":      {"mysql-cluster", "mysql"},
+		"mariadb":            {"mariadb"},
+		"mongodb":            {"mongodb"},
+		"postgres":           {"postgres", "postgresql", "postgresql-cluster"},
+		"postgresql":         {"postgresql", "postgres", "postgresql-cluster"},
+		"postgresql-cluster": {"postgresql-cluster", "postgresql", "postgres"},
+	}
+	types, supported := aliases[databaseType]
+	if !supported {
+		return nil, fmt.Errorf("不支持的数据库终端类型: %s", databaseType)
+	}
+
+	var connection service.Database
+	foundConnection := false
+	for _, typ := range types {
+		if item, ok := databaseService.FindConnection(ctx, typ, databaseName); ok {
+			connection, foundConnection = item, true
+			break
+		}
+	}
+	store := getAppStore()
+	store.mu.RLock()
+	var install appRecord
+	if foundConnection && connection.AppInstallID > 0 {
+		_, install = findApp(store.state.Apps, strconv.FormatInt(connection.AppInstallID, 10))
+	}
+	if install.ID == "" {
+		for _, candidate := range store.state.Apps {
+			matchesType := false
+			for _, typ := range types {
+				if strings.EqualFold(candidate.Key, typ) {
+					matchesType = true
+					break
+				}
+			}
+			serviceName := appValue(candidate.Config, "serviceName", "SERVICE_NAME", "database")
+			if matchesType && (strings.EqualFold(candidate.Name, databaseName) || strings.EqualFold(serviceName, databaseName)) {
+				install = candidate
+				break
+			}
+		}
+	}
+	store.mu.RUnlock()
+	containerNames := appContainerNames(install)
+	if len(containerNames) == 0 || !validDockerIdentifier(containerNames[0]) {
+		return nil, fmt.Errorf("数据库 %s 没有关联可用容器", databaseName)
+	}
+	containerName := containerNames[0]
+	username, password := connection.Username, connection.Password
+	if username == "" {
+		username = appValue(install.Config, "username", "user", "PANEL_DB_ROOT_USER")
+	}
+	if password == "" {
+		password = appValue(install.Config, "password", "PANEL_DB_ROOT_PASSWORD")
+	}
+	if username == "" {
+		username = "root"
+	}
+
+	args := []string{"exec", "-i", "-t", containerName}
+	switch databaseType {
+	case "mysql", "mysql-cluster":
+		if password != "" {
+			args = append([]string{"exec", "-e", "MYSQL_PWD=" + password, "-i", "-t", containerName}, "mysql", "-u"+username)
+			return exec.CommandContext(ctx, service.DockerBinary(), args...), nil
+		}
+		args = append(args, "mysql", "-u"+username)
+		return exec.CommandContext(ctx, service.DockerBinary(), args...), nil
+	case "mariadb":
+		if password != "" {
+			args = append([]string{"exec", "-e", "MYSQL_PWD=" + password, "-i", "-t", containerName}, "mariadb", "-u"+username)
+			return exec.CommandContext(ctx, service.DockerBinary(), args...), nil
+		}
+		args = append(args, "mariadb", "-u"+username)
+	case "mongodb":
+		args = append(args, "mongosh", "--username", username, "--password", password, "--authenticationDatabase", "admin")
+	case "postgres", "postgresql", "postgresql-cluster":
+		if username == "root" {
+			username = "postgres"
+		}
+		args = []string{"exec", "-e", "PGPASSWORD=" + password, "-i", "-t", containerName, "psql", "-t", "-U", username}
+	}
+	return exec.CommandContext(ctx, service.DockerBinary(), args...), nil
+}
+
 func temporarySSHIdentity(privateKey string) (string, func(), error) {
 	dataRoot := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dataRoot == "" {
@@ -298,13 +397,16 @@ func cleanupTerminalCommand(command *exec.Cmd) {
 
 // validTerminalProgram 仅允许容器内单个可执行文件名，禁止注入 shell 参数。
 func validTerminalProgram(program string) bool {
-	if program == "" || len(program) > 128 || strings.ContainsAny(program, " \t\r\n\x00/\\") {
+	if program == "" || len(program) > 128 || strings.ContainsAny(program, " \t\r\n\x00\\") || strings.Contains(program, "..") {
 		return false
 	}
 	for _, ch := range program {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || strings.ContainsRune("._-", ch)) {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || strings.ContainsRune("._-/", ch)) {
 			return false
 		}
+	}
+	if strings.HasPrefix(program, "/") && !strings.HasPrefix(program, "/bin/") && !strings.HasPrefix(program, "/usr/bin/") && !strings.HasPrefix(program, "/usr/local/bin/") && !strings.HasPrefix(program, "/sbin/") && !strings.HasPrefix(program, "/usr/sbin/") {
+		return false
 	}
 	return true
 }

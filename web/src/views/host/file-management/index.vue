@@ -1568,7 +1568,7 @@ const sortedCompressExtensions = Object.values(CompressExtension).sort((a, b) =>
 const getFileExtension = (name: string, extension?: string): string => {
     const lowerName = name?.toLowerCase().split('?')[0] ?? '';
     if (lowerName.startsWith('.') && lowerName.indexOf('.', 1) === -1) {
-        return extension.toLowerCase();
+        return (extension || '').toLowerCase();
     }
     const compoundMatch = sortedCompressExtensions.find((compressExtension) => lowerName.endsWith(compressExtension));
     if (compoundMatch) {
@@ -1619,7 +1619,7 @@ const openView = (item: File.File) => {
 };
 
 const openPreview = (item: File.File, fileType: string) => {
-    if (item.mode.toString() == '-' && item.user == '-' && item.group == '-') {
+    if (String(item.mode ?? '') == '-' && (item.user || '') == '-' && (item.group || '') == '-') {
         MsgWarning(i18n.global.t('file.fileCanNotRead'));
         return;
     }

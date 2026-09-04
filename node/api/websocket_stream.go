@@ -125,6 +125,12 @@ func (s *streamWebSocket) writeText(payload []byte) error {
 	return writeStreamFrame(s.conn, 0x1, payload)
 }
 
+func (s *streamWebSocket) writeControl(opcode byte, payload []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return writeStreamFrame(s.conn, opcode, payload)
+}
+
 func writeStreamFrame(conn net.Conn, opcode byte, payload []byte) error {
 	if len(payload) > maxWebSocketMessage {
 		return errors.New("websocket 消息超过 1MiB 限制")

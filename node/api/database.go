@@ -78,7 +78,7 @@ func handleDatabaseCreate(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
 		return
 	}
-	item, err := databaseService.Create(r.Context(), service.Database{Name: req.Name, Type: req.Type, Host: req.Host, Port: req.Port, Username: req.Username, Description: req.Description})
+	item, err := databaseService.Create(r.Context(), service.Database{Name: req.Name, Type: req.Type, Host: req.Host, Port: req.Port, Username: req.Username, Password: req.Password, Description: req.Description})
 	if err != nil {
 		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
 		return
@@ -96,7 +96,7 @@ func handleDatabaseUpdate(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "数据库 ID 无效"})
 		return
 	}
-	item, err := databaseService.Update(r.Context(), service.Database{ID: req.ID, Name: req.Name, Type: req.Type, Host: req.Host, Port: req.Port, Username: req.Username, Description: req.Description})
+	item, err := databaseService.Update(r.Context(), service.Database{ID: req.ID, Name: req.Name, Type: req.Type, Host: req.Host, Port: req.Port, Username: req.Username, Password: req.Password, Description: req.Description})
 	if err != nil {
 		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
 		return

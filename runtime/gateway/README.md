@@ -7,6 +7,7 @@
 
 - 所有节点独立注册，注册凭证和私钥不进入日志或前端响应。
 - 仅使用 HTTPS、请求签名、时间戳、nonce、幂等键和协议版本。
+- WorkMesh 节点协议固定为 `v2`；不再提供 `/api/workmesh/v1` 路径或 v1 header 回退。
 - Gateway 离线时，已注册节点的本机能力可按策略继续运行；云端任务不得绕过授权。
 - `CapabilityRouter` 是本机和 Gateway 透传的共同入口，禁止复制两套沙盒执行逻辑。
 

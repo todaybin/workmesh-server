@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/todaybin/workmesh-server/internal/storage"
+	"github.com/todaybin/workmesh-server/node/service"
 )
 
 var (
@@ -25,19 +26,40 @@ func SetSharedStore(store *storage.Store) error {
 		return errors.New("公共数据库连接不能为空")
 	}
 	db := store.DB()
+	if err := initializeRuntimePersistence(db, os.Getenv("WORKMESH_DATA_DIR")); err != nil {
+		return err
+	}
 	if err := ensureControlTables(db); err != nil {
 		return err
 	}
 	controlStoreMu.Lock()
 	controlStoreDB = db
 	controlStoreMu.Unlock()
+	service.SetSharedDatabase(db)
 	return importLegacyControlState(db)
+}
+
+// SetCoreDatabase switches the process-wide authentication service to SQLite.
+// It is called by the executable after the shared database is opened.
+func SetCoreDatabase(db *sql.DB) error {
+	if err := localCore.SetDatabase(db); err != nil {
+		return fmt.Errorf("初始化认证 SQLite 存储失败: %w", err)
+	}
+	return nil
 }
 
 func sharedDB() *sql.DB {
 	controlStoreMu.RLock()
 	defer controlStoreMu.RUnlock()
 	return controlStoreDB
+}
+
+// resetSharedStoreForTest 清理包级测试注入，避免已关闭连接污染后续用例。
+func resetSharedStoreForTest() {
+	controlStoreMu.Lock()
+	controlStoreDB = nil
+	controlStoreMu.Unlock()
+	service.SetSharedDatabase(nil)
 }
 
 func ensureControlTables(db *sql.DB) error {
@@ -57,6 +79,27 @@ func ensureControlTables(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS node_quick_commands (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'command', command TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, group_belong TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', payload BLOB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS idx_node_quick_commands_type_name ON node_quick_commands(type, name, id)`,
 		`CREATE TABLE IF NOT EXISTS node_settings (setting_key TEXT PRIMARY KEY, payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS databases (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, version TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'local', app_install_id INTEGER NOT NULL DEFAULT 0, address TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL DEFAULT 0, initial_db TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', password TEXT NOT NULL DEFAULT '', ssl INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_databases_type_name ON databases(type, name)`,
+		`CREATE INDEX IF NOT EXISTS idx_databases_app_install ON databases(app_install_id)`,
+		`CREATE TABLE IF NOT EXISTS database_operations (id TEXT PRIMARY KEY, type TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS idx_database_operations_created ON database_operations(created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS resource_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, is_delete INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(type,name))`,
+		`CREATE INDEX IF NOT EXISTS idx_resource_groups_type_default ON resource_groups(type,is_default DESC,id)`,
+		`CREATE TABLE IF NOT EXISTS cronjobs (id TEXT PRIMARY KEY, payload BLOB NOT NULL, records BLOB NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS database_users (id INTEGER PRIMARY KEY AUTOINCREMENT, database_id INTEGER NOT NULL DEFAULT 0, database_name TEXT NOT NULL, type TEXT NOT NULL DEFAULT '', username TEXT NOT NULL, host TEXT NOT NULL DEFAULT '%', description TEXT NOT NULL DEFAULT '', password_set INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_users_identity ON database_users(database_name,username,host)`,
+		`CREATE INDEX IF NOT EXISTS idx_database_users_database ON database_users(database_name,id)`,
+		`CREATE TABLE IF NOT EXISTS database_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, database_name TEXT NOT NULL, username TEXT NOT NULL, host TEXT NOT NULL DEFAULT '%', privileges BLOB NOT NULL DEFAULT '[]')`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_grants_identity ON database_grants(database_name,username,host)`,
+		`CREATE INDEX IF NOT EXISTS idx_database_grants_database ON database_grants(database_name,id)`,
+		`CREATE TABLE IF NOT EXISTS database_variables (database_name TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(database_name,name))`,
+		`CREATE TABLE IF NOT EXISTS database_configs (database_name TEXT PRIMARY KEY, content BLOB NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS script_library (id TEXT PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', approved INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS ai_state (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS file_aux_state (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS file_shares_state (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS functional_domain_state (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
@@ -122,6 +165,25 @@ func saveJSONState(table string, value any) error {
 	}
 	_, err = db.Exec("INSERT INTO "+table+"(id,payload,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at", payload, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
+}
+
+// LoadSecuritySettings 从共享功能域状态读取安全策略，供最外层 HTTP 中间件使用。
+func LoadSecuritySettings() map[string]any {
+	db := sharedDB()
+	if db == nil {
+		return nil
+	}
+	var payload []byte
+	if err := db.QueryRow(`SELECT payload FROM functional_domain_state WHERE id=1`).Scan(&payload); err != nil {
+		return nil
+	}
+	var document struct {
+		Settings map[string]any `json:"settings"`
+	}
+	if json.Unmarshal(payload, &document) != nil {
+		return nil
+	}
+	return document.Settings
 }
 
 func loadNodeSetting(key string, target any) bool {

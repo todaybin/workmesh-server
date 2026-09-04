@@ -255,10 +255,19 @@ const searchLogs = async () => {
         currentNode = props.node;
     }
 
-    let url = `/api/v2/containers/search/log?container=${logSearch.container}&since=${logSearch.mode}&tail=${logSearch.tail}&follow=${logSearch.isWatch}&timestamp=${logSearch.isShowTimestamp}&operateNode=${currentNode}`;
+    const params = new URLSearchParams({
+        container: logSearch.container,
+        since: logSearch.mode,
+        tail: String(logSearch.tail),
+        follow: String(logSearch.isWatch),
+        timestamp: String(logSearch.isShowTimestamp),
+        operateNode: currentNode || '',
+    });
     if (logSearch.compose !== '') {
-        url = `/api/v2/containers/search/log?compose=${logSearch.compose}&since=${logSearch.mode}&tail=${logSearch.tail}&follow=${logSearch.isWatch}&timestamp=${logSearch.isShowTimestamp}&operateNode=${currentNode}`;
+        params.delete('container');
+        params.set('compose', logSearch.compose);
     }
+    const url = `/api/v2/containers/search/log?${params.toString()}`;
 
     const authError = await checkStreamAuth(url, currentNode);
     if (authError) {
@@ -270,9 +279,12 @@ const searchLogs = async () => {
         writeLogLine(event.data);
     };
     eventSource.onerror = (event: MessageEvent) => {
-        stopListening();
         if (event.data && event.data != '') {
             MsgError(event.data);
+        }
+        // follow 模式保留 EventSource 的原生退避重连；一次性读取完成后立即释放连接。
+        if (!logSearch.isWatch) {
+            stopListening();
         }
     };
 };

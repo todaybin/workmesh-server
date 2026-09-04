@@ -204,6 +204,7 @@ export namespace Container {
     export interface ContainerPrune {
         pruneType: string;
         withTagAll: boolean;
+        taskID?: string;
     }
     export interface ContainerPruneReport {
         deletedNumber: number;

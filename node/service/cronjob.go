@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,15 +26,19 @@ import (
 
 // CronjobService 保存计划任务定义并提供调度、执行和记录能力。
 type CronjobService struct {
-	mu       sync.RWMutex
-	startMu  sync.Mutex
-	started  bool
-	items    map[string]model.Cronjob
-	cmd      CommandService
-	records  map[string][]model.CommandResult
-	path     string
-	running  map[string]context.CancelFunc
-	lastTick map[string]string
+	mu      sync.RWMutex
+	initMu  sync.Mutex
+	startMu sync.Mutex
+	started bool
+	items   map[string]model.Cronjob
+	cmd     CommandService
+	records map[string][]model.CommandResult
+	// path 仅作为旧 cronjobs.json 的一次性迁移输入。
+	path         string
+	fallbackPath string
+	running      map[string]context.CancelFunc
+	lastTick     map[string]string
+	db           *sql.DB
 }
 
 // NewCronjobService 创建计划任务服务。
@@ -42,32 +47,93 @@ func NewCronjobService() *CronjobService {
 	if dir == "" {
 		dir = "./data"
 	}
-	path := filepath.Join(dir, "cronjobs.json")
-	// 测试进程使用带 PID 的临时状态文件，避免上一次异常退出留下的任务
-	// 污染本次测试；生产进程仍使用稳定路径以保证重启后状态恢复。
-	if strings.Contains(filepath.Base(os.Args[0]), ".test") {
-		path = filepath.Join(".tmp", fmt.Sprintf("cronjobs-test-%d.json", os.Getpid()))
+	return &CronjobService{
+		items: make(map[string]model.Cronjob), records: make(map[string][]model.CommandResult),
+		path: filepath.Join(dir, "cronjobs.json"), fallbackPath: filepath.Join(dir, "workmesh.db"),
+		running: make(map[string]context.CancelFunc), lastTick: make(map[string]string),
 	}
-	s := &CronjobService{items: make(map[string]model.Cronjob), records: make(map[string][]model.CommandResult), path: path, running: make(map[string]context.CancelFunc), lastTick: make(map[string]string)}
-	if b, err := os.ReadFile(s.path); err == nil {
-		var payload struct {
-			Items   map[string]model.Cronjob         `json:"items"`
-			Records map[string][]model.CommandResult `json:"records"`
-		}
-		if json.Unmarshal(b, &payload) == nil {
-			if payload.Items != nil {
-				s.items = payload.Items
-			}
-			if payload.Records != nil {
-				s.records = payload.Records
-			}
+}
+
+// ensureDatabase 在首次业务调用时绑定统一连接；这样包级服务不会在 main 注入数据库前固化旧数据源。
+func (s *CronjobService) ensureDatabase(ctx context.Context) error {
+	db := SharedDatabase()
+	if db == nil {
+		var err error
+		db, err = sharedFallbackSQLite(s.fallbackPath)
+		if err != nil {
+			return err
 		}
 	}
-	return s
+	s.initMu.Lock()
+	defer s.initMu.Unlock()
+	if s.db == db {
+		return nil
+	}
+	items, records, err := s.initializeDatabase(contextOrBackground(ctx), db)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.items, s.records, s.db = items, records, db
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *CronjobService) initializeDatabase(ctx context.Context, db *sql.DB) (map[string]model.Cronjob, map[string][]model.CommandResult, error) {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS cronjobs (id TEXT PRIMARY KEY, payload BLOB NOT NULL, records BLOB NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`); err != nil {
+		return nil, nil, err
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM cronjobs`).Scan(&count); err != nil {
+		return nil, nil, err
+	}
+	if count == 0 {
+		if payload, err := os.ReadFile(s.path); err == nil {
+			var legacy struct {
+				Items   map[string]model.Cronjob         `json:"items"`
+				Records map[string][]model.CommandResult `json:"records"`
+			}
+			if json.Unmarshal(payload, &legacy) == nil {
+				for id, job := range legacy.Items {
+					records, _ := json.Marshal(legacy.Records[id])
+					jobPayload, _ := json.Marshal(job)
+					if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO cronjobs(id,payload,records,updated_at) VALUES(?,?,?,?)`, id, jobPayload, records, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+						return nil, nil, fmt.Errorf("导入旧计划任务失败: %w", err)
+					}
+				}
+			}
+		}
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id,payload,records FROM cronjobs ORDER BY id LIMIT 10000`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	items := make(map[string]model.Cronjob)
+	recordsByID := make(map[string][]model.CommandResult)
+	for rows.Next() {
+		var id string
+		var jobPayload, recordsPayload []byte
+		if rows.Scan(&id, &jobPayload, &recordsPayload) != nil {
+			continue
+		}
+		var job model.Cronjob
+		var records []model.CommandResult
+		if json.Unmarshal(jobPayload, &job) == nil {
+			items[id] = job
+		}
+		if json.Unmarshal(recordsPayload, &records) == nil {
+			recordsByID[id] = records
+		}
+	}
+	return items, recordsByID, rows.Err()
 }
 
 // Create 新增计划任务，初始状态为 disabled。
-func (s *CronjobService) Create(_ context.Context, job model.Cronjob) (model.Cronjob, error) {
+func (s *CronjobService) Create(ctx context.Context, job model.Cronjob) (model.Cronjob, error) {
+	if err := s.ensureDatabase(ctx); err != nil {
+		return model.Cronjob{}, err
+	}
 	if strings.TrimSpace(job.Name) == "" {
 		return model.Cronjob{}, errors.New("计划任务名称不能为空")
 	}
@@ -89,7 +155,7 @@ func (s *CronjobService) Create(_ context.Context, job model.Cronjob) (model.Cro
 	job.CreatedAt, job.UpdatedAt = now, now
 	s.mu.Lock()
 	s.items[job.ID] = job
-	err := s.saveLocked()
+	err := s.persistLocked(ctx, job.ID)
 	s.mu.Unlock()
 	if err != nil {
 		return model.Cronjob{}, err
@@ -98,7 +164,10 @@ func (s *CronjobService) Create(_ context.Context, job model.Cronjob) (model.Cro
 }
 
 // List 返回全部计划任务定义。
-func (s *CronjobService) List(context.Context) []model.Cronjob {
+func (s *CronjobService) List(ctx context.Context) []model.Cronjob {
+	if err := s.ensureDatabase(ctx); err != nil {
+		return []model.Cronjob{}
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]model.Cronjob, 0, len(s.items))
@@ -109,14 +178,14 @@ func (s *CronjobService) List(context.Context) []model.Cronjob {
 }
 
 // ListPage 按页返回计划任务，防止前端一次读取无界数据。
-func (s *CronjobService) ListPage(_ context.Context, page, pageSize int) (int, []model.Cronjob) {
+func (s *CronjobService) ListPage(ctx context.Context, page, pageSize int) (int, []model.Cronjob) {
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 || pageSize > 200 {
 		pageSize = 20
 	}
-	items := s.List(context.Background())
+	items := s.List(ctx)
 	total := len(items)
 	start := (page - 1) * pageSize
 	if start >= total {
@@ -130,19 +199,28 @@ func (s *CronjobService) ListPage(_ context.Context, page, pageSize int) (int, [
 }
 
 // Delete 删除指定计划任务。
-func (s *CronjobService) Delete(_ context.Context, id string) error {
+func (s *CronjobService) Delete(ctx context.Context, id string) error {
+	if err := s.ensureDatabase(ctx); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.items[id]; !ok {
 		return errors.New("计划任务不存在")
 	}
+	if _, err := s.db.ExecContext(contextOrBackground(ctx), `DELETE FROM cronjobs WHERE id=?`, id); err != nil {
+		return err
+	}
 	delete(s.items, id)
 	delete(s.records, id)
-	return s.saveLocked()
+	return nil
 }
 
 // HandleOnce 立即执行计划任务的命令字段。
 func (s *CronjobService) HandleOnce(ctx context.Context, id string) (model.CommandResult, error) {
+	if err := s.ensureDatabase(ctx); err != nil {
+		return model.CommandResult{}, err
+	}
 	s.mu.RLock()
 	job, ok := s.items[id]
 	s.mu.RUnlock()
@@ -174,7 +252,7 @@ func (s *CronjobService) HandleOnce(ctx context.Context, id string) (model.Comma
 		}
 		s.items[id] = current
 	}
-	_ = s.saveLocked()
+	_ = s.persistLocked(ctx, id)
 	s.mu.Unlock()
 	if err != nil && job.IgnoreErr {
 		return result, nil
@@ -391,6 +469,10 @@ func (s *CronjobService) Start(parent context.Context) {
 
 // runDue 执行当前分钟到期且尚未执行的启用任务，避免同一分钟重复调度。
 func (s *CronjobService) runDue(parent context.Context) {
+	// 调度器可能在主进程注入共享库前启动，因此每轮先懒加载一次数据库。
+	if err := s.ensureDatabase(parent); err != nil {
+		return
+	}
 	now := time.Now().UTC()
 	minute := now.Truncate(time.Minute).Format(time.RFC3339)
 	s.mu.RLock()
@@ -529,7 +611,10 @@ func cronField(expr string, value, min, max int) bool {
 }
 
 // Update 修改计划任务定义并保留原有创建时间。
-func (s *CronjobService) Update(_ context.Context, job model.Cronjob) (model.Cronjob, error) {
+func (s *CronjobService) Update(ctx context.Context, job model.Cronjob) (model.Cronjob, error) {
+	if err := s.ensureDatabase(ctx); err != nil {
+		return model.Cronjob{}, err
+	}
 	if job.ID == "" || strings.TrimSpace(job.Name) == "" {
 		return model.Cronjob{}, errors.New("计划任务 ID 和名称不能为空")
 	}
@@ -560,14 +645,17 @@ func (s *CronjobService) Update(_ context.Context, job model.Cronjob) (model.Cro
 	job.CreatedAt = old.CreatedAt
 	job.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	s.items[job.ID] = job
-	if err := s.saveLocked(); err != nil {
+	if err := s.persistLocked(ctx, job.ID); err != nil {
 		return model.Cronjob{}, err
 	}
 	return job, nil
 }
 
 // SetStatus 切换计划任务启停状态。
-func (s *CronjobService) SetStatus(_ context.Context, id, status string) error {
+func (s *CronjobService) SetStatus(ctx context.Context, id, status string) error {
+	if err := s.ensureDatabase(ctx); err != nil {
+		return err
+	}
 	if status != "enabled" && status != "disabled" {
 		return errors.New("invalid status")
 	}
@@ -579,25 +667,28 @@ func (s *CronjobService) SetStatus(_ context.Context, id, status string) error {
 	}
 	job.Status, job.UpdatedAt = status, time.Now().UTC().Format(time.RFC3339)
 	s.items[id] = job
-	return s.saveLocked()
+	return s.persistLocked(ctx, id)
 }
 
 // Records 返回任务执行记录，调用方可按需分页。
-func (s *CronjobService) Records(_ context.Context, id string) []model.CommandResult {
+func (s *CronjobService) Records(ctx context.Context, id string) []model.CommandResult {
+	if err := s.ensureDatabase(ctx); err != nil {
+		return []model.CommandResult{}
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]model.CommandResult(nil), s.records[id]...)
 }
 
 // RecordsPage 分页读取任务记录，最多返回 200 条。
-func (s *CronjobService) RecordsPage(_ context.Context, id string, page, pageSize int) (int, []model.CommandResult) {
+func (s *CronjobService) RecordsPage(ctx context.Context, id string, page, pageSize int) (int, []model.CommandResult) {
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 || pageSize > 200 {
 		pageSize = 20
 	}
-	all := s.Records(context.Background(), id)
+	all := s.Records(ctx, id)
 	total := len(all)
 	start := (page - 1) * pageSize
 	if start >= total {
@@ -609,11 +700,14 @@ func (s *CronjobService) RecordsPage(_ context.Context, id string, page, pageSiz
 	}
 	return total, all[start:end]
 }
-func (s *CronjobService) CleanRecords(_ context.Context, id string) error {
+func (s *CronjobService) CleanRecords(ctx context.Context, id string) error {
+	if err := s.ensureDatabase(ctx); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.records, id)
-	return s.saveLocked()
+	return s.persistLocked(ctx, id)
 }
 
 // NextRuns 返回后续五次调度时间，供计划任务编辑器预览。
@@ -633,29 +727,36 @@ func NextRuns(spec string, from time.Time, count int) ([]time.Time, error) {
 	}
 	return out, nil
 }
-func (s *CronjobService) Get(_ context.Context, id string) (model.Cronjob, bool) {
+func (s *CronjobService) Get(ctx context.Context, id string) (model.Cronjob, bool) {
+	if err := s.ensureDatabase(ctx); err != nil {
+		return model.Cronjob{}, false
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	v, ok := s.items[id]
 	return v, ok
 }
 
-func (s *CronjobService) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
+// persistLocked 只更新发生变化的计划任务行，调用方必须已持有 s.mu 写锁。
+func (s *CronjobService) persistLocked(ctx context.Context, id string) error {
+	if s.db == nil {
+		return errors.New("计划任务数据库未初始化")
+	}
+	job, ok := s.items[id]
+	if !ok {
+		_, err := s.db.ExecContext(contextOrBackground(ctx), `DELETE FROM cronjobs WHERE id=?`, id)
 		return err
 	}
-	b, err := json.Marshal(struct {
-		Items   map[string]model.Cronjob         `json:"items"`
-		Records map[string][]model.CommandResult `json:"records"`
-	}{s.items, s.records})
+	jobPayload, err := json.Marshal(job)
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	records, err := json.Marshal(s.records[id])
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	_, err = s.db.ExecContext(contextOrBackground(ctx), `INSERT INTO cronjobs(id,payload,records,updated_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,records=excluded.records,updated_at=excluded.updated_at`, id, jobPayload, records, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
 }
 
 // Export 返回稳定 JSON，供旧版导入导出接口适配。

@@ -8,12 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -121,6 +121,15 @@ func RegisterHostContainerCronRoutes(mux *http.ServeMux) {
 			return
 		}
 		result, err := docker.Operate(r.Context(), request)
+		if request.TaskID != "" {
+			// v2 前端会携带任务标识；同步执行完成后回传同一标识，便于任务面板关联结果。
+			if err != nil {
+				wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error(), "taskID": request.TaskID, "data": result})
+				return
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "taskID": request.TaskID, "data": result})
+			return
+		}
 		writeCommandResult(w, result, err)
 	})
 	// 镜像导入必须使用 docker load 的文件参数，禁止通过 shell 拼接用户输入。
@@ -432,6 +441,35 @@ func loadHostOperationalState() hostOperationalState {
 
 func loadHostOperationalStateLocked() hostOperationalState {
 	state := hostOperationalState{Monitor: map[string]any{"enabled": true, "interval": 10}}
+	// SQLite 已初始化时，主机监控设置只从 node_settings 读取；旧 JSON 仅在首次启动时导入并归档。
+	if sharedDB() != nil {
+		if loadNodeSetting("host_operational", &state) {
+			if state.Monitor == nil {
+				state.Monitor = map[string]any{}
+			}
+			return state
+		}
+		legacyPath := hostOperationalStatePath()
+		if b, err := os.ReadFile(legacyPath); err == nil && len(b) > 0 {
+			var legacy hostOperationalState
+			if json.Unmarshal(b, &legacy) == nil {
+				if legacy.Monitor != nil {
+					state = legacy
+				}
+				if saveErr := saveNodeSetting("host_operational", state); saveErr == nil {
+					archiveDir := filepath.Join(filepath.Dir(legacyPath), "backups")
+					if os.MkdirAll(archiveDir, 0o750) == nil {
+						archivePath := filepath.Join(archiveDir, "legacy-host-operational-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".json")
+						_ = os.Rename(legacyPath, archivePath)
+					}
+				}
+			}
+		}
+		if state.Monitor == nil {
+			state.Monitor = map[string]any{}
+		}
+		return state
+	}
 	b, err := os.ReadFile(hostOperationalStatePath())
 	if err == nil && len(b) > 0 {
 		_ = json.Unmarshal(b, &state)
@@ -449,6 +487,12 @@ func saveHostOperationalState(state hostOperationalState) error {
 }
 
 func saveHostOperationalStateLocked(state hostOperationalState) error {
+	if sharedDB() != nil {
+		if state.Monitor == nil {
+			state.Monitor = map[string]any{}
+		}
+		return saveNodeSetting("host_operational", state)
+	}
 	if err := os.MkdirAll(filepath.Dir(hostOperationalStatePath()), 0o750); err != nil {
 		return err
 	}
@@ -466,19 +510,44 @@ func saveHostOperationalStateLocked(state hostOperationalState) error {
 // registerHostOperationalRoutes 提供旧主机面板使用的真实本机状态接口。
 func registerHostOperationalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/hosts/monitor/netoptions", func(w http.ResponseWriter, _ *http.Request) {
-		interfaces, err := net.Interfaces()
-		if err != nil {
-			wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": "读取网络接口失败: " + err.Error()})
-			return
+		// 直接读取 /proc/net/dev，避免容器内缺少 netlink 权限时无法列出节点网卡。
+		items := []string{"all"}
+		seen := map[string]bool{"all": true}
+		if data, err := os.ReadFile("/proc/net/dev"); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) != 2 {
+					continue
+				}
+				name := strings.TrimSpace(parts[0])
+				if name != "" && !seen[name] {
+					seen[name] = true
+					items = append(items, name)
+				}
+			}
 		}
-		items := make([]map[string]any, 0, len(interfaces))
-		for _, item := range interfaces {
-			items = append(items, map[string]any{"name": item.Name, "index": item.Index, "up": item.Flags&net.FlagUp != 0})
-		}
+		sort.Strings(items[1:])
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": items})
 	})
 	mux.HandleFunc("GET /api/v2/hosts/monitor/iooptions", func(w http.ResponseWriter, _ *http.Request) {
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": []map[string]string{{"value": "read", "label": "读取"}, {"value": "write", "label": "写入"}, {"value": "all", "label": "全部"}}})
+		items := []string{"all"}
+		if data, err := os.ReadFile("/proc/diskstats"); err == nil {
+			seen := map[string]bool{"all": true}
+			for _, line := range strings.Split(string(data), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) < 3 {
+					continue
+				}
+				name := fields[2]
+				if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "ram") || dashboardIsPartition(name) || seen[name] {
+					continue
+				}
+				seen[name] = true
+				items = append(items, name)
+			}
+			sort.Strings(items[1:])
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": items})
 	})
 	mux.HandleFunc("GET /api/v2/hosts/monitor/setting", func(w http.ResponseWriter, _ *http.Request) {
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": loadHostOperationalState().Monitor})
@@ -593,31 +662,6 @@ func firewallStatus(parent context.Context) map[string]any {
 		}
 	}
 	return map[string]any{"available": false, "provider": "", "reason": "未检测到防火墙命令"}
-}
-
-func registerUnmigratedRoutes(mux *http.ServeMux) {
-	paths := []string{
-		"/api/v2/hosts", "/api/v2/hosts/test/byinfo", "/api/v2/hosts/test/byid", "/api/v2/hosts/tree", "/api/v2/hosts/search", "/api/v2/hosts/del", "/api/v2/hosts/update", "/api/v2/hosts/update/group", "/api/v2/hosts/info",
-		"/api/v2/containers/search", "/api/v2/containers/users", "/api/v2/containers/files/search", "/api/v2/containers/files/upload", "/api/v2/containers/files/content", "/api/v2/containers/files/size", "/api/v2/containers/files/del", "/api/v2/containers/files/download", "/api/v2/containers/list", "/api/v2/containers/list/byimage", "/api/v2/containers/status", "/api/v2/containers/compose/search", "/api/v2/containers/compose/test", "/api/v2/containers/compose", "/api/v2/containers/compose/operate", "/api/v2/containers/update", "/api/v2/containers/info", "/api/v2/containers/limit", "/api/v2/containers/list/stats", "/api/v2/containers/item/stats", "/api/v2/containers", "/api/v2/containers/upgrade", "/api/v2/containers/prune", "/api/v2/containers/clean/log", "/api/v2/containers/compose/clean/log", "/api/v2/containers/rename", "/api/v2/containers/commit", "/api/v2/containers/operate", "/api/v2/containers/inspect", "/api/v2/containers/download/log", "/api/v2/containers/network/search", "/api/v2/containers/network", "/api/v2/containers/network/del", "/api/v2/containers/volume/search", "/api/v2/containers/volume", "/api/v2/containers/volume/del", "/api/v2/containers/compose/update", "/api/v2/containers/compose/pin", "/api/v2/containers/compose/env", "/api/v2/containers/search/log", "/api/v2/containers/daemonjson/file", "/api/v2/containers/daemonjson", "/api/v2/containers/daemonjson/update", "/api/v2/containers/logoption/update", "/api/v2/containers/ipv6option/update", "/api/v2/containers/daemonjson/update/byfile", "/api/v2/containers/docker/operate",
-		"/api/v2/cronjobs/load/info", "/api/v2/cronjobs/export", "/api/v2/cronjobs/import", "/api/v2/cronjobs/script/options", "/api/v2/cronjobs/next", "/api/v2/cronjobs/search/records", "/api/v2/cronjobs/records/log", "/api/v2/cronjobs/records/clean", "/api/v2/cronjobs/stop", "/api/v2/cronjobs/update", "/api/v2/cronjobs/group/update", "/api/v2/cronjobs/status",
-	}
-	for _, path := range paths {
-		for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
-			if (path == "/api/v2/containers/list" && method == "GET") ||
-				(path == "/api/v2/containers/operate" && method == "POST") ||
-				(path == "/api/v2/cronjobs" && method == "POST") ||
-				(path == "/api/v2/cronjobs/del" && method == "POST") {
-				continue
-			}
-			pattern := method + " " + path
-			mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-				wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING"}, "message": "该接口正在迁移"})
-			})
-		}
-	}
-	mux.HandleFunc("GET /api/v2/containers/stats", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "message": "该接口正在迁移"})
-	})
 }
 
 func decodeJSON(r *http.Request, target any) error {

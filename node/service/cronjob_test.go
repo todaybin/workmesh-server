@@ -11,8 +11,14 @@ import (
 	"github.com/todaybin/workmesh-server/node/model"
 )
 
+func newTestCronjobService(t *testing.T) *CronjobService {
+	t.Helper()
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	return NewCronjobService()
+}
+
 func TestCronjobCreateListDelete(t *testing.T) {
-	service := NewCronjobService()
+	service := newTestCronjobService(t)
 	job, err := service.Create(context.Background(), model.Cronjob{Name: "健康检查", Command: "echo ok"})
 	if err != nil || job.ID == "" {
 		t.Fatalf("创建计划任务失败: %+v, %v", job, err)
@@ -48,7 +54,7 @@ func TestNextRunsSupportsEveryAndMacros(t *testing.T) {
 }
 
 func TestCronjobRejectsUnsafeCommand(t *testing.T) {
-	s := NewCronjobService()
+	s := newTestCronjobService(t)
 	job, err := s.Create(context.Background(), model.Cronjob{Name: "unsafe", Type: "shell", Command: "echo ok; rm -rf /"})
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +65,7 @@ func TestCronjobRejectsUnsafeCommand(t *testing.T) {
 }
 
 func TestCronjobStartIsIdempotent(t *testing.T) {
-	s := NewCronjobService()
+	s := newTestCronjobService(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.Start(ctx)
 	s.Start(ctx)

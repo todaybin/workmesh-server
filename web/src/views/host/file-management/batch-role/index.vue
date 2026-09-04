@@ -67,7 +67,7 @@ const handleClose = () => {
 
 const addForm = reactive({
     paths: [],
-    mode: 755,
+    mode: 0o755,
     user: '',
     group: '',
     sub: false,

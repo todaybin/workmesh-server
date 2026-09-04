@@ -4,7 +4,9 @@
 package api
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -23,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/todaybin/workmesh-server/node/service"
@@ -53,45 +56,50 @@ func isFileRoute(pattern string) bool {
 }
 
 type fileAdvancedRequest struct {
-	Path              string            `json:"path"`
-	Dst               string            `json:"dst"`
-	URL               string            `json:"url"`
-	Name              string            `json:"name"`
-	Token             string            `json:"token"`
-	Key               string            `json:"key"`
-	ID                flexibleID        `json:"id"`
-	Code              string            `json:"code"`
-	Query             string            `json:"query"`
-	Paths             []string          `json:"paths"`
-	Mode              int64             `json:"mode"`
-	User              string            `json:"user"`
-	Group             string            `json:"group"`
-	WithInit          bool              `json:"withInit"`
-	ContainSub        bool              `json:"containSub"`
-	MatchCase         bool              `json:"matchCase"`
-	WholeWord         bool              `json:"wholeWord"`
-	UseRegex          bool              `json:"useRegex"`
-	MaxScanFiles      int               `json:"maxScanFiles"`
-	MaxFileBytes      int64             `json:"maxFileBytes"`
-	MaxHitsPerFile    int               `json:"maxHitsPerFile"`
-	MaxTotalHits      int               `json:"maxTotalHits"`
-	IgnoreCertificate bool              `json:"ignoreCertificate"`
-	Page              int               `json:"page"`
-	PageSize          int               `json:"pageSize"`
-	UploadID          string            `json:"uploadID"`
-	ChunkIndex        int               `json:"chunkIndex"`
-	ChunkCount        int               `json:"chunkCount"`
-	Offset            int64             `json:"offset"`
-	FileSize          int64             `json:"fileSize"`
-	Overwrite         bool              `json:"overwrite"`
-	DeleteSource      bool              `json:"deleteSource"`
-	OutputPath        string            `json:"outputPath"`
-	TaskID            string            `json:"taskID"`
-	Type              string            `json:"type"`
-	Extension         string            `json:"extension"`
-	OutputFormat      string            `json:"outputFormat"`
-	Files             []fileConvertItem `json:"files"`
-	Remark            string            `json:"remark"`
+	Path              string          `json:"path"`
+	Dst               string          `json:"dst"`
+	URL               string          `json:"url"`
+	Name              string          `json:"name"`
+	Token             string          `json:"token"`
+	Key               string          `json:"key"`
+	ID                flexibleID      `json:"id"`
+	Code              string          `json:"code"`
+	Query             string          `json:"query"`
+	Paths             []string        `json:"paths"`
+	IDs               []flexibleID    `json:"ids"`
+	Mode              int64           `json:"mode"`
+	User              string          `json:"user"`
+	Group             string          `json:"group"`
+	WithInit          bool            `json:"withInit"`
+	ContainSub        bool            `json:"containSub"`
+	Sub               bool            `json:"sub"`
+	MatchCase         bool            `json:"matchCase"`
+	WholeWord         bool            `json:"wholeWord"`
+	UseRegex          bool            `json:"useRegex"`
+	MaxScanFiles      int             `json:"maxScanFiles"`
+	MaxFileBytes      int64           `json:"maxFileBytes"`
+	MaxHitsPerFile    int             `json:"maxHitsPerFile"`
+	MaxTotalHits      int             `json:"maxTotalHits"`
+	IgnoreCertificate bool            `json:"ignoreCertificate"`
+	Page              int             `json:"page"`
+	PageSize          int             `json:"pageSize"`
+	UploadID          string          `json:"uploadID"`
+	ChunkIndex        int             `json:"chunkIndex"`
+	ChunkCount        int             `json:"chunkCount"`
+	Offset            int64           `json:"offset"`
+	FileSize          int64           `json:"fileSize"`
+	Overwrite         bool            `json:"overwrite"`
+	Replace           bool            `json:"replace"`
+	DeleteSource      bool            `json:"deleteSource"`
+	OutputPath        string          `json:"outputPath"`
+	TaskID            string          `json:"taskID"`
+	Type              string          `json:"type"`
+	Extension         string          `json:"extension"`
+	OutputFormat      string          `json:"outputFormat"`
+	Files             json.RawMessage `json:"files"`
+	Remark            string          `json:"remark"`
+	Scope             string          `json:"scope"`
+	Operation         string          `json:"operation"`
 }
 
 // flexibleID 兼容历史客户端将资源 ID 以数字或字符串提交的两种形式。
@@ -220,10 +228,20 @@ type fileAuxState struct {
 }
 
 type fileHistoryItem struct {
-	ID        string    `json:"id"`
-	Path      string    `json:"path"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID          string    `json:"id"`
+	FileID      string    `json:"fileId,omitempty"`
+	Path        string    `json:"path"`
+	CurrentPath string    `json:"currentPath,omitempty"`
+	FileName    string    `json:"fileName,omitempty"`
+	Extension   string    `json:"extension,omitempty"`
+	FileMode    string    `json:"fileMode,omitempty"`
+	Operation   string    `json:"operation,omitempty"`
+	Deleted     bool      `json:"deleted,omitempty"`
+	ContentSize int64     `json:"contentSize,omitempty"`
+	ContentSHA  string    `json:"contentSHA,omitempty"`
+	Content     string    `json:"content"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt,omitempty"`
 }
 
 var fileAux struct {
@@ -248,7 +266,18 @@ func loadFileAuxLocked() {
 	}
 	fileAux.loaded, fileAux.path = true, path
 	fileAux.data = fileAuxState{Favorites: []fileFavorite{}, Recycle: []fileRecycleItem{}, Uploads: []fileUploadItem{}, Remarks: map[string]string{}, History: []fileHistoryItem{}, ConvertLogs: []fileConvertLog{}}
-	if raw, err := os.ReadFile(path); err == nil {
+	if sharedDB() != nil {
+		if !loadJSONState("file_aux_state", &fileAux.data) {
+			if raw, err := os.ReadFile(path); err == nil && len(raw) > 0 && json.Unmarshal(raw, &fileAux.data) == nil {
+				if saveErr := saveJSONState("file_aux_state", fileAux.data); saveErr == nil {
+					archiveDir := filepath.Join(filepath.Dir(path), "backups")
+					if os.MkdirAll(archiveDir, 0o750) == nil {
+						_ = os.Rename(path, filepath.Join(archiveDir, "legacy-files-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".json"))
+					}
+				}
+			}
+		}
+	} else if raw, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(raw, &fileAux.data)
 	}
 	if fileAux.data.Favorites == nil {
@@ -272,6 +301,9 @@ func loadFileAuxLocked() {
 }
 
 func saveFileAuxLocked() error {
+	if sharedDB() != nil {
+		return saveJSONState("file_aux_state", fileAux.data)
+	}
 	if err := os.MkdirAll(filepath.Dir(fileAux.path), 0o750); err != nil {
 		return err
 	}
@@ -348,13 +380,26 @@ func loadFileSharesLocked() {
 	}
 	fileShareState.loaded = true
 	fileShareState.items = make(map[string]fileShare)
-	b, err := os.ReadFile(fileShareFile())
-	if err == nil {
+	if sharedDB() != nil {
+		if !loadJSONState("file_shares_state", &fileShareState.items) {
+			if b, err := os.ReadFile(fileShareFile()); err == nil && len(b) > 0 && json.Unmarshal(b, &fileShareState.items) == nil {
+				if saveErr := saveJSONState("file_shares_state", fileShareState.items); saveErr == nil {
+					archiveDir := filepath.Join(filepath.Dir(fileShareFile()), "backups")
+					if os.MkdirAll(archiveDir, 0o750) == nil {
+						_ = os.Rename(fileShareFile(), filepath.Join(archiveDir, "legacy-file-shares-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".json"))
+					}
+				}
+			}
+		}
+	} else if b, err := os.ReadFile(fileShareFile()); err == nil {
 		_ = json.Unmarshal(b, &fileShareState.items)
 	}
 }
 
 func saveFileSharesLocked() error {
+	if sharedDB() != nil {
+		return saveJSONState("file_shares_state", fileShareState.items)
+	}
 	if err := os.MkdirAll(filepath.Dir(fileShareFile()), 0o750); err != nil {
 		return err
 	}
@@ -539,6 +584,25 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 			fileError(w, http.StatusBadRequest, errors.New("mode 超出范围"))
 			return
 		}
+		// Resolve owner IDs once, then apply chown/chmod to each selected path.
+		// The 1Panel contract uses sub=true to include descendants of directories.
+		uid, gid := -1, -1
+		if strings.TrimSpace(req.User) != "" {
+			u, lookupErr := osuser.Lookup(strings.TrimSpace(req.User))
+			if lookupErr != nil {
+				fileError(w, 400, lookupErr)
+				return
+			}
+			uid, _ = strconv.Atoi(u.Uid)
+		}
+		if strings.TrimSpace(req.Group) != "" {
+			g, lookupErr := osuser.LookupGroup(strings.TrimSpace(req.Group))
+			if lookupErr != nil {
+				fileError(w, 400, lookupErr)
+				return
+			}
+			gid, _ = strconv.Atoi(g.Gid)
+		}
 		updated := make([]string, 0, len(req.Paths))
 		failures := make([]map[string]string, 0)
 		for _, raw := range req.Paths {
@@ -551,11 +615,35 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 				failures = append(failures, map[string]string{"path": clean, "error": "文件不存在"})
 				continue
 			}
-			if err := os.Chmod(clean, os.FileMode(req.Mode)); err != nil {
-				failures = append(failures, map[string]string{"path": clean, "error": err.Error()})
-				continue
+			targets := []string{clean}
+			if req.Sub || req.ContainSub {
+				if info, statErr := os.Stat(clean); statErr == nil && info.IsDir() {
+					_ = filepath.Walk(clean, func(child string, childInfo os.FileInfo, walkErr error) error {
+						if walkErr == nil && childInfo != nil {
+							targets = append(targets, child)
+						}
+						return nil
+					})
+				}
 			}
-			updated = append(updated, clean)
+			failed := false
+			for _, target := range targets {
+				if uid >= 0 || gid >= 0 {
+					if chownErr := os.Chown(target, uid, gid); chownErr != nil {
+						failures = append(failures, map[string]string{"path": target, "error": chownErr.Error()})
+						failed = true
+						continue
+					}
+				}
+				if chmodErr := os.Chmod(target, os.FileMode(req.Mode)); chmodErr != nil {
+					failures = append(failures, map[string]string{"path": target, "error": chmodErr.Error()})
+					failed = true
+					continue
+				}
+			}
+			if !failed {
+				updated = append(updated, clean)
+			}
 		}
 		if len(updated) == 0 {
 			fileError(w, http.StatusBadRequest, errors.New("没有文件权限更新成功"))
@@ -655,20 +743,57 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"deleted": true}})
 	case "compress":
-		if req.Dst == "" {
-			req.Dst = req.Path + ".zip"
+		var sources []string
+		_ = json.Unmarshal(req.Files, &sources)
+		if len(sources) == 0 && req.Path != "" {
+			sources = []string{req.Path}
 		}
-		if err := zipPath(req.Path, req.Dst); err != nil {
-			fileError(w, http.StatusBadRequest, err)
+		if len(sources) == 0 || req.Dst == "" || req.Name == "" {
+			fileError(w, 400, errors.New("files、dst 和 name 不能为空"))
 			return
 		}
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": req.Dst}})
+		destination := filepath.Join(req.Dst, req.Name)
+		if !req.Replace {
+			if _, statErr := os.Stat(destination); statErr == nil {
+				fileError(w, http.StatusConflict, errors.New("压缩目标已存在"))
+				return
+			}
+		}
+		var archiveErr error
+		if strings.EqualFold(req.Type, "tar.gz") || strings.EqualFold(req.Type, "tgz") {
+			archiveErr = tarGzipPaths(sources, destination)
+		} else {
+			archiveErr = zipPaths(sources, destination)
+		}
+		if archiveErr != nil {
+			fileError(w, http.StatusBadRequest, archiveErr)
+			return
+		}
+		if req.TaskID != "" {
+			ensureAppTaskLog(req.TaskID, "", "file-compress", "completed", "压缩完成")
+			appendAppTaskLog(req.TaskID, "[TASK-END]")
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": destination, "taskID": req.TaskID}})
 	case "decompress":
-		if err := unzipPath(req.Path, req.Dst); err != nil {
-			fileError(w, http.StatusBadRequest, err)
+		if req.Path == "" || req.Dst == "" {
+			fileError(w, 400, errors.New("path 和 dst 不能为空"))
 			return
 		}
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": req.Dst}})
+		var extractErr error
+		if strings.EqualFold(req.Type, "tar.gz") || strings.EqualFold(req.Type, "tgz") {
+			extractErr = untarGzipPath(req.Path, req.Dst)
+		} else {
+			extractErr = unzipPath(req.Path, req.Dst)
+		}
+		if extractErr != nil {
+			fileError(w, http.StatusBadRequest, extractErr)
+			return
+		}
+		if req.TaskID != "" {
+			ensureAppTaskLog(req.TaskID, "", "file-decompress", "completed", "解压完成")
+			appendAppTaskLog(req.TaskID, "[TASK-END]")
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": req.Dst, "taskID": req.TaskID}})
 	case "share/create":
 		clean, err := cleanFilePath(req.Path)
 		if err != nil {
@@ -972,7 +1097,63 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		loadFileAuxLocked()
 		list := append([]fileHistoryItem(nil), fileAux.data.History...)
 		fileAux.Unlock()
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": list, "total": len(list)}})
+		scope := strings.ToLower(strings.TrimSpace(req.Scope))
+		if scope == "" {
+			if strings.TrimSpace(req.Path) != "" {
+				scope = "current"
+			} else {
+				scope = "all"
+			}
+		}
+		path := filepath.Clean(strings.TrimSpace(req.Path))
+		operation := strings.TrimSpace(req.Operation)
+		filtered := make([]fileHistoryItem, 0, len(list))
+		for _, item := range list {
+			if item.FileName == "" {
+				item.FileName = filepath.Base(item.Path)
+			}
+			if item.Extension == "" {
+				item.Extension = filepath.Ext(item.FileName)
+			}
+			if item.Operation == "" {
+				item.Operation = "save"
+			}
+			if item.CurrentPath == "" {
+				item.CurrentPath = item.Path
+			}
+			if item.ContentSize == 0 {
+				item.ContentSize = int64(len(item.Content))
+			}
+			if item.UpdatedAt.IsZero() {
+				item.UpdatedAt = item.CreatedAt
+			}
+			if scope == "current" && path != "." && filepath.Clean(item.Path) != path && filepath.Clean(item.CurrentPath) != path {
+				continue
+			}
+			if scope != "current" && scope != "all" {
+				continue
+			}
+			if operation != "" && !strings.EqualFold(item.Operation, operation) {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		page, size := req.Page, req.PageSize
+		if page < 1 {
+			page = 1
+		}
+		if size < 1 || size > 200 {
+			size = 20
+		}
+		start := (page - 1) * size
+		if start > len(filtered) {
+			start = len(filtered)
+		}
+		end := start + size
+		if end > len(filtered) {
+			end = len(filtered)
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": filtered[start:end], "total": len(filtered)}})
 	case "history/content":
 		fileAux.Lock()
 		loadFileAuxLocked()
@@ -994,8 +1175,15 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		loadFileAuxLocked()
 		kept := fileAux.data.History[:0]
 		removed := false
+		ids := map[string]bool{}
+		for _, id := range req.IDs {
+			ids[string(id)] = true
+		}
+		if len(ids) == 0 && string(req.ID) != "" {
+			ids[string(req.ID)] = true
+		}
 		for _, item := range fileAux.data.History {
-			if item.ID == string(req.ID) {
+			if ids[item.ID] {
 				removed = true
 			} else {
 				kept = append(kept, item)
@@ -1058,24 +1246,29 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": listAlertDisks()})
 	case "user/group":
 		users := make([]map[string]string, 0, 32)
-		if raw, err := os.ReadFile("/etc/passwd"); err == nil {
-			for _, line := range strings.Split(string(raw), "\n") {
-				fields := strings.Split(line, ":")
-				if len(fields) > 2 {
-					users = append(users, map[string]string{"name": fields[0], "uid": fields[2]})
-				}
-			}
-		}
-		groups := make([]map[string]string, 0, 32)
+		userGroups := map[string]string{}
+		groupNames := make([]string, 0, 32)
+		seenGroups := map[string]bool{}
 		if raw, err := os.ReadFile("/etc/group"); err == nil {
 			for _, line := range strings.Split(string(raw), "\n") {
 				fields := strings.Split(line, ":")
 				if len(fields) > 2 {
-					groups = append(groups, map[string]string{"name": fields[0], "gid": fields[2]})
+					gid := fields[2]
+					if !seenGroups[fields[0]] { groupNames = append(groupNames, fields[0]); seenGroups[fields[0]] = true }
+					userGroups[gid] = fields[0]
 				}
 			}
 		}
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"users": users, "groups": groups}})
+		if raw, err := os.ReadFile("/etc/passwd"); err == nil {
+			for _, line := range strings.Split(string(raw), "\n") {
+				fields := strings.Split(line, ":")
+				if len(fields) > 2 {
+					primaryGroup := userGroups[fields[3]]
+					users = append(users, map[string]string{"username": fields[0], "group": primaryGroup, "uid": fields[2], "gid": fields[3]})
+				}
+			}
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"users": users, "groups": groupNames}})
 	case "convert":
 		converter := strings.TrimSpace(os.Getenv("WORKMESH_MEDIA_CONVERTER"))
 		if converter == "" {
@@ -1086,7 +1279,8 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 			fileError(w, http.StatusServiceUnavailable, fmt.Errorf("媒体转换器不可执行: %w", err))
 			return
 		}
-		items := append([]fileConvertItem(nil), req.Files...)
+		var items []fileConvertItem
+		_ = json.Unmarshal(req.Files, &items)
 		if len(items) == 0 {
 			if req.Path == "" || req.Dst == "" {
 				fileError(w, http.StatusBadRequest, errors.New("files 或 path/dst 不能为空"))
@@ -1187,6 +1381,58 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": all[start:end], "total": total, "page": page, "pageSize": size}})
 	default:
 		if operationPath == "read" {
+			if path == "read/php" || path == "read/php-fpm-slow-logs" {
+				item, index := runtimeByID(getRuntimeStore(), strings.TrimSpace(string(req.ID)))
+				if index < 0 || normalizeRuntimeTypeFilter(item.Type) != "php" || strings.TrimSpace(item.InstallPath) == "" {
+					fileError(w, http.StatusNotFound, errors.New("PHP 运行时不存在"))
+					return
+				}
+				logName := "build.log"
+				if path == "read/php-fpm-slow-logs" {
+					logName = filepath.Join("log", "fpm.slow.log")
+				}
+				logPath := filepath.Join(item.InstallPath, logName)
+				if info, statErr := os.Lstat(logPath); statErr == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
+					fileError(w, http.StatusBadRequest, errors.New("PHP 构建日志不是普通文件"))
+					return
+				}
+				content, err := os.ReadFile(logPath)
+				if errors.Is(err, os.ErrNotExist) {
+					content = []byte{}
+				} else if err != nil {
+					fileError(w, http.StatusNotFound, err)
+					return
+				}
+				if len(content) > 8<<20 {
+					fileError(w, http.StatusRequestEntityTooLarge, errors.New("PHP 构建日志超过 8 MiB 读取限制"))
+					return
+				}
+				lines := []string{}
+				if len(content) > 0 {
+					lines = strings.Split(strings.TrimRight(string(content), "\r\n"), "\n")
+				}
+				page, size := req.Page, req.PageSize
+				if page < 1 {
+					page = 1
+				}
+				if size < 1 || size > 500 {
+					size = 500
+				}
+				totalPages := (len(lines) + size - 1) / size
+				if totalPages == 0 {
+					totalPages = 1
+				}
+				start := (page - 1) * size
+				if start > len(lines) {
+					start = len(lines)
+				}
+				end := start + size
+				if end > len(lines) {
+					end = len(lines)
+				}
+				wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"path": logPath, "lines": lines[start:end], "totalLines": len(lines), "total": totalPages, "end": end == len(lines), "type": strings.TrimPrefix(path, "read/")}})
+				return
+			}
 			// 继续复用 read 分页逻辑，路径参数 type 仅用于客户端展示。
 			path = "read"
 			clean, err := cleanFilePath(req.Path)
@@ -1205,6 +1451,70 @@ func fileAdvancedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		fileError(w, http.StatusNotImplemented, fmt.Errorf("文件操作 %q 尚未实现", path))
 	}
+}
+
+func tarGzipPaths(sources []string, destination string) error {
+	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(destination), ".workmesh-tar-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	gw := gzip.NewWriter(tmp)
+	tw := tar.NewWriter(gw)
+	for _, source := range sources {
+		source, err = cleanFilePath(source)
+		if err != nil {
+			break
+		}
+		baseDir := filepath.Dir(source)
+		err = filepath.Walk(source, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			rel, e := filepath.Rel(baseDir, path)
+			if e != nil {
+				return e
+			}
+			header, e := tar.FileInfoHeader(info, "")
+			if e != nil {
+				return e
+			}
+			header.Name = filepath.ToSlash(rel)
+			if e = tw.WriteHeader(header); e != nil {
+				return e
+			}
+			if info.IsDir() {
+				return nil
+			}
+			in, e := os.Open(path)
+			if e != nil {
+				return e
+			}
+			_, e = io.Copy(tw, in)
+			_ = in.Close()
+			return e
+		})
+		if err != nil {
+			break
+		}
+	}
+	if closeErr := tw.Close(); err == nil {
+		err = closeErr
+	}
+	if closeErr := gw.Close(); err == nil {
+		err = closeErr
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmpName, destination)
 }
 
 // handleWebsiteFileRead 以网站 ID 解析根目录，并拒绝读取站点目录以外的任何路径。
@@ -1461,7 +1771,11 @@ func handleFileWget(w http.ResponseWriter, r *http.Request, req fileAdvancedRequ
 }
 
 func zipPath(source, destination string) error {
-	if strings.TrimSpace(source) == "" || strings.TrimSpace(destination) == "" {
+	return zipPaths([]string{source}, destination)
+}
+
+func zipPaths(sources []string, destination string) error {
+	if len(sources) == 0 || strings.TrimSpace(destination) == "" {
 		return errors.New("压缩源和目标不能为空")
 	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
@@ -1475,29 +1789,39 @@ func zipPath(source, destination string) error {
 	defer os.Remove(tmpName)
 	out := tmp
 	zw := zip.NewWriter(out)
-	err = filepath.Walk(source, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(filepath.Dir(source), path)
+	for _, source := range sources {
+		source, err = cleanFilePath(source)
 		if err != nil {
-			return err
+			break
 		}
-		entry, err := zw.Create(filepath.ToSlash(rel))
+		baseDir := filepath.Dir(source)
+		err = filepath.Walk(source, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if info.IsDir() {
+				return nil
+			}
+			rel, e := filepath.Rel(baseDir, path)
+			if e != nil {
+				return e
+			}
+			entry, e := zw.Create(filepath.ToSlash(rel))
+			if e != nil {
+				return e
+			}
+			in, e := os.Open(path)
+			if e != nil {
+				return e
+			}
+			_, copyErr := io.Copy(entry, in)
+			_ = in.Close()
+			return copyErr
+		})
 		if err != nil {
-			return err
+			break
 		}
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(entry, in)
-		_ = in.Close()
-		return copyErr
-	})
+	}
 	if closeErr := zw.Close(); err == nil {
 		err = closeErr
 	}
@@ -1557,6 +1881,59 @@ func unzipPath(source, destination string) error {
 		_ = in.Close()
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func untarGzipPath(source, destination string) error {
+	f, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	if err := os.MkdirAll(destination, 0755); err != nil {
+		return err
+	}
+	tr := tar.NewReader(gz)
+	for {
+		header, e := tr.Next()
+		if errors.Is(e, io.EOF) {
+			break
+		}
+		if e != nil {
+			return e
+		}
+		if header.Name == "" || strings.Contains(header.Name, "..") {
+			return errors.New("压缩包包含非法路径")
+		}
+		target := filepath.Join(destination, filepath.FromSlash(header.Name))
+		root := filepath.Clean(destination)
+		if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
+			return errors.New("压缩包包含非法路径")
+		}
+		if header.FileInfo().IsDir() {
+			if e = os.MkdirAll(target, 0755); e != nil {
+				return e
+			}
+			continue
+		}
+		if e = os.MkdirAll(filepath.Dir(target), 0755); e != nil {
+			return e
+		}
+		out, e := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		if e != nil {
+			return e
+		}
+		_, e = io.Copy(out, io.LimitReader(tr, 512<<20))
+		_ = out.Close()
+		if e != nil {
+			return e
 		}
 	}
 	return nil
@@ -1667,13 +2044,80 @@ func handleChunkUpload(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := os.Rename(partPath, dstFile); err != nil {
+		if err := moveChunkIntoPlace(partPath, dstFile); err != nil {
 			fileError(w, 500, err)
 			return
 		}
+		// OpenResty runs in its own container user namespace. Website content
+		// must remain readable after a chunk's secure 0600 staging file is moved
+		// into the public site root.
+		if isWebsiteContentPath(dstFile) {
+			_ = os.Chmod(dstFile, 0o644)
+		}
+		applyWebsiteOwnership(dstFile)
 		_ = os.RemoveAll(workDir)
 	}
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"uploadID": uploadID, "chunkIndex": chunkIndex, "chunkCount": chunkCount, "completed": done, "path": dstFile}})
+}
+
+func isWebsiteContentPath(path string) bool {
+	root := strings.TrimSpace(os.Getenv("PANEL_WEBSITE_DIR"))
+	if root == "" {
+		root = "/www/wwwroot"
+	}
+	root, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return false
+	}
+	target, err := filepath.Abs(filepath.Clean(path))
+	if err != nil || target == root {
+		return false
+	}
+	prefix := root + string(filepath.Separator)
+	return strings.HasPrefix(target, prefix)
+}
+
+// moveChunkIntoPlace keeps the fast atomic rename path and falls back to a
+// destination-filesystem copy when the chunk directory is on another mount.
+func moveChunkIntoPlace(source, destination string) error {
+	if err := os.Rename(source, destination); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	tmp := destination + ".workmesh-upload.tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		_ = in.Close()
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	if copyErr == nil {
+		copyErr = out.Sync()
+	}
+	closeOutErr := out.Close()
+	closeInErr := in.Close()
+	if copyErr != nil {
+		_ = os.Remove(tmp)
+		return copyErr
+	}
+	if closeOutErr != nil {
+		_ = os.Remove(tmp)
+		return closeOutErr
+	}
+	if closeInErr != nil {
+		_ = os.Remove(tmp)
+		return closeInErr
+	}
+	if err := os.Rename(tmp, destination); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Remove(source)
 }
 
 // handleChunkDownload 支持 HTTP Range，便于大文件断点续传而无需额外进程。

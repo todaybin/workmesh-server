@@ -1,4 +1,5 @@
 import { Languages } from '@/global/mimetype';
+import { buildSameOriginApiUrl } from '@/api/transport';
 
 const icons = new Map([
     ['.zip', 'p-file-zip'],
@@ -66,10 +67,11 @@ export function getIcon(extension: string): string {
     return 'p-file-normal';
 }
 
-export const getFileType = (extension: string) => {
+export const getFileType = (extension?: string) => {
+    const normalizedExtension = String(extension || '').toLowerCase();
     let type = 'text';
     Object.entries(fileTypes).forEach(([key, extensions]) => {
-        if (extensions.includes(extension.toLowerCase())) {
+        if (extensions.includes(normalizedExtension)) {
             type = key;
         }
     });
@@ -79,8 +81,8 @@ export const getFileType = (extension: string) => {
 const convertTypes = ['image', 'video', 'audio'] as const;
 type ConvertType = (typeof convertTypes)[number];
 
-export function isConvertible(extension: string, mimeType: string): boolean {
-    return convertTypes.includes(getFileType(extension) as ConvertType) && /^(image|audio|video)\//.test(mimeType);
+export function isConvertible(extension?: string, mimeType?: string): boolean {
+    return convertTypes.includes(getFileType(extension) as ConvertType) && /^(image|audio|video)\//.test(mimeType || '');
 }
 
 export const isSensitiveLinuxPath = (path: string) => {
@@ -106,8 +108,10 @@ export const isSensitiveLinuxPath = (path: string) => {
 };
 
 function buildFileDownloadUrl(filePath: string, currentNode: string): string {
-    const base = `${import.meta.env.VITE_API_URL as string}/files/download?operateNode=${currentNode}&`;
-    return base + 'path=' + encodeURIComponent(filePath);
+    return buildSameOriginApiUrl('/files/download', {
+        operateNode: currentNode,
+        path: filePath,
+    });
 }
 
 export function buildFileSharePageUrl(code: string, currentNode: string): string {
@@ -117,28 +121,18 @@ export function buildFileSharePageUrl(code: string, currentNode: string): string
 }
 
 export function buildFileShareDownloadUrl(code: string, currentNode: string, password?: string): string {
-    const apiBase = import.meta.env.VITE_API_URL as string;
-    const normalizedBase = apiBase.replace(/\/$/, '');
-    const shareUrl = /^https?:\/\//i.test(normalizedBase)
-        ? new URL(`${normalizedBase}/files/share/download`)
-        : new URL(`${normalizedBase}/files/share/download`, window.location.origin);
-    shareUrl.searchParams.set('operateNode', currentNode);
-    shareUrl.searchParams.set('code', code);
-    if (password && password.length > 0) {
-        shareUrl.searchParams.set('password', password);
-    }
-    return shareUrl.toString();
+    return buildSameOriginApiUrl('/files/share/download', {
+        operateNode: currentNode,
+        code,
+        password: password && password.length > 0 ? password : undefined,
+    });
 }
 
 export function buildFileShareQrCodeUrl(code: string, currentNode: string): string {
-    const apiBase = import.meta.env.VITE_API_URL as string;
-    const normalizedBase = apiBase.replace(/\/$/, '');
-    const shareUrl = /^https?:\/\//i.test(normalizedBase)
-        ? new URL(`${normalizedBase}/files/share/qrcode`)
-        : new URL(`${normalizedBase}/files/share/qrcode`, window.location.origin);
-    shareUrl.searchParams.set('operateNode', currentNode);
-    shareUrl.searchParams.set('code', code);
-    return shareUrl.toString();
+    return buildSameOriginApiUrl('/files/share/qrcode', {
+        operateNode: currentNode,
+        code,
+    });
 }
 
 export function downloadFile(filePath: string, currentNode: string) {

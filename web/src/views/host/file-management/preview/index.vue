@@ -94,6 +94,7 @@ import VueOfficeExcel from '@vue-office/excel';
 import '@vue-office/docx/lib/index.css';
 import '@vue-office/excel/lib/index.css';
 import { MsgError } from '@/utils/message';
+import { buildSameOriginApiUrl } from '@/api/transport';
 
 interface EditProps {
     fileType: string;
@@ -139,10 +140,11 @@ const toggleFullscreen = () => {
 };
 
 const getDownloadUrl = (path: string) => {
-    const baseUrl = `${import.meta.env.VITE_API_URL as string}/files/download`;
-    const encodedPath = encodeURIComponent(path);
-    const timestamp = new Date().getTime();
-    return `${baseUrl}?operateNode=${currentNode.value}&path=${encodedPath}&timestamp=${timestamp}`;
+    return buildSameOriginApiUrl('/files/download', {
+        operateNode: currentNode.value,
+        path,
+        timestamp: Date.now(),
+    });
 };
 
 const acceptParams = (props: EditProps) => {

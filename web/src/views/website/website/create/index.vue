@@ -6,7 +6,7 @@
                 label-position="top"
                 :model="website"
                 label-width="125px"
-                :rules="rules"
+                :rules="activeRules"
                 :validate-on-rule-change="false"
                 v-loading="loading"
             >
@@ -461,7 +461,7 @@ import {
 import { Rules, checkNumberRange } from '@/global/form-rules';
 import i18n from '@/lang';
 import { ElForm, FormInstance } from 'element-plus';
-import { reactive, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import { SearchRuntimes } from '@/api/modules/runtime';
 import { Runtime } from '@/api/interface/runtime';
@@ -496,7 +496,7 @@ const initData = () => ({
     webSiteGroupId: 0,
     otherDomains: '',
     proxy: '',
-    runtimeID: undefined,
+    runtimeID: undefined as string | undefined,
     appinstall: {
         appId: 0,
         name: '',
@@ -577,6 +577,30 @@ const rules = ref<any>({
     siteDir: [Rules.requiredSelect],
     streamPorts: [Rules.requiredInput],
 });
+const activeRules = computed(() => {
+    const current = { ...rules.value };
+    if (website.value.type !== 'deployment') {
+        delete current.appInstallId;
+        delete current.appType;
+        delete current.appinstall;
+    }
+    if (website.value.type !== 'runtime') {
+        delete current.runtimeID;
+        delete current.runtimeType;
+        delete current.proxyType;
+        delete current.port;
+    }
+    if (website.value.type !== 'proxy') {
+        delete current.proxyAddress;
+    }
+    if (website.value.type !== 'stream') {
+        delete current.streamPorts;
+    }
+    if (website.value.type !== 'subsite') {
+        delete current.parentWebsiteID;
+    }
+    return current;
+});
 
 const open = ref(false);
 const loading = ref(false);
@@ -647,6 +671,18 @@ const randomDbPassword = async () => {
 
 const changeType = (type: string) => {
     localStorage.setItem('website-type', type);
+    const isRuntime = type === 'runtime';
+    website.value.runtimeID = undefined;
+    website.value.runtimeType = isRuntime ? website.value.runtimeType || 'php' : '';
+    website.value.port = isRuntime ? 0 : 0;
+    website.value.proxyType = isRuntime ? 'tcp' : '';
+    runtimePorts.value = [];
+    runtimeResource.value = 'appstore';
+    if (!isRuntime) {
+        website.value.proxyType = '';
+        website.value.proxyAddress = '';
+        website.value.proxy = '';
+    }
     switch (type) {
         case 'deployment':
             website.value.appType = 'installed';
@@ -750,13 +786,15 @@ const changeRuntimeType = () => {
     runtimeReq.value.type = website.value.runtimeType;
     website.value.appinstall.advanced = false;
     website.value.runtimeID = undefined;
+    website.value.port = 0;
+    runtimePorts.value = [];
     getRuntimes();
 };
 
-const changeRuntime = (runID: number) => {
+const changeRuntime = (runID?: string) => {
     website.value.port = 0;
     runtimes.value.forEach((item) => {
-        if (item.id === runID) {
+        if (String(item.id) === String(runID)) {
             runtimeResource.value = item.resource;
             if (runtimeResource.value == 'local') {
                 website.value.port = 9000;
@@ -777,7 +815,7 @@ const getRuntimes = async () => {
         runtimes.value = res.data.items || [];
         if (runtimes.value.length > 0) {
             const first = runtimes.value[0];
-            website.value.runtimeID = first.id;
+            website.value.runtimeID = String(first.id);
             runtimeResource.value = first.resource;
             if (first.port != '') {
                 runtimePorts.value = first.port.split(',').map((port: string) => parseInt(port.trim(), 10));
@@ -802,10 +840,10 @@ const acceptParams = async (openrestyVersion: string) => {
     website.value.type = websiteType;
     const dirRes = await loadWebsiteDir();
     staticPath.value = dirRes.data + '/sites/';
-    changeType(websiteType);
-
     runtimeResource.value = 'appstore';
     runtimeReq.value = initRuntimeReq();
+    // 先重置运行时查询条件，再触发按站点类型加载，避免复用上一次 Node/Java 类型。
+    changeType(websiteType);
     listAcmeAccount();
     listTemplateOutputs();
 
@@ -1026,7 +1064,7 @@ const submit = async (formEl: FormInstance | undefined) => {
             const isValid = await installFormRef.value?.validate();
             if (!isValid) return;
         }
-        if (website.value.type === 'runtime' && website.value.runtimeType !== 'php' && website.value.port == 0) {
+                if (website.value.type === 'runtime' && website.value.runtimeType !== 'php' && website.value.port == 0) {
             MsgError(i18n.global.t('website.runtimePortWarn'));
             return;
         }
@@ -1056,8 +1094,22 @@ const submit = async (formEl: FormInstance | undefined) => {
                     website.value.templateOutputID = undefined;
                 }
                 const taskID = uuidv4();
-                website.value.taskID = taskID;
-                await createWebsite(website.value);
+                const request = { ...website.value } as any;
+                if (request.type !== 'runtime') {
+                    delete request.runtimeID;
+                    delete request.runtimeType;
+                    request.port = undefined;
+                    request.proxyType = undefined;
+                    request.proxyAddress = undefined;
+                } else {
+                    request.runtimeID = request.runtimeID ? String(request.runtimeID) : undefined;
+                    if (!request.runtimeID) {
+                        MsgError(i18n.global.t('runtime.runtime') + '不能为空');
+                        return;
+                    }
+                }
+                request.taskID = taskID;
+                await createWebsite(request);
                 MsgSuccess(i18n.global.t('commons.msg.createSuccess'));
                 handleClose();
                 openTaskLog(taskID);

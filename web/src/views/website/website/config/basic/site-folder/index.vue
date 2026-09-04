@@ -89,8 +89,8 @@ const update = reactive({
 });
 const updatePermission = reactive({
     id: 0,
-    user: '1000',
-    group: '1000',
+    user: 'www',
+    group: 'www',
 });
 const siteForm = ref<FormInstance>();
 const dirs = ref([]);
@@ -107,13 +107,11 @@ const search = () => {
         .then((res) => {
             website.value = res.data;
             update.id = website.value.id;
-            update.siteDir = website.value.siteDir.startsWith('/')
-                ? website.value.siteDir
-                : '/' + website.value.siteDir;
+            update.siteDir = normalizeRunDir(website.value);
             updatePermission.id = website.value.id;
-            updatePermission.group = website.value.group === '' ? '1000' : website.value.group;
-            updatePermission.user = website.value.user === '' ? '1000' : website.value.user;
-            if ((website.value.type === 'static' || website.value.runtimeID > 0) && website.value.type != 'subsite') {
+            updatePermission.group = website.value.group === '' ? 'www' : website.value.group;
+            updatePermission.user = website.value.user === '' ? 'www' : website.value.user;
+            if ((website.value.type === 'static' || !!website.value.runtimeID) && website.value.type != 'subsite') {
                 configDir.value = true;
                 getConfig();
             }
@@ -121,6 +119,18 @@ const search = () => {
         .finally(() => {
             loading.value = false;
         });
+};
+
+// 后端站点详情同时保留物理 sitePath；运行目录下拉框只展示 app 根下的虚拟相对路径。
+const normalizeRunDir = (item: any) => {
+    const value = String(item?.siteDir || '').trim();
+    const sitePath = String(item?.sitePath || '').replace(/\\+$/, '');
+    const appRoot = sitePath ? `${sitePath}/app` : '';
+    if (!value || value === '/' || value === sitePath || value === appRoot) return '/';
+    if (appRoot && value.startsWith(`${appRoot}/`)) {
+        return `/${value.slice(appRoot.length + 1)}`;
+    }
+    return value.startsWith('/') ? value : `/${value}`;
 };
 
 const submit = async (formEl: FormInstance | undefined) => {

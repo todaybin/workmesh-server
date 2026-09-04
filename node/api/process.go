@@ -5,10 +5,10 @@ package api
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -28,8 +28,12 @@ func registerProcessRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/process/listening", handleProcessListening)
 }
 
-// handleProcessWebSocket 按 RFC6455 提供轻量进程快照推送，不引入常驻 WebSocket 库。
-// 仅发送服务端文本帧，客户端关闭连接或请求上下文结束后立即释放连接。
+// writeWebSocketTextFrame 保留测试和旧内部调用的兼容名称。
+func writeWebSocketTextFrame(conn net.Conn, payload []byte) error {
+	return writeStreamFrame(conn, 0x1, payload)
+}
+
+// handleProcessWebSocket 按原 Agent 协议处理 ps/net 请求并返回数组结果。
 func handleProcessWebSocket(w http.ResponseWriter, r *http.Request) {
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"websocket": true, "upgradeRequired": true}})
@@ -42,60 +46,57 @@ func handleProcessWebSocket(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusForbidden, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "WEBSOCKET_ORIGIN_DENIED"}})
 		return
 	}
-	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
-	if key == "" {
-		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "WEBSOCKET_KEY_REQUIRED"}})
-		return
-	}
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		// 当前传输层不支持 Hijack 时返回依赖不可用，而不是把接口标记为未实现。
-		wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "WEBSOCKET_UNAVAILABLE"}})
-		return
-	}
-	conn, rw, err := hj.Hijack()
+	ws, err := upgradeStreamWebSocket(w, r)
 	if err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "WEBSOCKET_ORIGIN_DENIED" {
+			status = http.StatusForbidden
+		}
+		if err.Error() == "WEBSOCKET_UNAVAILABLE" {
+			status = http.StatusServiceUnavailable
+		}
+		wmhttp.JSON(w, status, map[string]any{"code": "ERR", "details": map[string]string{"errCode": err.Error()}})
 		return
 	}
-	defer conn.Close()
-	sum := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
-	accept := base64.StdEncoding.EncodeToString(sum[:])
-	_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n")
-	if err := rw.Flush(); err != nil {
-		return
-	}
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	defer ws.close()
 	for {
-		payload, _ := json.Marshal(map[string]any{"type": "process", "data": dashboardProcesses(), "updatedAt": time.Now().UTC()})
-		if err := writeWebSocketTextFrame(conn, payload); err != nil {
+		opcode, payload, readErr := ws.readFrame()
+		if readErr != nil {
 			return
 		}
-		select {
-		case <-r.Context().Done():
+		switch opcode {
+		case 0x8:
 			return
-		case <-ticker.C:
+		case 0x9:
+			_ = ws.writeControl(0xA, payload)
+		case 0x1:
+			var request struct {
+				Type        string `json:"type"`
+				PID         int    `json:"pid"`
+				Name        string `json:"name"`
+				Username    string `json:"username"`
+				ProcessID   int    `json:"processID"`
+				ProcessName string `json:"processName"`
+				Port        int    `json:"port"`
+			}
+			if json.Unmarshal(payload, &request) != nil {
+				continue
+			}
+			var data any
+			switch request.Type {
+			case "ps":
+				data = dashboardProcessList(request.PID, request.Name, request.Username)
+			case "net":
+				data = dashboardNetList(request.ProcessID, request.ProcessName, request.Port)
+			default:
+				continue
+			}
+			encoded, _ := json.Marshal(data)
+			if err := ws.writeText(encoded); err != nil {
+				return
+			}
 		}
 	}
-}
-
-func writeWebSocketTextFrame(conn net.Conn, payload []byte) error {
-	// 服务端发送帧不需要掩码；按 RFC6455 编码 7 位、16 位和 64 位长度。
-	var header []byte
-	switch {
-	case len(payload) < 126:
-		header = []byte{0x81, byte(len(payload))}
-	case len(payload) <= 65535:
-		header = []byte{0x81, 126, byte(len(payload) >> 8), byte(len(payload))}
-	default:
-		if uint64(len(payload)) > ^uint64(0)>>1 {
-			return errors.New("进程流帧过大")
-		}
-		header = []byte{0x81, 127, 0, 0, 0, 0, byte(len(payload) >> 24), byte(len(payload) >> 16), byte(len(payload) >> 8), byte(len(payload))}
-	}
-	frame := append(header, payload...)
-	_, err := conn.Write(frame)
-	return err
 }
 
 func handleProcessByID(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +119,95 @@ func handleProcessByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": data})
+}
+
+func dashboardProcessList(pid int, name, username string) []map[string]any {
+	items := dashboardProcesses()
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if pid > 0 && processIntValue(item["pid"]) != pid {
+			continue
+		}
+		if name != "" && !strings.Contains(strings.ToLower(fmt.Sprint(item["name"])), strings.ToLower(name)) {
+			continue
+		}
+		if username != "" && !strings.Contains(strings.ToLower(fmt.Sprint(item["user"])), strings.ToLower(username)) {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+func dashboardNetList(processID int, processName string, port int) []map[string]any {
+	items := make([]map[string]any, 0)
+	for _, proto := range []string{"tcp", "udp"} {
+		data, err := os.ReadFile("/proc/net/" + proto)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n")[1:] {
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
+				continue
+			}
+			local := procSocketAddr(fields[1])
+			remote := procSocketAddr(fields[2])
+			if port > 0 && local["port"] != port && remote["port"] != port {
+				continue
+			}
+			status := "NONE"
+			if len(fields) > 3 {
+				switch fields[3] {
+				case "01":
+					status = "ESTABLISHED"
+				case "0A":
+					status = "LISTEN"
+				case "06":
+					status = "TIME_WAIT"
+				case "08":
+					status = "CLOSE_WAIT"
+				}
+			}
+			item := map[string]any{"type": proto, "status": status, "localaddr": local, "remoteaddr": remote, "PID": 0, "name": ""}
+			items = append(items, item)
+			if len(items) >= 2048 {
+				return items
+			}
+		}
+	}
+	_ = processID
+	_ = processName
+	return items
+}
+
+func procSocketAddr(value string) map[string]any {
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return map[string]any{"ip": "", "port": 0}
+	}
+	port, _ := strconv.ParseInt(parts[1], 16, 32)
+	ip := parts[0]
+	if len(ip) == 8 {
+		if raw, err := hex.DecodeString(ip); err == nil {
+			ip = net.IPv4(raw[3], raw[2], raw[1], raw[0]).String()
+		}
+	}
+	return map[string]any{"ip": ip, "port": int(port)}
+}
+
+func processIntValue(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case uint64:
+		return int(v)
+	case float64:
+		return int(v)
+	}
+	return 0
 }
 
 // readProcessDetails 从 procfs 读取进程内存和用户，失败时保留可解释的默认值。

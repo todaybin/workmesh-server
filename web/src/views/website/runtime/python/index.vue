@@ -119,7 +119,7 @@ import TaskLog from '@/components/log/task/index.vue';
 import Terminal from '@/views/website/runtime/components/terminal.vue';
 import DockerStatus from '@/views/container/docker-status/index.vue';
 import { disabledButton } from '@/utils/runtime';
-import { operateRuntime, updateRuntimeRemark } from '../common/utils';
+import { operateRuntime, runtimeComposePath, updateRuntimeRemark } from '../common/utils';
 import { routerToFileWithPath } from '@/utils/router';
 import { useGlobalStore } from '@/composables/useGlobalStore';
 
@@ -252,7 +252,7 @@ const openDelete = async (row: Runtime.Runtime) => {
 
 const openLog = (row: any) => {
     composeLogRef.value.acceptParams({
-        compose: row.path + '/docker-compose.yml',
+        compose: runtimeComposePath(row),
         resource: row.name,
         container: row.container,
     });

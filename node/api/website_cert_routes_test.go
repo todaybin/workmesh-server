@@ -120,14 +120,17 @@ func TestWebsiteCertificateRoutesLifecycle(t *testing.T) {
 		t.Fatalf("CA ZIP 缺少证书或私钥: %v", seen)
 	}
 
-	// 重建服务验证 JSON 持久化后仍可查询。
+	// 重建服务验证 SQLite 持久化后仍可查询。
 	reloaded := service.NewWebsiteSecurityService(filepath.Clean(dataDir))
 	total, items := reloaded.ListCA("test-ca", 1, 20)
 	if total != 1 || len(items) != 1 || items[0].ID != ca.Data.ID {
 		t.Fatalf("CA 重载失败: total=%d items=%+v", total, items)
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, "website-ca.json")); err != nil {
-		t.Fatalf("CA 状态文件不存在: %v", err)
+	if _, err := os.Stat(filepath.Join(dataDir, "workmesh.db")); err != nil {
+		t.Fatalf("SQLite 数据库不存在: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "website-ca.json")); !os.IsNotExist(err) {
+		t.Fatalf("不应再生成 CA JSON 状态文件，错误=%v", err)
 	}
 }
 

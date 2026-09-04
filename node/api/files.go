@@ -6,12 +6,17 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"os"
+	osuser "os/user"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
@@ -25,6 +30,17 @@ type fileRequest struct {
 	ForceDelete bool     `json:"forceDelete"`
 	Paths       []string `json:"paths"`
 	Dst         string   `json:"dst"`
+	OldName     string   `json:"oldName"`
+	NewName     string   `json:"newName"`
+	OldPaths    []string `json:"oldPaths"`
+	NewPath     string   `json:"newPath"`
+	Type        string   `json:"type"`
+	Cover       bool     `json:"cover"`
+	CoverPaths  []string `json:"coverPaths"`
+	TaskID      string   `json:"taskID"`
+	Files       []string `json:"files"`
+	Replace     bool     `json:"replace"`
+	Secret      string   `json:"secret"`
 	ShowHidden  bool     `json:"showHidden"`
 	SortBy      string   `json:"sortBy"`
 	SortOrder   string   `json:"sortOrder"`
@@ -58,7 +74,133 @@ func cleanFilePath(path string) (string, error) {
 	return clean, nil
 }
 func fileInfo(path string, info os.FileInfo) map[string]any {
-	return map[string]any{"path": path, "name": info.Name(), "size": info.Size(), "isDir": info.IsDir(), "isSymlink": info.Mode()&os.ModeSymlink != 0, "mode": info.Mode().Perm(), "modTime": info.ModTime(), "updateTime": info.ModTime(), "mimeType": mime.TypeByExtension(filepath.Ext(info.Name()))}
+	extension := filepath.Ext(info.Name())
+	uid, gid, user, group := fileOwner(info)
+	return map[string]any{
+		"path": path, "name": info.Name(), "size": info.Size(), "isDir": info.IsDir(),
+		"isSymlink": info.Mode()&os.ModeSymlink != 0, "isHidden": strings.HasPrefix(info.Name(), "."),
+		"mode": fmt.Sprintf("%04o", info.Mode().Perm()), "modTime": info.ModTime(), "updateTime": info.ModTime(),
+		"extension": extension, "mimeType": mime.TypeByExtension(extension),
+		"uid": uid, "gid": gid, "user": user, "group": group,
+		"type": map[bool]string{true: "dir", false: "file"}[info.IsDir()],
+	}
+}
+
+func fileOwner(info os.FileInfo) (uid, gid, user, group string) {
+	uid, gid = "-", "-"
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		uid = strconv.FormatUint(uint64(stat.Uid), 10)
+		gid = strconv.FormatUint(uint64(stat.Gid), 10)
+		user, group = uid, gid
+		if item, err := osuser.LookupId(uid); err == nil {
+			user = item.Username
+		}
+		if item, err := osuser.LookupGroupId(gid); err == nil {
+			group = item.Name
+		}
+	}
+	return
+}
+
+func applyWebsiteOwnership(path string) {
+	if !isWebsiteContentPath(path) {
+		return
+	}
+	user, userErr := osuser.Lookup("www")
+	group, groupErr := osuser.LookupGroup("www")
+	if userErr != nil || groupErr != nil {
+		return
+	}
+	uid, uidErr := strconv.Atoi(user.Uid)
+	gid, gidErr := strconv.Atoi(group.Gid)
+	if uidErr == nil && gidErr == nil {
+		_ = os.Chown(path, uid, gid)
+	}
+}
+
+// sortFileItems keeps directories before regular files, matching the original
+// panel behavior, while honoring the table's requested field and direction.
+func sortFileItems(items []map[string]any, sortBy, sortOrder string) {
+	if len(items) < 2 {
+		return
+	}
+	if sortBy == "" {
+		sortBy = "name"
+	}
+	ascending := sortOrder != "descending"
+	valueString := func(item map[string]any, key string) string {
+		if value, ok := item[key].(string); ok {
+			return value
+		}
+		return ""
+	}
+	valueInt64 := func(item map[string]any, key string) int64 {
+		switch value := item[key].(type) {
+		case int64:
+			return value
+		case int:
+			return int64(value)
+		case float64:
+			return int64(value)
+		}
+		return 0
+	}
+	valueTime := func(item map[string]any, key string) time.Time {
+		if value, ok := item[key].(time.Time); ok {
+			return value
+		}
+		return time.Time{}
+	}
+	less := func(a, b map[string]any) bool {
+		var result int
+		switch sortBy {
+		case "size":
+			av, bv := valueInt64(a, "size"), valueInt64(b, "size")
+			if av < bv {
+				result = -1
+			} else if av > bv {
+				result = 1
+			}
+		case "modTime", "updateTime":
+			av, bv := valueTime(a, "modTime"), valueTime(b, "modTime")
+			if av.Before(bv) {
+				result = -1
+			} else if av.After(bv) {
+				result = 1
+			}
+		default:
+			av, bv := valueString(a, "name"), valueString(b, "name")
+			if av < bv {
+				result = -1
+			} else if av > bv {
+				result = 1
+			}
+		}
+		if result == 0 {
+			// Ensure stable output when the primary field ties.
+			av, bv := valueString(a, "name"), valueString(b, "name")
+			if av < bv {
+				result = -1
+			} else if av > bv {
+				result = 1
+			}
+		}
+		if !ascending {
+			result = -result
+		}
+		return result < 0
+	}
+	var dirs, files []map[string]any
+	for _, item := range items {
+		if isDir, _ := item["isDir"].(bool); isDir {
+			dirs = append(dirs, item)
+		} else {
+			files = append(files, item)
+		}
+	}
+	sort.SliceStable(dirs, func(i, j int) bool { return less(dirs[i], dirs[j]) })
+	sort.SliceStable(files, func(i, j int) bool { return less(files[i], files[j]) })
+	copy(items, append(dirs, files...))
 }
 
 func handleFilesSearch(w http.ResponseWriter, r *http.Request) {
@@ -103,6 +245,7 @@ func handleFilesSearch(w http.ResponseWriter, r *http.Request) {
 			items = append(items, fileInfo(filepath.Join(root, entry.Name()), info))
 		}
 	}
+	sortFileItems(items, req.SortBy, req.SortOrder)
 	// 原系统返回完整的 FileInfo 根对象，前端依赖 data.path 判断当前目录是否有效。
 	result := fileInfo(root, rootInfo)
 	result["items"] = items
@@ -127,7 +270,18 @@ func handleFilesContent(w http.ResponseWriter, r *http.Request) {
 		fileError(w, 404, err)
 		return
 	}
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": path, "content": string(data)}})
+	info, _ := os.Stat(path)
+	extension := filepath.Ext(path)
+	result := map[string]any{
+		"path": path, "name": filepath.Base(path), "content": string(data), "size": len(data),
+		"extension": extension, "mimeType": mime.TypeByExtension(extension),
+	}
+	if info != nil {
+		result["isDir"] = info.IsDir()
+		result["mode"] = info.Mode().Perm()
+		result["isSymlink"] = info.Mode()&os.ModeSymlink != 0
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": result})
 }
 func handleFilesSave(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeFileRequest(r)
@@ -150,7 +304,12 @@ func handleFilesSave(w http.ResponseWriter, r *http.Request) {
 	if old, readErr := os.ReadFile(path); readErr == nil && len(old) <= 2<<20 {
 		fileAux.Lock()
 		loadFileAuxLocked()
-		fileAux.data.History = append(fileAux.data.History, fileHistoryItem{ID: fileAuxID("history"), Path: path, Content: string(old), CreatedAt: time.Now().UTC()})
+		now := time.Now().UTC()
+		fileAux.data.History = append(fileAux.data.History, fileHistoryItem{
+			ID: fileAuxID("history"), FileID: path, Path: path, CurrentPath: path,
+			FileName: filepath.Base(path), Extension: filepath.Ext(path), FileMode: "",
+			Operation: "save", ContentSize: int64(len(old)), Content: string(old), CreatedAt: now, UpdatedAt: now,
+		})
 		if len(fileAux.data.History) > 200 {
 			fileAux.data.History = fileAux.data.History[len(fileAux.data.History)-200:]
 		}
@@ -177,6 +336,7 @@ func handleFilesSave(w http.ResponseWriter, r *http.Request) {
 		fileError(w, 500, err)
 		return
 	}
+	applyWebsiteOwnership(path)
 	wmhttp.JSON(w, 200, map[string]any{"code": 200})
 }
 func handleFilesCreate(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +363,7 @@ func handleFilesCreate(w http.ResponseWriter, r *http.Request) {
 		fileError(w, 409, err)
 		return
 	}
+	applyWebsiteOwnership(path)
 	info, _ := os.Stat(path)
 	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": fileInfo(path, info)})
 }
@@ -230,6 +391,17 @@ func handleFilesDelete(w http.ResponseWriter, r *http.Request) {
 		if err = os.MkdirAll(trashRoot, 0o750); err == nil {
 			trashPath := filepath.Join(trashRoot, fileAuxID("item"))
 			err = os.Rename(path, trashPath)
+			// 数据目录可能位于另一挂载点（测试临时目录也常见），此时
+			// rename 会返回 EXDEV；回收到源目录旁可保持原子移动语义。
+			if errors.Is(err, syscall.EXDEV) {
+				localRoot := filepath.Join(filepath.Dir(path), ".workmesh-recycle")
+				if mkdirErr := os.MkdirAll(localRoot, 0o750); mkdirErr != nil {
+					err = mkdirErr
+				} else {
+					trashPath = filepath.Join(localRoot, fileAuxID("item"))
+					err = os.Rename(path, trashPath)
+				}
+			}
 			if err == nil {
 				fileAux.Lock()
 				loadFileAuxLocked()
@@ -251,16 +423,32 @@ func handleFilesRename(w http.ResponseWriter, r *http.Request) {
 		fileError(w, 400, err)
 		return
 	}
-	old, err := cleanFilePath(req.Path)
+	oldPath := req.Path
+	if strings.TrimSpace(req.OldName) != "" {
+		oldPath = req.OldName
+	}
+	old, err := cleanFilePath(oldPath)
 	if err != nil {
 		fileError(w, 400, err)
 		return
 	}
-	if req.Name == "" {
+	newName := req.Name
+	if strings.TrimSpace(req.NewName) != "" {
+		newName = req.NewName
+	}
+	if newName == "" {
 		fileError(w, 400, errors.New("新名称不能为空"))
 		return
 	}
-	dst := filepath.Join(filepath.Dir(old), filepath.Base(req.Name))
+	if filepath.Base(newName) != newName || newName == "." || newName == ".." {
+		fileError(w, 400, errors.New("新名称包含非法路径"))
+		return
+	}
+	dst := filepath.Join(filepath.Dir(old), newName)
+	if _, statErr := os.Stat(dst); statErr == nil {
+		fileError(w, http.StatusConflict, errors.New("目标名称已存在"))
+		return
+	}
 	if err = os.Rename(old, dst); err != nil {
 		fileError(w, 500, err)
 		return
@@ -273,21 +461,112 @@ func handleFilesMove(w http.ResponseWriter, r *http.Request) {
 		fileError(w, 400, err)
 		return
 	}
-	src, err := cleanFilePath(req.Path)
-	if err != nil {
+	paths := req.OldPaths
+	if len(paths) == 0 && req.Path != "" {
+		paths = []string{req.Path}
+	}
+	dir := req.NewPath
+	if dir == "" {
+		dir = req.Dst
+	}
+	dir, err = cleanFilePath(dir)
+	if err != nil || len(paths) == 0 {
+		if err == nil {
+			err = errors.New("源文件不能为空")
+		}
 		fileError(w, 400, err)
 		return
 	}
-	dst, err := cleanFilePath(req.Dst)
-	if err != nil {
-		fileError(w, 400, err)
-		return
-	}
-	if err = os.Rename(src, dst); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		fileError(w, 500, err)
 		return
 	}
-	wmhttp.JSON(w, 200, map[string]any{"code": 200})
+	for _, raw := range paths {
+		src, e := cleanFilePath(raw)
+		if e != nil {
+			fileError(w, 400, e)
+			return
+		}
+		name := filepath.Base(src)
+		if len(paths) == 1 && req.Name != "" {
+			name = filepath.Base(req.Name)
+		}
+		target := filepath.Join(dir, name)
+		if filepath.Clean(target) == filepath.Clean(src) {
+			continue
+		}
+		if req.Cover {
+			_ = os.RemoveAll(target)
+		} else if _, e := os.Stat(target); e == nil {
+			fileError(w, http.StatusConflict, fmt.Errorf("目标已存在: %s", target))
+			return
+		}
+		if req.Type == "copy" {
+			e = copyPath(src, target)
+		} else {
+			e = os.Rename(src, target)
+			if errors.Is(e, syscall.EXDEV) {
+				e = copyPath(src, target)
+				if e == nil {
+					e = os.RemoveAll(src)
+				}
+			}
+		}
+		if e != nil {
+			fileError(w, 500, e)
+			return
+		}
+		applyWebsiteOwnership(target)
+	}
+	if req.TaskID != "" {
+		ensureAppTaskLog(req.TaskID, "", "file-move", "completed", "文件操作完成")
+		appendAppTaskLog(req.TaskID, "[TASK-END]")
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"taskID": req.TaskID, "path": dir}})
+}
+
+func copyPath(source, destination string) error {
+	info, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		if err := os.MkdirAll(destination, info.Mode().Perm()); err != nil {
+			return err
+		}
+		return filepath.Walk(source, func(path string, item os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			rel, _ := filepath.Rel(source, path)
+			if rel == "." {
+				return nil
+			}
+			target := filepath.Join(destination, rel)
+			if item.IsDir() {
+				return os.MkdirAll(target, item.Mode().Perm())
+			}
+			return copyPath(path, target)
+		})
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 func handleFilesSize(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeFileRequest(r)
@@ -321,12 +600,20 @@ func handleFilesTree(w http.ResponseWriter, r *http.Request) {
 		fileError(w, 400, err)
 		return
 	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		fileError(w, http.StatusNotFound, err)
+		return
+	}
 	var walk func(string, int) []map[string]any
 	walk = func(path string, depth int) []map[string]any {
-		if depth > 4 {
+		if depth > 2 {
 			return nil
 		}
-		entries, _ := os.ReadDir(path)
+		entries, readErr := os.ReadDir(path)
+		if readErr != nil {
+			return nil
+		}
 		result := make([]map[string]any, 0, len(entries))
 		for _, entry := range entries {
 			if !req.ShowHidden && strings.HasPrefix(entry.Name(), ".") {
@@ -337,7 +624,10 @@ func handleFilesTree(w http.ResponseWriter, r *http.Request) {
 			if e != nil {
 				continue
 			}
-			item := fileInfo(full, info)
+			item := map[string]any{
+				"id": fileAuxID("tree"), "name": entry.Name(), "path": full,
+				"isDir": info.IsDir(), "extension": filepath.Ext(entry.Name()),
+			}
 			if info.IsDir() {
 				item["children"] = walk(full, depth+1)
 			}
@@ -345,7 +635,14 @@ func handleFilesTree(w http.ResponseWriter, r *http.Request) {
 		}
 		return result
 	}
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": walk(root, 0)})
+	rootNode := map[string]any{
+		"id": fileAuxID("tree"), "name": filepath.Base(root), "path": root,
+		"isDir": rootInfo.IsDir(), "extension": filepath.Ext(rootInfo.Name()),
+	}
+	if rootInfo.IsDir() {
+		rootNode["children"] = walk(root, 0)
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": []map[string]any{rootNode}})
 }
 
 func handleFilesUpload(w http.ResponseWriter, r *http.Request) {
@@ -387,6 +684,7 @@ func handleFilesUpload(w http.ResponseWriter, r *http.Request) {
 				fileError(w, 500, e)
 				return
 			}
+			applyWebsiteOwnership(dst)
 			if info, statErr := os.Stat(dst); statErr == nil {
 				fileAux.Lock()
 				loadFileAuxLocked()

@@ -30,7 +30,7 @@ func TestHTTPClientRegisterUsesSignedEnvelope(t *testing.T) {
 	}))
 	defer server.Close()
 	client := NewHTTPClient(server.URL, "gateway-test", "secret")
-	auth, err := client.Register(context.Background(), RegisterRequest{NodeID: "node-test", Role: "secondary", ProtocolVersion: "v1"})
+	auth, err := client.Register(context.Background(), RegisterRequest{NodeID: "node-test", Role: "secondary", ProtocolVersion: "v2"})
 	if err != nil || auth.BindingID != "binding-1" || !auth.Refreshable {
 		t.Fatalf("Gateway 注册失败: %+v, %v", auth, err)
 	}
@@ -99,7 +99,7 @@ func TestHTTPClientRegisterMapsItemAndRefreshToken(t *testing.T) {
 			}})
 			return
 		}
-		if r.URL.Path == "/api/workmesh/v1/nodes/authorization/refresh" {
+		if r.URL.Path == "/api/workmesh/v2/nodes/authorization/refresh" {
 			if r.Header.Get("Authorization") != "Bearer node-token" {
 				t.Fatalf("刷新未携带最新令牌: %q", r.Header.Get("Authorization"))
 			}

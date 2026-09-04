@@ -31,7 +31,7 @@ func RegisterLinkRoutes(mux *http.ServeMux, nodeID, initialRole string, manager 
 	server, err := link.NewServer(link.ServerOptions{
 		NodeID:          nodeID,
 		Role:            initialRole,
-		ProtocolVersion: "v1",
+		ProtocolVersion: "v2",
 		Capabilities:    []string{"system", "containers", "files", "sync", "fencing"},
 		Secret:          []byte(os.Getenv("WORKMESH_LINK_SECRET")),
 		RoleManager:     manager,

@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -31,7 +32,7 @@ const (
 )
 
 // SecuritySettings 是全局安全策略的只读快照。
-// 设置由 domains.json 的 settings 对象提供，也可通过环境变量覆盖部署默认值。
+// 设置优先由统一 SQLite 状态提供，旧 domains.json 仅作为迁移兼容来源。
 type SecuritySettings struct {
 	BindDomain           string
 	SecurityEntrance     string
@@ -46,6 +47,46 @@ type SecuritySettings struct {
 type SecurityMiddlewareOptions struct {
 	DataDir   string
 	Authorize func(*http.Request) bool
+	// Settings 返回统一 SQLite 中的安全设置；为空时兼容读取旧 domains.json。
+	Settings func() map[string]any
+	// OperationLog 在写请求完成后接收统一审计元数据；返回值不影响原始响应。
+	OperationLog func(*http.Request, int, []byte, time.Duration)
+}
+
+type operationResponseWriter struct {
+	http.ResponseWriter
+	status int
+	body   bytes.Buffer
+}
+
+func (w *operationResponseWriter) ResponseLocale() string {
+	if localized, ok := w.ResponseWriter.(interface{ ResponseLocale() string }); ok {
+		return localized.ResponseLocale()
+	}
+	return ""
+}
+
+func (w *operationResponseWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *operationResponseWriter) Write(payload []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.body.Len() < 1<<20 {
+		remaining := (1 << 20) - w.body.Len()
+		if len(payload) > remaining {
+			_, _ = w.body.Write(payload[:remaining])
+		} else {
+			_, _ = w.body.Write(payload)
+		}
+	}
+	return w.ResponseWriter.Write(payload)
 }
 
 // securitySettingsCache 对低频设置文件进行有界缓存，避免每个请求重复解析 JSON。
@@ -56,6 +97,7 @@ type securitySettingsCache struct {
 	size    int64
 	loaded  bool
 	value   SecuritySettings
+	loadDB  func() map[string]any
 }
 
 // NewSecurityMiddleware 将 Session、CSRF、域名绑定和密码过期策略统一挂载到 HTTP 链路。
@@ -64,7 +106,7 @@ func NewSecurityMiddleware(next http.Handler, options SecurityMiddlewareOptions)
 	if next == nil {
 		next = http.NotFoundHandler()
 	}
-	provider := newSecuritySettingsProvider(options.DataDir)
+	provider := newSecuritySettingsProvider(options.DataDir, options.Settings)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 普通 JSON 请求携带语言元数据，统一错误响应由 runtime/http 按 Accept-Language 渲染。
 		// 流式和 WebSocket 请求必须保留原始 ResponseWriter 的 Flusher/Hijacker 能力。
@@ -76,6 +118,22 @@ func NewSecurityMiddleware(next http.Handler, options SecurityMiddlewareOptions)
 			wmhttp.JSON(responseWriter, http.StatusBadRequest, securityError("INVALID_REQUEST", "请求不能为空"))
 			return
 		}
+		started := time.Now()
+		logRequest := options.OperationLog != nil && unsafeHTTPMethod(r.Method) && !strings.Contains(strings.ToLower(r.URL.Path), "/search") && !isSelfAuthenticatedStream(r.URL.Path)
+		var operationWriter *operationResponseWriter
+		if logRequest {
+			operationWriter = &operationResponseWriter{ResponseWriter: responseWriter}
+			responseWriter = operationWriter
+		}
+		defer func() {
+			if logRequest && operationWriter != nil {
+				status := operationWriter.status
+				if status == 0 {
+					status = http.StatusOK
+				}
+				options.OperationLog(r, status, operationWriter.body.Bytes(), time.Since(started))
+			}
+		}()
 		settings := provider.load()
 		if !checkBoundDomain(responseWriter, r, settings) {
 			return
@@ -135,7 +193,7 @@ func isForwardedRelayRequest(r *http.Request) bool {
 	return true
 }
 
-func newSecuritySettingsProvider(dataDir string) *securitySettingsCache {
+func newSecuritySettingsProvider(dataDir string, loadDB func() map[string]any) *securitySettingsCache {
 	dataDir = strings.TrimSpace(dataDir)
 	if dataDir == "" {
 		dataDir = strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
@@ -143,11 +201,16 @@ func newSecuritySettingsProvider(dataDir string) *securitySettingsCache {
 	if dataDir == "" {
 		dataDir = "./data"
 	}
-	return &securitySettingsCache{path: filepath.Join(dataDir, "domains.json")}
+	return &securitySettingsCache{path: filepath.Join(dataDir, "domains.json"), loadDB: loadDB}
 }
 
 func (p *securitySettingsCache) load() SecuritySettings {
 	value := SecuritySettings{BindDomain: strings.TrimSpace(os.Getenv("WORKMESH_BIND_DOMAIN")), SecurityEntrance: strings.Trim(strings.TrimSpace(os.Getenv("WORKMESH_SECURITY_ENTRANCE")), "/")}
+	if p.loadDB != nil {
+		if settings := p.loadDB(); settings != nil {
+			return mergeSecuritySettings(value, parseSecuritySettings(settings))
+		}
+	}
 	info, err := os.Stat(p.path)
 	if err == nil {
 		p.mu.RLock()

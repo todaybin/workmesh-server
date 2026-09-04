@@ -54,7 +54,7 @@ func TestHTTPClientSignsHandshakeAndRetriesWithFreshNonce(t *testing.T) {
 		},
 	})
 	response, err := client.Handshake(context.Background(), Handshake{
-		NodeID: "local", Role: role.Primary, RoleEpoch: 1, ProtocolVersion: "v1",
+		NodeID: "local", Role: role.Primary, RoleEpoch: 1, ProtocolVersion: "v2",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestHTTPClientRetriesTransientHTTPError(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"code":200,"data":{"nodeId":"remote","role":"secondary","roleEpoch":1,"protocolVersion":"v1"}}`)
+		_, _ = io.WriteString(w, `{"code":200,"data":{"nodeId":"remote","role":"secondary","roleEpoch":1,"protocolVersion":"v2"}}`)
 	}))
 	defer server.Close()
 	client := NewHTTPClientWithOptions(server.URL, HTTPClientOptions{MaxRetries: 1, RetryBackoff: time.Millisecond})

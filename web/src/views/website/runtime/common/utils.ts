@@ -5,7 +5,7 @@ import { Ref } from 'vue';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import { Runtime } from '@/api/interface/runtime';
 
-export const operateRuntime = async (operate: string, ID: number, loading: Ref<boolean>, search: () => void) => {
+export const operateRuntime = async (operate: string, ID: string | number, loading: Ref<boolean>, search: () => void) => {
     try {
         const action = await ElMessageBox.confirm(
             i18n.global.t('runtime.operatorHelper', [i18n.global.t('commons.operate.' + operate)]),
@@ -19,7 +19,10 @@ export const operateRuntime = async (operate: string, ID: number, loading: Ref<b
 
         if (action === 'confirm') {
             loading.value = true;
-            await OperateRuntime({ operate: operate, ID: ID });
+            // Runtime IDs are string identifiers (for example `php74`).
+            // Keep the legacy uppercase field for older nodes, but never send
+            // a numeric value that can be coerced or lost by transport code.
+            await OperateRuntime({ operate: operate, ID: String(ID) });
             search();
         }
     } catch (error) {
@@ -42,4 +45,17 @@ export const updateRuntimeRemark = async (row: Runtime.Runtime, bulr: Function) 
             MsgSuccess(i18n.global.t('commons.msg.updateSuccess'));
         });
     } catch (error) {}
+};
+
+// Runtime 列表统一使用后端返回的 1Panel 规范 Compose 路径，缺失时退回容器日志模式。
+export const runtimeComposePath = (row: any): string => {
+    const composePath = typeof row?.composePath === 'string' ? row.composePath.trim() : '';
+    if (composePath && !/undefined|null/i.test(composePath)) {
+        return composePath;
+    }
+    const installPath = typeof row?.path === 'string' ? row.path.trim() : '';
+    if (!installPath || /undefined|null/i.test(installPath)) {
+        return '';
+    }
+    return installPath.replace(/[\\/]+$/, '') + '/docker-compose.yml';
 };

@@ -46,7 +46,7 @@ func TestGatewayRegistrationContractHasIndependentNodeIdentity(t *testing.T) {
 		NodeID:          "node-61-184-12-165",
 		DisplayName:     "primary",
 		Role:            "primary",
-		ProtocolVersion: "v1",
+		ProtocolVersion: "v2",
 		Capabilities:    []string{"system.command", "container.exec"},
 	}
 	if request.NodeID == "" || request.Role != "primary" || len(request.Capabilities) == 0 {

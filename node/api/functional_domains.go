@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -123,8 +124,157 @@ type logItem struct {
 	Type      string         `json:"type"`
 	Level     string         `json:"level"`
 	Message   string         `json:"message"`
+	Source    string         `json:"source"`
+	User      string         `json:"user"`
+	Node      string         `json:"node"`
+	IP        string         `json:"ip"`
+	Path      string         `json:"path"`
+	Method    string         `json:"method"`
+	UserAgent string         `json:"userAgent"`
+	Latency   int64          `json:"latency"`
+	Status    string         `json:"status"`
+	DetailZH  string         `json:"detailZH"`
+	DetailEN  string         `json:"detailEN"`
 	Meta      map[string]any `json:"meta,omitempty"`
 	CreatedAt time.Time      `json:"createdAt"`
+}
+
+// MarshalJSON 保持操作日志 ID 与旧版 API 的数字语义，同时不影响内部字符串任务 ID。
+func (item logItem) MarshalJSON() ([]byte, error) {
+	type plainLogItem logItem
+	payload, err := json.Marshal(plainLogItem(item))
+	if err != nil {
+		return nil, err
+	}
+	if item.Type != "operation" {
+		return payload, nil
+	}
+	var object map[string]any
+	if err := json.Unmarshal(payload, &object); err != nil {
+		return nil, err
+	}
+	if id, err := strconv.ParseInt(item.ID, 10, 64); err == nil {
+		object["id"] = id
+	}
+	delete(object, "type")
+	delete(object, "level")
+	delete(object, "meta")
+	return json.Marshal(object)
+}
+
+func normalizeOperationPath(path string) string {
+	path = strings.TrimSpace(path)
+	if strings.HasPrefix(path, "/api/v2/core") {
+		path = strings.TrimPrefix(path, "/api/v2/core")
+	} else {
+		path = strings.TrimPrefix(path, "/api/v2")
+	}
+	if path == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(path, "/") {
+		return "/" + path
+	}
+	return path
+}
+
+func operationSource(path string) string {
+	clean := strings.TrimPrefix(normalizeOperationPath(path), "/")
+	if clean == "" {
+		return "server"
+	}
+	parts := strings.Split(clean, "/")
+	if parts[0] == "core" && len(parts) > 1 {
+		return parts[1]
+	}
+	return parts[0]
+}
+
+func operationClientIP(remoteAddr string) string {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return strings.Trim(remoteAddr, "[]")
+}
+
+func operationStatus(status string) string {
+	if strings.EqualFold(strings.TrimSpace(status), "failed") || strings.EqualFold(strings.TrimSpace(status), "error") {
+		return "Failed"
+	}
+	if strings.TrimSpace(status) == "" {
+		return ""
+	}
+	return "Success"
+}
+
+func operationDetails(method, path, detailZH, detailEN string) (string, string) {
+	method = strings.ToLower(strings.TrimSpace(method))
+	path = normalizeOperationPath(path)
+	if strings.TrimSpace(detailZH) == "" {
+		detailZH = fmt.Sprintf("%s %s", strings.ToUpper(method), path)
+	}
+	if strings.TrimSpace(detailEN) == "" {
+		detailEN = fmt.Sprintf("%s %s", strings.ToUpper(method), path)
+	}
+	return detailZH, detailEN
+}
+
+// RecordOperationLog 将统一 HTTP 链路的写请求审计信息写入 SQLite。
+// 响应体只解析 envelope 中的 code/message，不保存原始请求体，避免凭据泄漏。
+func RecordOperationLog(r *http.Request, status int, response []byte, latency time.Duration) {
+	db := sharedDB()
+	if db == nil || r == nil {
+		return
+	}
+	resultStatus := "Success"
+	message := ""
+	var envelope struct {
+		Code    any    `json:"code"`
+		Message string `json:"message"`
+	}
+	if len(response) > 0 {
+		_ = json.Unmarshal(response, &envelope)
+		message = strings.TrimSpace(envelope.Message)
+	}
+	if status >= http.StatusBadRequest {
+		resultStatus = "Failed"
+	}
+	switch code := envelope.Code.(type) {
+	case string:
+		if strings.EqualFold(code, "ERR") {
+			resultStatus = "Failed"
+		}
+	case float64:
+		if code != 200 {
+			resultStatus = "Failed"
+		}
+	}
+	user := ""
+	sessionID := coreSessionID(r)
+	if cookie, err := r.Cookie("workmesh_session"); err == nil {
+		sessionID = strings.TrimSpace(cookie.Value)
+	}
+	if sessionID != "" {
+		if account, currentErr := localCore.Current(sessionID); currentErr == nil {
+			user = account.Name
+		}
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	node := strings.TrimSpace(r.Header.Get("CurrentNode"))
+	if decoded, err := url.QueryUnescape(node); err == nil {
+		node = strings.TrimSpace(decoded)
+	}
+	if node == "" {
+		node = "local"
+	}
+	detailZH := strings.TrimSpace(r.Header.Get("X-Operation-Detail-ZH"))
+	detailEN := strings.TrimSpace(r.Header.Get("X-Operation-Detail-EN"))
+	path := normalizeOperationPath(r.URL.Path)
+	method := strings.ToLower(strings.TrimSpace(r.Method))
+	detailZH, detailEN = operationDetails(method, path, detailZH, detailEN)
+	_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS operation_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL DEFAULT 'server', user TEXT NOT NULL DEFAULT '', ip TEXT NOT NULL DEFAULT '', node TEXT NOT NULL DEFAULT 'local', path TEXT NOT NULL DEFAULT '', method TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', latency INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', detail_zh TEXT NOT NULL DEFAULT '', detail_en TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+	_, _ = db.Exec(`INSERT INTO operation_logs(source,user,ip,node,path,method,user_agent,latency,status,message,detail_zh,detail_en,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, operationSource(r.URL.Path), user, operationClientIP(r.RemoteAddr), node, path, method, r.UserAgent(), latency.Nanoseconds(), resultStatus, message, detailZH, detailEN, now, now)
 }
 
 var functionalStoreMu sync.Mutex
@@ -142,17 +292,62 @@ func getDomainStore() *domainStore {
 		return functionalStoreInstance
 	}
 	s := &domainStore{path: path, state: domainState{Settings: map[string]any{"language": "zh", "theme": "system"}}}
-	if content, err := os.ReadFile(path); err == nil && len(content) > 0 {
+	var persistedOperationLogs []logItem
+	if db := sharedDB(); db != nil {
+		_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS operation_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL DEFAULT 'server', user TEXT NOT NULL DEFAULT '', ip TEXT NOT NULL DEFAULT '', node TEXT NOT NULL DEFAULT 'local', path TEXT NOT NULL DEFAULT '', method TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', latency INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', detail_zh TEXT NOT NULL DEFAULT '', detail_en TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+		_, _ = db.Exec(`CREATE TABLE IF NOT EXISTS login_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL DEFAULT '', user TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', agent TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+		if rows, err := db.Query(`SELECT id,source,user,ip,node,path,method,user_agent,latency,status,message,detail_zh,detail_en,created_at FROM operation_logs ORDER BY id DESC LIMIT 1000`); err == nil {
+			for rows.Next() {
+				var id int64
+				var source, user, ip, node, path, method, userAgent, status, message, detailZH, detailEN, created string
+				var latency int64
+				if rows.Scan(&id, &source, &user, &ip, &node, &path, &method, &userAgent, &latency, &status, &message, &detailZH, &detailEN, &created) == nil {
+					t, _ := time.Parse(time.RFC3339Nano, created)
+					path = normalizeOperationPath(path)
+					method = strings.ToLower(strings.TrimSpace(method))
+					if source == "" || strings.EqualFold(source, "server") {
+						source = operationSource(path)
+					}
+					ip = operationClientIP(ip)
+					if node == "" {
+						node = "local"
+					}
+					status = operationStatus(status)
+					detailZH, detailEN = operationDetails(method, path, detailZH, detailEN)
+					persistedOperationLogs = append(persistedOperationLogs, logItem{ID: strconv.FormatInt(id, 10), Type: "operation", Level: status, Status: status, Source: source, User: user, IP: ip, Node: node, Path: path, Method: method, UserAgent: userAgent, Latency: latency, Message: message, DetailZH: detailZH, DetailEN: detailEN, Meta: map[string]any{"method": method, "path": path}, CreatedAt: t})
+				}
+			}
+			rows.Close()
+		}
+	}
+	if db := sharedDB(); db != nil {
+		if !loadJSONState("functional_domain_state", &s.state) {
+			if content, err := os.ReadFile(path); err == nil && len(content) > 0 && json.Unmarshal(content, &s.state) == nil {
+				if saveErr := saveJSONState("functional_domain_state", s.state); saveErr == nil {
+					archiveDir := filepath.Join(filepath.Dir(path), "backups")
+					if os.MkdirAll(archiveDir, 0o750) == nil {
+						_ = os.Rename(path, filepath.Join(archiveDir, "legacy-domains-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".json"))
+					}
+				}
+			}
+		}
+	} else if content, err := os.ReadFile(path); err == nil && len(content) > 0 {
 		_ = json.Unmarshal(content, &s.state)
 		if s.state.Settings == nil {
 			s.state.Settings = map[string]any{}
 		}
+	}
+	if len(persistedOperationLogs) > 0 {
+		s.state.Logs = append(persistedOperationLogs, s.state.Logs...)
 	}
 	functionalStoreInstance = s
 	return functionalStoreInstance
 }
 
 func (s *domainStore) saveLocked() error {
+	if sharedDB() != nil {
+		return saveJSONState("functional_domain_state", s.state)
+	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
 		return err
 	}
@@ -164,7 +359,26 @@ func (s *domainStore) saveLocked() error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	if err := os.Rename(tmp, s.path); err != nil {
+		return err
+	}
+	if db := sharedDB(); db != nil {
+		for _, item := range s.state.Logs {
+			if !strings.EqualFold(item.Type, "operation") && !strings.EqualFold(item.Type, "login") {
+				continue
+			}
+			method, path := "", ""
+			if item.Meta != nil {
+				method, path = valueString(item.Meta, "method"), valueString(item.Meta, "path")
+			}
+			if numericID, parseErr := strconv.ParseInt(item.ID, 10, 64); parseErr == nil {
+				_, _ = db.Exec(`INSERT OR IGNORE INTO operation_logs(id,method,path,status,message,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, numericID, method, path, item.Level, item.Message, formatTimeForLog(item.CreatedAt), formatTimeForLog(item.CreatedAt))
+			} else {
+				_, _ = db.Exec(`INSERT INTO operation_logs(method,path,status,message,created_at,updated_at) VALUES(?,?,?,?,?,?)`, method, path, item.Level, item.Message, formatTimeForLog(item.CreatedAt), formatTimeForLog(item.CreatedAt))
+			}
+		}
+	}
+	return nil
 }
 
 func validBackupPath(value string) bool {
@@ -174,6 +388,14 @@ func validBackupPath(value string) bool {
 	}
 	clean := filepath.Clean(value)
 	return clean != "." && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator))
+}
+
+// formatTimeForLog 保持审计日志统一使用 UTC RFC3339Nano 文本格式。
+func formatTimeForLog(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func idToken() string {
@@ -193,18 +415,25 @@ func domainError(w http.ResponseWriter, status int, code, message string) {
 }
 
 func requestMap(r *http.Request) (map[string]any, error) {
-	if r.Body == nil {
-		return map[string]any{}, nil
-	}
-	var v map[string]any
-	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&v); err != nil {
-		if errors.Is(err, io.EOF) {
-			return map[string]any{}, nil
+	v := map[string]any{}
+	if r.Body != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&v); err != nil {
+			if errors.Is(err, io.EOF) {
+				v = map[string]any{}
+			} else {
+				return nil, err
+			}
 		}
-		return nil, err
 	}
 	if v == nil {
 		v = map[string]any{}
+	}
+	for key, values := range r.URL.Query() {
+		if len(values) > 0 && strings.TrimSpace(values[0]) != "" {
+			if _, exists := v[key]; !exists {
+				v[key] = values[0]
+			}
+		}
 	}
 	return v, nil
 }
@@ -1782,18 +2011,66 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 			domainError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
 			return
 		}
-		q := strings.ToLower(valueString(v, "keyword", "search", "message"))
+		q := strings.ToLower(valueString(v, "keyword", "search", "message", "operation"))
 		typ := strings.ToLower(valueString(v, "type", "logType"))
 		level := strings.ToLower(valueString(v, "level", "status"))
+		sourceFilter := strings.ToLower(valueString(v, "source"))
+		nodeFilter := strings.ToLower(valueString(v, "node"))
 		s.mu.RLock()
 		items := append([]logItem(nil), s.state.Logs...)
 		s.mu.RUnlock()
-		if q != "" {
+		if strings.Contains(r.URL.Path, "/logs/login") {
+			if db := sharedDB(); db != nil {
+				if rows, err := db.Query(`SELECT id,ip,user,agent,status,message,created_at FROM login_logs ORDER BY id DESC LIMIT 1000`); err == nil {
+					items = nil
+					for rows.Next() {
+						var id int64
+						var ip, user, agent, status, message, created string
+						if rows.Scan(&id, &ip, &user, &agent, &status, &message, &created) == nil {
+							t, _ := time.Parse(time.RFC3339Nano, created)
+							items = append(items, logItem{ID: strconv.FormatInt(id, 10), Type: "login", Level: status, Message: message, Meta: map[string]any{"ip": ip, "user": user, "agent": agent}, CreatedAt: t})
+						}
+					}
+					rows.Close()
+				}
+			}
+		} else if strings.Contains(r.URL.Path, "/logs/operation") {
+			if db := sharedDB(); db != nil {
+				if rows, err := db.Query(`SELECT id,source,user,ip,node,path,method,user_agent,latency,status,message,detail_zh,detail_en,created_at FROM operation_logs ORDER BY id DESC LIMIT 1000`); err == nil {
+					items = nil
+					for rows.Next() {
+						var id int64
+						var source, user, ip, node, path, method, userAgent, status, message, detailZH, detailEN, created string
+						var latency int64
+						if rows.Scan(&id, &source, &user, &ip, &node, &path, &method, &userAgent, &latency, &status, &message, &detailZH, &detailEN, &created) == nil {
+							t, _ := time.Parse(time.RFC3339Nano, created)
+							path = normalizeOperationPath(path)
+							method = strings.ToLower(strings.TrimSpace(method))
+							if source == "" || strings.EqualFold(source, "server") {
+								source = operationSource(path)
+							}
+							ip = operationClientIP(ip)
+							if node == "" {
+								node = "local"
+							}
+							status = operationStatus(status)
+							detailZH, detailEN = operationDetails(method, path, detailZH, detailEN)
+							items = append(items, logItem{ID: strconv.FormatInt(id, 10), Type: "operation", Level: status, Status: status, Source: source, User: user, IP: ip, Node: node, Path: path, Method: method, UserAgent: userAgent, Latency: latency, Message: message, DetailZH: detailZH, DetailEN: detailEN, Meta: map[string]any{"method": method, "path": path}, CreatedAt: t})
+						}
+					}
+					rows.Close()
+				}
+			}
+		}
+		if q != "" || typ != "" || level != "" || sourceFilter != "" || nodeFilter != "" {
 			filtered := items[:0]
 			for _, item := range items {
-				if (q == "" || strings.Contains(strings.ToLower(item.Message), q)) &&
+				searchText := strings.ToLower(strings.Join([]string{item.Message, item.DetailZH, item.DetailEN, item.Path, item.Method, item.User}, " "))
+				if (q == "" || strings.Contains(searchText, q)) &&
 					(typ == "" || strings.EqualFold(item.Type, typ)) &&
-					(level == "" || strings.EqualFold(item.Level, level)) {
+					(level == "" || strings.EqualFold(item.Level, level) || strings.EqualFold(item.Status, level)) &&
+					(sourceFilter == "" || strings.EqualFold(item.Source, sourceFilter)) &&
+					(nodeFilter == "" || strings.EqualFold(item.Node, nodeFilter)) {
 					filtered = append(filtered, item)
 				}
 			}
@@ -1854,6 +2131,16 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 				}
 				s.state.Logs = kept
 			}
+			if db := sharedDB(); db != nil {
+				if logType == "" {
+					_, _ = db.Exec(`DELETE FROM operation_logs`)
+					_, _ = db.Exec(`DELETE FROM login_logs`)
+				} else if strings.EqualFold(logType, "login") {
+					_, _ = db.Exec(`DELETE FROM login_logs`)
+				} else if strings.EqualFold(logType, "operation") {
+					_, _ = db.Exec(`DELETE FROM operation_logs`)
+				}
+			}
 			_ = s.saveLocked()
 			s.mu.Unlock()
 			success(w, nil)
@@ -1867,6 +2154,7 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 	})
 	mux.HandleFunc("POST /api/v2/logs/system/read", func(w http.ResponseWriter, r *http.Request) { readLogFile(w, r) })
 	mux.HandleFunc("POST /api/v2/logs/tasks/read", func(w http.ResponseWriter, r *http.Request) { readTaskLog(w, r, s) })
+	mux.HandleFunc("GET /api/v2/logs/tasks/read", func(w http.ResponseWriter, r *http.Request) { readTaskLog(w, r, s) })
 	mux.HandleFunc("GET /api/v2/logs/system/files", func(w http.ResponseWriter, _ *http.Request) { success(w, listSystemLogFiles()) })
 	mux.HandleFunc("GET /api/v2/logs/system/services", func(w http.ResponseWriter, _ *http.Request) { success(w, listRunningSystemServices()) })
 	mux.HandleFunc("GET /api/v2/logs/system/status", func(w http.ResponseWriter, _ *http.Request) { success(w, systemLogStatus()) })
@@ -2048,6 +2336,12 @@ func readTaskLog(w http.ResponseWriter, r *http.Request, s *domainStore) {
 			path = candidate
 		}
 	}
+	if path == "" && id != "" {
+		candidate := runtimeTaskLogPath(id)
+		if info, statErr := os.Stat(candidate); statErr == nil && info.Mode().IsRegular() {
+			path = candidate
+		}
+	}
 	if path == "" {
 		domainError(w, 400, "INVALID_TASK", "任务日志路径或任务 ID 不能为空")
 		return
@@ -2069,6 +2363,9 @@ func readTaskLog(w http.ResponseWriter, r *http.Request, s *domainStore) {
 	if size < 1 || size > 500 {
 		size = 100
 	}
+	if boolValue(v, "latest") && len(lines) > 0 {
+		page = (len(lines) + size - 1) / size
+	}
 	start := (page - 1) * size
 	if start > len(lines) {
 		start = len(lines)
@@ -2084,14 +2381,14 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 	// 默认字段与前端 SettingInfo/SettingBaseInfo 契约保持一致；状态文件中已有值会覆盖默认值。
 	defaults := map[string]any{
 		"dockerSockPath": "unix:///var/run/docker.sock", "systemIP": "", "localTime": "", "timeZone": "", "ntpSite": "",
-		"defaultNetwork": "workmesh-network", "defaultIO": "read", "lastCleanTime": "", "lastCleanSize": "", "lastCleanData": "",
+		"defaultNetwork": "all", "defaultIO": "all", "lastCleanTime": "", "lastCleanSize": "", "lastCleanData": "",
 		"monitorStatus": "enable", "monitorInterval": "10", "monitorStoreDays": "7", "fileRecycleBin": "disable", "localSSHConnShow": "disable", "firewallPortWhiteList": "",
 		"systemVersion": "workmesh-server", "upgradeBackupCopies": "3", "developerMode": "false",
 		"sessionTimeout": 86400, "expirationDays": 0, "panelName": "WorkMesh", "edition": "community",
 		"theme": "system", "menuTabs": "false", "menuAccordion": "false", "language": "zh", "docSource": "official",
 		"serverPort": 9999, "port": "9999", "ipv6": "disable", "bindAddress": "0.0.0.0", "ssl": "disable", "sslType": "self",
 		"allowIPs": "", "allowIPTrustedProxies": "", "bindDomain": "", "passkeyTrustedProxies": "", "securityEntrance": "",
-		"dashboardMemoVisible": "true", "dashboardSimpleNodeVisible": "true", "complexityVerification": "false", "messageType": "system",
+		"dashboardMemoVisible": "Enable", "dashboardSimpleNodeVisible": "Enable", "complexityVerification": "false", "messageType": "system",
 		"emailVars": "", "weChatVars": "", "dingVars": "", "snapshotIgnore": "", "hideMenu": "", "noAuthSetting": "",
 		"proxyUrl": "", "proxyType": "", "proxyPort": "", "proxyUser": "", "proxyPasswd": "", "proxyPasswdKeep": "",
 		"scriptSync": "false", "lineHeight": "1.5", "letterSpacing": "0", "fontSize": "14", "fontFamily": "monospace",
@@ -2126,7 +2423,11 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 			}
 			success(w, map[string]any{"baseDir": dir, "path": dir})
 		case "/api/v2/settings/website/dir":
-			success(w, map[string]any{"path": "/var/www", "dir": "/var/www"})
+			dir := strings.TrimSpace(os.Getenv("PANEL_WEBSITE_DIR"))
+			if dir == "" {
+				dir = "/www/wwwroot"
+			}
+			success(w, dir)
 		case "/api/v2/settings/snapshot/load":
 			s.mu.RLock()
 			items := append([]settingSnapshot(nil), s.state.Snapshots...)

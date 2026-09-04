@@ -54,6 +54,11 @@ func TestSystemLogEndpointsCollectAndRead(t *testing.T) {
 	if taskRead.Code != http.StatusOK || !strings.Contains(taskRead.Body.String(), "line two") {
 		t.Fatalf("task read status=%d body=%s", taskRead.Code, taskRead.Body.String())
 	}
+	latestRead := httptest.NewRecorder()
+	mux.ServeHTTP(latestRead, httptest.NewRequest(http.MethodGet, "/api/v2/logs/tasks/read?id=task-1&page=1&pageSize=1&latest=true&operateNode=primary-main", nil))
+	if latestRead.Code != http.StatusOK || !strings.Contains(latestRead.Body.String(), "line three") {
+		t.Fatalf("latest task read status=%d body=%s", latestRead.Code, latestRead.Body.String())
+	}
 	count := httptest.NewRecorder()
 	mux.ServeHTTP(count, httptest.NewRequest(http.MethodGet, "/api/v2/logs/tasks/executing/count", nil))
 	if count.Code != http.StatusOK || !strings.Contains(count.Body.String(), `"data":1`) {

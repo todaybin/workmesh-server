@@ -14,6 +14,10 @@ import (
 func TestDockerStatusInfoMissingCLI(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PATH", dir)
+	originalLookPath, originalStandardPaths := dockerLookPath, dockerStandardPaths
+	dockerLookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	dockerStandardPaths = func() []string { return nil }
+	t.Cleanup(func() { dockerLookPath, dockerStandardPaths = originalLookPath, originalStandardPaths })
 	status, err := NewDockerService().StatusInfo(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -37,6 +41,9 @@ func TestDockerStatusInfoHealthyCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
+	originalStandardPaths := dockerStandardPaths
+	dockerStandardPaths = func() []string { return nil }
+	t.Cleanup(func() { dockerStandardPaths = originalStandardPaths })
 	status, err := NewDockerService().StatusInfo(context.Background())
 	if err != nil {
 		t.Fatal(err)

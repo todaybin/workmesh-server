@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -67,6 +68,42 @@ type CoreService struct {
 	passkeySessions map[string]time.Time
 	passkeyPath     string
 	usersPath       string
+	db              *sql.DB
+}
+
+// SetDatabase attaches the shared SQLite store used for authentication data.
+// Existing users.json data is imported once when the SQLite table is empty;
+// subsequent reads and writes stay entirely in SQLite.
+func (s *CoreService) SetDatabase(db *sql.DB) error {
+	if db == nil {
+		return errors.New("SQLite 数据库不能为空")
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS core_users (id TEXT PRIMARY KEY, payload BLOB NOT NULL, updated_at TEXT NOT NULL)`); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.db = db
+	s.mu.Unlock()
+	var payload []byte
+	err := db.QueryRow(`SELECT payload FROM core_users ORDER BY id LIMIT 1`).Scan(&payload)
+	if err == nil {
+		var users map[string]persistedUser
+		if json.Unmarshal(payload, &users) == nil && len(users) > 0 {
+			s.mu.Lock()
+			s.users = make(map[string]User, len(users))
+			for key, item := range users {
+				s.users[key] = User{ID: item.ID, Name: item.Name, Role: item.Role, Password: item.Password, Groups: item.Groups, MFA: item.MFA, API: item.API}
+			}
+			s.mu.Unlock()
+			return nil
+		}
+	}
+	if err != sql.ErrNoRows && err != nil {
+		return err
+	}
+	// One-time compatibility import. If no legacy file exists, persist the
+	// environment/default administrator as the initial SQLite record.
+	return s.saveUsersToDB()
 }
 
 // NewCoreService 创建默认管理员和基础设置。
@@ -117,6 +154,9 @@ type persistedUser struct {
 }
 
 func (s *CoreService) saveUsersLocked() error {
+	if s.db != nil {
+		return s.saveUsersToDBLocked()
+	}
 	if err := os.MkdirAll(filepath.Dir(s.usersPath), 0o700); err != nil {
 		return err
 	}
@@ -133,6 +173,28 @@ func (s *CoreService) saveUsersLocked() error {
 		return err
 	}
 	return os.Rename(tmp, s.usersPath)
+}
+
+func (s *CoreService) saveUsersToDB() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.saveUsersToDBLocked()
+}
+
+func (s *CoreService) saveUsersToDBLocked() error {
+	if s.db == nil {
+		return errors.New("SQLite 数据库未初始化")
+	}
+	items := make(map[string]persistedUser, len(s.users))
+	for key, user := range s.users {
+		items[key] = persistedUser{ID: user.ID, Name: user.Name, Role: user.Role, Password: user.Password, Groups: user.Groups, MFA: user.MFA, API: user.API}
+	}
+	raw, err := json.Marshal(items)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO core_users(id,payload,updated_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at`, "local", raw, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
 }
 
 // ListUsers 返回脱敏后的本地用户列表，不包含密码和 API 密钥。

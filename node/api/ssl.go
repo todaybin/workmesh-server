@@ -30,6 +30,9 @@ func RegisterSSLRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/websites/ssl/list", func(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": ssls.List(r.Context(), "")})
 	})
+	mux.HandleFunc("GET /api/v2/websites/ssl/list", func(w http.ResponseWriter, r *http.Request) {
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": ssls.List(r.Context(), r.URL.Query().Get("domain"))})
+	})
 	mux.HandleFunc("POST /api/v2/websites/ssl", func(w http.ResponseWriter, r *http.Request) {
 		var req model.WebsiteSSLCreateRequest
 		if err := decodeJSON(r, &req); err != nil {
@@ -117,8 +120,7 @@ func RegisterSSLRoutes(mux *http.ServeMux) {
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
-		// ACME 申请是长任务；这里只返回已接受状态，实际申请由调度器执行。
-		wmhttp.JSON(w, http.StatusAccepted, map[string]any{"code": 200, "data": map[string]any{"id": req.ID, "status": "queued"}})
+		writeError(w, http.StatusServiceUnavailable, errors.New("ACME 证书签发执行器未配置，未创建申请任务"))
 	})
 	mux.HandleFunc("POST /api/v2/websites/ssl/resolve", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -137,15 +139,16 @@ func RegisterSSLRoutes(mux *http.ServeMux) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"domain": item.PrimaryDomain, "records": txt, "resolved": lookupErr == nil}})
 	})
 	mux.HandleFunc("POST /api/v2/websites/ssl/push", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusAccepted, map[string]any{"code": 200, "data": map[string]string{"status": "queued"}})
+		writeError(w, http.StatusServiceUnavailable, errors.New("证书推送执行器未配置，未执行推送"))
 	})
 	mux.HandleFunc("POST /api/v2/websites/ssl/import", func(w http.ResponseWriter, r *http.Request) {
-		var item model.WebsiteSSL
+		var item struct { ID uint `json:"id"`; SSLID uint `json:"sslID"`; PrivateKey string `json:"privateKey"`; Certificate string `json:"certificate"`; PEM string `json:"pem"`; Description string `json:"description"` }
 		if err := decodeJSON(r, &item); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		result, err := ssls.Upload(r.Context(), model.WebsiteSSLUploadRequest{ID: item.ID, PrivateKey: item.PrivateKey, Certificate: item.Certificate, Type: "paste", Description: item.Description})
+		id := item.ID; if id == 0 { id = item.SSLID }; cert := item.Certificate; if cert == "" { cert = item.PEM }
+		result, err := ssls.Upload(r.Context(), model.WebsiteSSLUploadRequest{ID: id, PrivateKey: item.PrivateKey, Certificate: cert, Type: "paste", Description: item.Description})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return

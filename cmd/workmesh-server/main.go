@@ -43,15 +43,9 @@ func main() {
 		_, _ = fmt.Fprintln(os.Stderr, "初始化数据目录失败:", err)
 		os.Exit(1)
 	}
-	if entrance, err := loadSecurityEntrance(cfg.DataDir); err == nil && entrance == "" {
-		if err := saveSecurityEntrance(cfg.DataDir, randomSecurityEntrance()); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, "初始化安全入口失败:", err)
-			os.Exit(1)
-		}
-	} else if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "读取安全入口失败:", err)
-		os.Exit(1)
-	}
+	// 安全入口由 functional_domain_state 中的共享 SQLite 持久化状态提供。
+	// 启动时不得从旧 domains.json 生成随机入口，否则每次重新部署/重启
+	// 都会造成入口变化并覆盖用户看到的地址。
 	if handled, err := runCLI(os.Args[1:], cfg.DataDir); handled {
 		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
@@ -92,6 +86,10 @@ func main() {
 		logger.Error("初始化节点公共控制面存储失败", "error", err)
 		os.Exit(1)
 	}
+	if err := nodeapi.SetCoreDatabase(stateStore.DB()); err != nil {
+		logger.Error("初始化认证 SQLite 存储失败", "error", err)
+		os.Exit(1)
+	}
 	if err := nodeapi.RecoverDeploymentState(cfg.DataDir); err != nil {
 		logger.Error("恢复部署制品状态失败", "error", err)
 		os.Exit(1)
@@ -109,7 +107,7 @@ func main() {
 	gatewayStore.Start(ctx, []string{"system", "containers", "files", "databases", "websites", "tasks"})
 	// 统一安全包装器位于所有控制面和节点路由外层，避免新增路由遗漏 Session/CSRF、域名绑定和密码过期校验。
 	securedMux := controlapi.NewSecurityMiddleware(mux, controlapi.SecurityMiddlewareOptions{
-		DataDir: cfg.DataDir, Authorize: nodeapi.AuthorizeControlRequest,
+		DataDir: cfg.DataDir, Authorize: nodeapi.AuthorizeControlRequest, Settings: nodeapi.LoadSecuritySettings, OperationLog: nodeapi.RecordOperationLog,
 	})
 	readiness.SetReady()
 	server := wmhttp.New(cfg.ListenAddr, securedMux, cfg.RequestTimeout)
@@ -128,32 +126,42 @@ func main() {
 }
 
 func initializeUnifiedSchema(s *storage.Store) error {
-	migration := storage.SQLMigration("0002-legacy-payloads", `CREATE TABLE IF NOT EXISTS legacy_payloads (
+	legacyMigration := storage.SQLMigration("0002-legacy-payloads", `CREATE TABLE IF NOT EXISTS legacy_payloads (
 		domain TEXT NOT NULL,
 		source_path TEXT NOT NULL,
 		source_sha256 TEXT NOT NULL,
 		payload BLOB NOT NULL,
 		imported_at TEXT NOT NULL,
 		PRIMARY KEY(domain, source_path, source_sha256)
-	)
-	`)
-	websiteMigration := storage.SQLMigration("0003-website-control-plane", `
-	CREATE TABLE IF NOT EXISTS website_state (state_key TEXT PRIMARY KEY, payload BLOB NOT NULL, updated_at TEXT NOT NULL);
-	CREATE TABLE IF NOT EXISTS websites (id INTEGER PRIMARY KEY, primary_domain TEXT NOT NULL UNIQUE, payload BLOB NOT NULL, status TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-	CREATE INDEX IF NOT EXISTS idx_websites_group_status ON websites(group_id, status, id);
-	CREATE TABLE IF NOT EXISTS website_domains (id TEXT PRIMARY KEY, website_id INTEGER NOT NULL REFERENCES websites(id) ON DELETE CASCADE, domain TEXT NOT NULL, port INTEGER NOT NULL DEFAULT 80, ssl INTEGER NOT NULL DEFAULT 0, payload BLOB NOT NULL, UNIQUE(website_id, domain));
-	CREATE INDEX IF NOT EXISTS idx_website_domains_website ON website_domains(website_id, domain);
-	CREATE TABLE IF NOT EXISTS website_configs (website_id INTEGER NOT NULL REFERENCES websites(id) ON DELETE CASCADE, config_type TEXT NOT NULL, payload BLOB NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(website_id, config_type));
-	CREATE TABLE IF NOT EXISTS website_dns_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, provider TEXT NOT NULL, credentials BLOB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`)
+	)`)
 	nodeMigration := storage.SQLMigration("0004-node-terminal-control-plane", `
 	CREATE TABLE IF NOT EXISTS node_hosts (id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL, port INTEGER NOT NULL, user_name TEXT NOT NULL DEFAULT '', group_id INTEGER NOT NULL DEFAULT 0, payload BLOB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 	CREATE INDEX IF NOT EXISTS idx_node_hosts_group_name ON node_hosts(group_id, name, id);
 	CREATE TABLE IF NOT EXISTS node_quick_commands (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'command', command TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, group_belong TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', payload BLOB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 	CREATE INDEX IF NOT EXISTS idx_node_quick_commands_type_name ON node_quick_commands(type, name, id);
 	CREATE TABLE IF NOT EXISTS node_settings (setting_key TEXT PRIMARY KEY, payload BLOB NOT NULL, updated_at TEXT NOT NULL);`)
+	databaseMigration := storage.SQLMigration("0005-database-resources", `
+	CREATE TABLE IF NOT EXISTS databases (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, version TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'local', app_install_id INTEGER NOT NULL DEFAULT 0, address TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL DEFAULT 0, initial_db TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', password TEXT NOT NULL DEFAULT '', ssl INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_databases_type_name ON databases(type, name);
+	CREATE INDEX IF NOT EXISTS idx_databases_app_install ON databases(app_install_id);
+	CREATE TABLE IF NOT EXISTS database_operations (id TEXT PRIMARY KEY, type TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+	CREATE INDEX IF NOT EXISTS idx_database_operations_created ON database_operations(created_at DESC);
+	CREATE TABLE IF NOT EXISTS resource_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, is_delete INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(type,name));
+	CREATE INDEX IF NOT EXISTS idx_resource_groups_type_default ON resource_groups(type,is_default DESC,id);
+	CREATE TABLE IF NOT EXISTS cronjobs (id TEXT PRIMARY KEY, payload BLOB NOT NULL, records BLOB NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL);
+	CREATE TABLE IF NOT EXISTS script_library (id TEXT PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', approved INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`)
+	databaseAdminMigration := storage.SQLMigration("0006-database-admin-metadata", `
+	CREATE TABLE IF NOT EXISTS database_users (id INTEGER PRIMARY KEY AUTOINCREMENT, database_id INTEGER NOT NULL DEFAULT 0, database_name TEXT NOT NULL, type TEXT NOT NULL DEFAULT '', username TEXT NOT NULL, host TEXT NOT NULL DEFAULT '%', description TEXT NOT NULL DEFAULT '', password_set INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_database_users_identity ON database_users(database_name,username,host);
+	CREATE INDEX IF NOT EXISTS idx_database_users_database ON database_users(database_name,id);
+	CREATE TABLE IF NOT EXISTS database_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, database_name TEXT NOT NULL, username TEXT NOT NULL, host TEXT NOT NULL DEFAULT '%', privileges BLOB NOT NULL DEFAULT '[]');
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_database_grants_identity ON database_grants(database_name,username,host);
+	CREATE INDEX IF NOT EXISTS idx_database_grants_database ON database_grants(database_name,id);
+	CREATE TABLE IF NOT EXISTS database_variables (database_name TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(database_name,name));
+	CREATE TABLE IF NOT EXISTS database_configs (database_name TEXT PRIMARY KEY, content BLOB NOT NULL, updated_at TEXT NOT NULL);`)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return storage.ApplyMigrations(ctx, s.DB(), []storage.Migration{migration, websiteMigration, nodeMigration})
+	return storage.ApplyMigrations(ctx, s.DB(), []storage.Migration{legacyMigration, nodeMigration, databaseMigration, databaseAdminMigration, service.WebsiteSchemaMigration()})
 }
 
 func importLegacyData(ctx context.Context, s *storage.Store, dataDir string) (storage.LegacyImportReport, error) {
@@ -161,16 +169,10 @@ func importLegacyData(ctx context.Context, s *storage.Store, dataDir string) (st
 	for _, domain := range []storage.LegacyDomain{storage.LegacyDomainGroups, storage.LegacyDomainWebsites, storage.LegacyDomainDomains, storage.LegacyDomainSSL} {
 		d := domain
 		handlers = append(handlers, storage.LegacyJSONHandlerFunc{DomainName: d, ImportFunc: func(ctx context.Context, tx *sql.Tx, source storage.LegacyJSONSource) (int64, error) {
-			_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO legacy_payloads(domain, source_path, source_sha256, payload, imported_at) VALUES(?, ?, ?, ?, ?)`, string(source.Domain), source.Path, source.SHA256, []byte(source.Data), time.Now().UTC().Format(time.RFC3339Nano))
-			if err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO legacy_payloads(domain, source_path, source_sha256, payload, imported_at) VALUES(?, ?, ?, ?, ?)`, string(source.Domain), source.Path, source.SHA256, []byte(source.Data), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 				return 0, err
 			}
-			stateKey := map[storage.LegacyDomain]string{
-				storage.LegacyDomainWebsites: "websites",
-				storage.LegacyDomainDomains:  "website-domains",
-				storage.LegacyDomainSSL:      "ssl",
-				storage.LegacyDomainGroups:   "groups",
-			}[source.Domain]
+			stateKey := map[storage.LegacyDomain]string{storage.LegacyDomainWebsites: "websites", storage.LegacyDomainDomains: "website-domains", storage.LegacyDomainSSL: "ssl", storage.LegacyDomainGroups: "groups"}[source.Domain]
 			if source.Domain == storage.LegacyDomainSSL {
 				switch filepath.Base(source.Path) {
 				case "ssl.json":

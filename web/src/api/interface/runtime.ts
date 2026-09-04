@@ -111,7 +111,7 @@ export namespace Runtime {
     }
 
     export interface RuntimeOperate {
-        ID: number;
+        ID: string;
         operate: string;
     }
 

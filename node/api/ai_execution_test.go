@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -128,7 +129,8 @@ func TestAIAccountModelDiscoveryAndSandboxPersistence(t *testing.T) {
 	registerAIExecutionRoutes(mux)
 	start := httptest.NewRecorder()
 	mux.ServeHTTP(start, httptest.NewRequest(http.MethodPost, "/api/v2/cubesandbox/start", strings.NewReader(`{"id":"sb-1"}`)))
-	if runtime.GOOS == "linux" {
+	_, kvmErr := os.Stat("/dev/kvm")
+	if runtime.GOOS == "linux" && kvmErr == nil {
 		if start.Code != http.StatusOK {
 			t.Fatalf("sandbox start: %d %s", start.Code, start.Body.String())
 		}

@@ -55,12 +55,20 @@ const acceptParams = async (params: DialogProps): Promise<void> => {
 const initTerm = async () => {
     open.value = true;
     await nextTick();
-    const args = containerID.value
-        ? `source=container&containerid=${containerID.value}&user=${user.value}&command=${command.value}`
-        : `source=database&databaseType=${databaseType.value}&database=${database.value}`;
+    const query = new URLSearchParams();
+    if (containerID.value) {
+        query.set('source', 'container');
+        query.set('containerid', containerID.value);
+        query.set('user', user.value);
+        query.set('command', command.value);
+    } else {
+        query.set('source', 'database');
+        query.set('databaseType', databaseType.value);
+        query.set('database', database.value);
+    }
     terminalRef.value!.acceptParams({
         endpoint: '/api/v2/hosts/terminal/container',
-        args,
+        args: query.toString(),
         error: '',
         initCmd: initCmd.value,
         waitForPrompt: waitForPrompt.value,

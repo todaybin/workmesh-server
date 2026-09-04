@@ -5,8 +5,10 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -30,54 +32,89 @@ type scriptLibraryItem struct {
 	UpdatedAt   string `json:"updatedAt"`
 }
 type scriptLibraryStore struct {
-	mu    sync.RWMutex
-	path  string
-	items []scriptLibraryItem
+	mu      sync.RWMutex
+	db      *sql.DB
+	path    string
+	items   []scriptLibraryItem
+	initErr error
 }
 
-var scriptStoreOnce sync.Once
+var scriptStoreMu sync.Mutex
 var scriptStore *scriptLibraryStore
 
 func getScriptStore() *scriptLibraryStore {
-	scriptStoreOnce.Do(func() {
+	scriptStoreMu.Lock()
+	defer scriptStoreMu.Unlock()
+	db := sharedDB()
+	if scriptStore != nil && scriptStore.db == db {
+		return scriptStore
+	}
+	{
 		dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 		if dir == "" {
 			dir = "./data"
 		}
-		scriptStore = &scriptLibraryStore{path: filepath.Join(dir, "scripts.json")}
-		if b, e := os.ReadFile(scriptStore.path); e == nil {
-			_ = json.Unmarshal(b, &scriptStore.items)
+		scriptStore = &scriptLibraryStore{db: db, path: filepath.Join(dir, "scripts.json")}
+		if scriptStore.db == nil {
+			scriptStore.initErr = errors.New("公共数据库未初始化")
+			return scriptStore
 		}
-	})
+		_, scriptStore.initErr = scriptStore.db.Exec(`CREATE TABLE IF NOT EXISTS script_library (id TEXT PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', approved INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+		if scriptStore.initErr != nil {
+			return scriptStore
+		}
+		var count int
+		_ = scriptStore.db.QueryRow(`SELECT COUNT(*) FROM script_library`).Scan(&count)
+		if count == 0 {
+			if b, e := os.ReadFile(scriptStore.path); e == nil {
+				var legacy []scriptLibraryItem
+				if json.Unmarshal(b, &legacy) == nil {
+					for _, it := range legacy {
+						_, _ = scriptStore.db.Exec(`INSERT OR IGNORE INTO script_library(id,name,script,description,version,approved,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, it.ID, it.Name, it.Script, it.Description, it.Version, boolInt(it.Approved), it.CreatedAt, it.UpdatedAt)
+					}
+				}
+			}
+		}
+		rows, err := scriptStore.db.Query(`SELECT id,name,script,description,version,approved,created_at,updated_at FROM script_library ORDER BY name,id`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var it scriptLibraryItem
+				var approved int
+				if rows.Scan(&it.ID, &it.Name, &it.Script, &it.Description, &it.Version, &approved, &it.CreatedAt, &it.UpdatedAt) == nil {
+					it.Approved = approved != 0
+					scriptStore.items = append(scriptStore.items, it)
+				}
+			}
+		}
+	}
 	return scriptStore
 }
 func (s *scriptLibraryStore) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
+	if s.initErr != nil || s.db == nil {
+		return errors.New("公共数据库未初始化")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
 		return err
 	}
-	b, e := json.Marshal(s.items)
-	if e != nil {
-		return e
+	defer tx.Rollback()
+	if _, err = tx.Exec(`DELETE FROM script_library`); err != nil {
+		return err
 	}
-	tmp := s.path + ".tmp"
-	if e = os.WriteFile(tmp, b, 0o600); e != nil {
-		return e
+	for _, it := range s.items {
+		if _, err = tx.Exec(`INSERT INTO script_library(id,name,script,description,version,approved,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, it.ID, it.Name, it.Script, it.Description, it.Version, boolInt(it.Approved), it.CreatedAt, it.UpdatedAt); err != nil {
+			return err
+		}
 	}
-	return os.Rename(tmp, s.path)
+	return tx.Commit()
 }
-
-type coreResourceStore struct {
-	mu      sync.RWMutex
-	items   map[string][]map[string]any
-	updated time.Time
-}
-
-var coreResources = coreResourceStore{items: make(map[string][]map[string]any)}
 
 func registerCoreResourceRoutes(mux *http.ServeMux) {
 	// 脚本运行必须先经过受保护的专用处理器，不能落入普通资源 CRUD。
 	mux.HandleFunc("GET /api/v2/core/script/run", handleScriptRun)
 	for _, pattern := range []string{
+		"POST /api/v2/core/groups",
 		"POST /api/v2/core/groups/del",
 		"POST /api/v2/core/groups/search",
 		"POST /api/v2/core/groups/update",
@@ -88,6 +125,12 @@ func registerCoreResourceRoutes(mux *http.ServeMux) {
 		"POST /api/v2/core/script/sync",
 	} {
 		switch pattern {
+		case "POST /api/v2/core/groups", "POST /api/v2/core/groups/update":
+			mux.HandleFunc(pattern, handleGroupUpsert)
+		case "POST /api/v2/core/groups/del":
+			mux.HandleFunc(pattern, handleGroupDelete)
+		case "POST /api/v2/core/groups/search":
+			mux.HandleFunc(pattern, handleGroupSearch)
 		case "POST /api/v2/core/script":
 			mux.HandleFunc(pattern, handleScriptCreate)
 		case "POST /api/v2/core/script/search":
@@ -98,8 +141,6 @@ func registerCoreResourceRoutes(mux *http.ServeMux) {
 			mux.HandleFunc(pattern, handleScriptDelete)
 		case "POST /api/v2/core/script/sync":
 			mux.HandleFunc(pattern, handleScriptSync)
-		default:
-			mux.HandleFunc(pattern, coreResourceHandler)
 		}
 	}
 	for _, prefix := range []string{"/api/v2/core/commands/", "/api/v2/core/script/", "/api/v2/core/logs/", "/api/v2/core/groups/"} {
@@ -168,7 +209,7 @@ func isCoreResourceRoute(pattern string) bool {
 	if len(parts) == 2 {
 		path = parts[1]
 	}
-	if path == "/api/v2/core/script" {
+	if path == "/api/v2/core/script" || path == "/api/v2/core/groups" {
 		return true
 	}
 	for _, prefix := range []string{"/api/v2/core/commands/", "/api/v2/core/script/", "/api/v2/core/logs/", "/api/v2/core/groups/"} {
@@ -194,40 +235,8 @@ func coreResourceHandler(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusNotFound, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "RESOURCE_NOT_FOUND"}})
 		return
 	}
-	if r.Method == http.MethodGet || strings.HasSuffix(key, "/search") || strings.HasSuffix(key, "/list") || strings.HasSuffix(key, "/tree") {
-		writeCoreResourceList(w, key)
-		return
-	}
-	var payload map[string]any
-	if r.Body != nil {
-		if err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&payload); err != nil && err != io.EOF {
-			wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "INVALID_JSON"}, "message": err.Error()})
-			return
-		}
-	}
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	if _, ok := payload["id"]; !ok {
-		payload["id"] = "core-" + time.Now().UTC().Format("20060102150405.000000000")
-	}
-	payload["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
-	coreResources.mu.Lock()
-	if strings.HasSuffix(key, "/del") || strings.HasSuffix(key, "/delete") {
-		delete(coreResources.items, key)
-	} else {
-		coreResources.items[key] = append(coreResources.items[key], payload)
-	}
-	coreResources.updated = time.Now().UTC()
-	coreResources.mu.Unlock()
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": payload})
-}
-
-func writeCoreResourceList(w http.ResponseWriter, key string) {
-	coreResources.mu.RLock()
-	items := append([]map[string]any(nil), coreResources.items[key]...)
-	coreResources.mu.RUnlock()
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items), "page": 1, "pageSize": 50}})
+	// 未接入真实仓储的旧资源必须明确返回 501，不能把内存临时列表当作成功结果。
+	wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "NOT_IMPLEMENTED", "resource": key}, "message": "该资源尚未接入真实存储"})
 }
 
 func handleScriptCreate(w http.ResponseWriter, r *http.Request) {
@@ -333,7 +342,13 @@ func handleScriptDelete(w http.ResponseWriter, r *http.Request) {
 	for i, it := range s.items {
 		if it.ID == in.ID {
 			s.items = append(s.items[:i], s.items[i+1:]...)
-			_ = s.saveLocked()
+			if err := s.saveLocked(); err != nil {
+				s.items = append(s.items, scriptLibraryItem{})
+				copy(s.items[i+1:], s.items[i:])
+				s.items[i] = it
+				wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error()})
+				return
+			}
 			wmhttp.JSON(w, 200, map[string]any{"code": 200})
 			return
 		}
@@ -341,5 +356,76 @@ func handleScriptDelete(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, 404, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_NOT_FOUND"}})
 }
 func handleScriptSync(w http.ResponseWriter, r *http.Request) {
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"synced": 0, "source": "local"}})
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("WORKMESH_SCRIPT_REPO_URL")), "/")
+	if base == "" {
+		wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_REPOSITORY_UNAVAILABLE"}, "message": "未配置脚本库远程地址"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base, nil)
+	if err != nil {
+		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_REPOSITORY_INVALID"}, "message": err.Error()})
+		return
+	}
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		wmhttp.JSON(w, http.StatusBadGateway, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_SYNC_FAILED"}, "message": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		wmhttp.JSON(w, http.StatusBadGateway, map[string]any{"code": "ERR", "details": map[string]any{"errCode": "SCRIPT_SYNC_FAILED", "status": resp.StatusCode}, "message": fmt.Sprintf("脚本库远端返回 HTTP %d", resp.StatusCode)})
+		return
+	}
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		wmhttp.JSON(w, http.StatusBadGateway, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_SYNC_FAILED"}, "message": err.Error()})
+		return
+	}
+	var incoming []scriptLibraryItem
+	if err := json.Unmarshal(payload, &incoming); err != nil {
+		var envelope struct {
+			Scripts []scriptLibraryItem `json:"scripts"`
+		}
+		if e := json.Unmarshal(payload, &envelope); e != nil {
+			wmhttp.JSON(w, http.StatusBadGateway, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_REPOSITORY_INVALID"}, "message": e.Error()})
+			return
+		}
+		incoming = envelope.Scripts
+	}
+	if len(incoming) == 0 {
+		wmhttp.JSON(w, http.StatusBadGateway, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_REPOSITORY_EMPTY"}, "message": "远端脚本库为空"})
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	store := getScriptStore()
+	if store.initErr != nil || store.db == nil {
+		wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_STORAGE_UNAVAILABLE"}, "message": "脚本库 SQLite 未初始化"})
+		return
+	}
+	store.mu.Lock()
+	for i := range incoming {
+		incoming[i].ID = strings.TrimSpace(incoming[i].ID)
+		if incoming[i].ID == "" {
+			incoming[i].ID = "remote-" + fmt.Sprintf("%d", i)
+		}
+		if strings.TrimSpace(incoming[i].Name) == "" || strings.TrimSpace(incoming[i].Script) == "" || len(incoming[i].Script) > 64<<10 {
+			store.mu.Unlock()
+			wmhttp.JSON(w, http.StatusBadGateway, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_REPOSITORY_INVALID"}, "message": "远端脚本字段无效"})
+			return
+		}
+		if incoming[i].CreatedAt == "" {
+			incoming[i].CreatedAt = now
+		}
+		incoming[i].UpdatedAt = now
+	}
+	store.items = incoming
+	err = store.saveLocked()
+	store.mu.Unlock()
+	if err != nil {
+		wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_SAVE_FAILED"}, "message": err.Error()})
+		return
+	}
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"count": len(incoming), "syncedAt": now}})
 }

@@ -240,7 +240,7 @@
                     >
                         <template #default="{ row }">
                             <el-tag v-if="row.protocol == 'HTTPS'" :type="row.sslStatus">
-                                {{ dateFormatSimple(row.sslExpireDate) }}
+                                {{ formatSSLExpireDate(row.sslExpireDate) }}
                             </el-tag>
                             <span v-else></span>
                         </template>
@@ -374,6 +374,14 @@ import { routerToFileWithPath, routerToNameWithParams, routerToNameWithQuery } f
 import { useGlobalStore } from '@/composables/useGlobalStore';
 import { useOperateNodeContext } from '@/composables/useOperateNodeContext';
 import { usePageState } from '@/composables/usePageState';
+
+// 未绑定证书时后端返回空值，避免日期工具把空值格式化成 NaN-NaN-NaN。
+const formatSSLExpireDate = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return '';
+    const date = new Date(String(value));
+    if (Number.isNaN(date.getTime())) return '';
+    return dateFormatSimple(value as any);
+};
 
 const { currentNode, isMobile } = useGlobalStore();
 useOperateNodeContext(currentNode);

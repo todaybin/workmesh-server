@@ -11,9 +11,11 @@ import { getCookie } from '@/utils/auth';
 import { handleAuthResponseCode } from '@/utils/auth-response';
 import { GlobalStore } from '@/store';
 import { getOperateNodeOverride } from '@/utils/operate-node';
+import { configuredApiPath } from '@/api/transport';
 
 const config = {
-    baseURL: import.meta.env.VITE_API_URL as string,
+    // 即使构建变量被配置为完整 URL，也只允许浏览器请求当前服务入口。
+    baseURL: configuredApiPath(),
     timeout: ResultEnum.TIMEOUT as number,
     withCredentials: true,
 };
@@ -180,7 +182,7 @@ class RequestHttp {
     }
     post<T>(url: string, params?: object, timeout?: number, headers?: object): Promise<ResultData<T>> {
         let config = {
-            baseURL: import.meta.env.VITE_API_URL as string,
+            baseURL: configuredApiPath(),
             timeout: timeout ? timeout : (ResultEnum.TIMEOUT as number),
             withCredentials: true,
             headers: headers,
@@ -192,7 +194,7 @@ class RequestHttp {
     }
     postWithConfig<T>(url: string, params?: object, config?: RequestConfig): Promise<ResultData<T>> {
         return this.service.post(url, params, {
-            baseURL: import.meta.env.VITE_API_URL as string,
+            baseURL: configuredApiPath(),
             timeout: ResultEnum.TIMEOUT as number,
             withCredentials: true,
             ...config,
@@ -200,7 +202,7 @@ class RequestHttp {
     }
     postLocalNode<T>(url: string, params?: object, timeout?: number): Promise<ResultData<T>> {
         return this.service.post(url, params, {
-            baseURL: import.meta.env.VITE_API_URL as string,
+            baseURL: configuredApiPath(),
             timeout: timeout ? timeout : (ResultEnum.TIMEOUT as number),
             withCredentials: true,
             headers: {

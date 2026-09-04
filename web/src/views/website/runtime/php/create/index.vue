@@ -120,7 +120,7 @@
                         <el-input v-model.trim="runtime.params['CONTAINER_NAME']"></el-input>
                     </el-form-item>
                     <el-form-item :label="$t('php.extensions')">
-                        <el-select v-model="extensions" @change="changePHPExtension()" clearable>
+                        <el-select v-model="extensions" @change="changePHPExtension()" multiple clearable>
                             <el-option
                                 v-for="(extension, index) in phpExtensions"
                                 :key="index"
@@ -295,7 +295,7 @@ const initData = (type: string) => ({
     environments: [],
     remark: '',
 });
-const extensions = ref();
+const extensions = ref<string[]>([]);
 const formFields = ref();
 
 let runtime = reactive<Runtime.RuntimeCreate>(initData('php'));
@@ -373,7 +373,7 @@ const searchAppList = async (appId: number) => {
 };
 
 const changeApp = (appId: number) => {
-    extensions.value = undefined;
+    extensions.value = [];
     for (const app of apps.value) {
         if (app.id === appId) {
             initParam.value = false;
@@ -384,13 +384,13 @@ const changeApp = (appId: number) => {
 };
 
 const changePHPVersion = (version: string) => {
-    runtime.image = 'workmesh-php-fpm:' + version;
+    runtime.image = '1panel-php-fpm:' + version;
 };
 
 const changeVersion = () => {
     loading.value = true;
     initParam.value = false;
-    extensions.value = undefined;
+    extensions.value = [];
     getAppDetail(runtime.appID, runtime.version, 'runtime')
         .then((res) => {
             runtime.appDetailID = res.data.id;
@@ -402,7 +402,7 @@ const changeVersion = () => {
                 formFields.value[fileds[index]['envKey']] = fileds[index];
                 runtime.params[fileds[index]['envKey']] = fileds[index]['default'];
                 if (fileds[index]['envKey'] == 'PHP_VERSION') {
-                    runtime.image = 'workmesh-php-fpm:' + fileds[index]['default'];
+                    runtime.image = '1panel-php-fpm:' + fileds[index]['default'];
                 }
             }
             initParam.value = true;
@@ -501,10 +501,9 @@ const listPHPExtensions = async () => {
 };
 
 const changePHPExtension = () => {
-    if (extensions.value == '') {
-        return;
-    }
-    runtime.params['PHP_EXTENSIONS'] = extensions.value.split(',');
+    runtime.params['PHP_EXTENSIONS'] = Array.from(
+        new Set(extensions.value.flatMap((item) => item.split(',')).map((item) => item.trim()).filter(Boolean)),
+    );
 };
 
 const acceptParams = async (props: OperateRrops) => {
@@ -521,7 +520,7 @@ const acceptParams = async (props: OperateRrops) => {
         searchAppList(props.appID);
         getRuntime(props.id);
     }
-    extensions.value = '';
+    extensions.value = [];
     open.value = true;
     listPHPExtensions();
 };

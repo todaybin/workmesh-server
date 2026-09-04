@@ -19,6 +19,11 @@ import (
 // DockerService 通过 Docker CLI 提供跨平台的最小容器适配。
 type DockerService struct{ commands CommandService }
 
+var dockerLookPath = exec.LookPath
+var dockerStandardPaths = func() []string {
+	return []string{"/usr/bin/docker", "/usr/local/bin/docker", "/snap/bin/docker", filepath.Join(os.Getenv("ProgramFiles"), "Docker", "Docker", "resources", "bin", "docker.exe")}
+}
+
 // NewDockerService 创建 Docker 服务。
 func NewDockerService() DockerService { return DockerService{commands: CommandService{}} }
 
@@ -112,26 +117,73 @@ func parseContainerStates(output string, wanted map[string]struct{}) map[string]
 
 // Operate 执行白名单中的容器生命周期操作。
 func (s DockerService) Operate(ctx context.Context, req model.DockerOperationRequest) (model.CommandResult, error) {
-	if strings.TrimSpace(req.Container) == "" {
-		return model.CommandResult{}, errors.New("容器名称不能为空")
+	operation := strings.ToLower(strings.TrimSpace(req.Operation))
+	if operation == "up" {
+		// 原 Agent 将 up 视为启动容器；保持 v2 操作语义一致。
+		operation = "start"
 	}
-	allowed := map[string]bool{"start": true, "stop": true, "restart": true, "pause": true, "unpause": true, "remove": true}
-	if !allowed[req.Operation] {
+	allowed := map[string]bool{"start": true, "stop": true, "restart": true, "kill": true, "pause": true, "unpause": true, "remove": true}
+	if !allowed[operation] {
 		return model.CommandResult{}, errors.New("不支持的容器操作")
 	}
-	operation := req.Operation
-	if operation == "remove" {
-		operation = "rm"
+	names := make([]string, 0, len(req.Names)+1)
+	for _, name := range req.Names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			names = append(names, name)
+		}
 	}
-	return s.commands.Execute(ctx, model.CommandRequest{Program: dockerBinaryOrName(), Args: []string{operation, req.Container}})
+	if len(names) == 0 && strings.TrimSpace(req.Container) != "" {
+		names = append(names, strings.TrimSpace(req.Container))
+	}
+	if len(names) == 0 {
+		return model.CommandResult{}, errors.New("容器名称不能为空")
+	}
+	for _, name := range names {
+		if !validDockerName(name) {
+			return model.CommandResult{}, fmt.Errorf("容器名称无效: %s", name)
+		}
+	}
+	command := operation
+	if command == "remove" {
+		command = "rm"
+	}
+	var aggregate model.CommandResult
+	for _, name := range names {
+		result, err := s.commands.Execute(ctx, model.CommandRequest{Program: dockerBinaryOrName(), Args: []string{command, name}, Timeout: 5 * time.Minute})
+		aggregate.ExitCode = result.ExitCode
+		aggregate.Duration += result.Duration
+		aggregate.Stdout += result.Stdout
+		aggregate.Stderr += result.Stderr
+		if err != nil || result.ExitCode != 0 {
+			if err == nil {
+				err = fmt.Errorf("docker %s %s 失败: %s", operation, name, strings.TrimSpace(result.Stderr))
+			}
+			return aggregate, err
+		}
+	}
+	return aggregate, nil
+}
+
+// validDockerName 限制生命周期操作只接受 Docker 名称或 ID，避免将输入解释为额外参数。
+func validDockerName(value string) bool {
+	if value == "" || len(value) > 255 || strings.ContainsAny(value, " \t\r\n\x00") {
+		return false
+	}
+	for _, ch := range value {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || strings.ContainsRune("._-", ch)) {
+			return false
+		}
+	}
+	return true
 }
 
 // dockerBinary 在服务管理器精简 PATH 时补查 Docker 的标准安装位置。
 func dockerBinary() string {
-	if value, err := exec.LookPath("docker"); err == nil {
+	if value, err := dockerLookPath("docker"); err == nil {
 		return value
 	}
-	for _, candidate := range []string{"/usr/bin/docker", "/usr/local/bin/docker", "/snap/bin/docker", filepath.Join(os.Getenv("ProgramFiles"), "Docker", "Docker", "resources", "bin", "docker.exe")} {
+	for _, candidate := range dockerStandardPaths() {
 		if candidate == "" {
 			continue
 		}
@@ -148,3 +200,6 @@ func dockerBinaryOrName() string {
 	}
 	return "docker"
 }
+
+// DockerBinary 返回当前系统可用的 Docker CLI 路径；服务管理器精简 PATH 时仍能定位标准安装位置。
+func DockerBinary() string { return dockerBinaryOrName() }

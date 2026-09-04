@@ -18,11 +18,11 @@ export const DeleteRuntime = (req: Runtime.RuntimeDelete) => {
     return http.post<any>(`/runtimes/del`, req);
 };
 
-export const RuntimeDeleteCheck = (runTimeId: number) => {
+export const RuntimeDeleteCheck = (runTimeId: string | number) => {
     return http.get<App.AppInstallResource[]>(`runtimes/installed/delete/check/${runTimeId}`);
 };
 
-export const GetRuntime = (id: number) => {
+export const GetRuntime = (id: string | number) => {
     return http.get<Runtime.RuntimeDTO>(`/runtimes/${id}`);
 };
 

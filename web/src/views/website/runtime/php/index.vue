@@ -158,7 +158,7 @@ import RuntimeStatus from '@/views/website/runtime/components/runtime-status.vue
 import Terminal from '@/views/website/runtime/components/terminal.vue';
 import { disabledButton } from '@/utils/runtime';
 import DockerStatus from '@/views/container/docker-status/index.vue';
-import { operateRuntime, updateRuntimeRemark } from '../common/utils';
+import { operateRuntime, runtimeComposePath, updateRuntimeRemark } from '../common/utils';
 import { routerToFileWithPath } from '@/utils/router';
 import { useGlobalStore } from '@/composables/useGlobalStore';
 const { isMobile } = useGlobalStore();
@@ -320,7 +320,7 @@ const openTerminal = (row: Runtime.Runtime) => {
 const openLog = (row: Runtime.RuntimeDTO) => {
     if (row.status == 'Running') {
         composeLogRef.value.acceptParams({
-            compose: row.path + '/docker-compose.yml',
+        compose: runtimeComposePath(row),
             resource: row.name,
             container: row.container,
         });

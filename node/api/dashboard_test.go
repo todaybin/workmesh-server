@@ -5,9 +5,11 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -30,6 +32,16 @@ func TestDashboardOS(t *testing.T) {
 	}
 	if envelope.Code != 200 || envelope.Data["platform"] == nil {
 		t.Fatalf("unexpected dashboard envelope: %#v", envelope)
+	}
+}
+
+func TestDashboardRestartRequiresExplicitAuthorization(t *testing.T) {
+	t.Setenv("WORKMESH_ALLOW_RESTART", "")
+	t.Setenv("WORKMESH_ALLOW_SYSTEM_REBOOT", "")
+	rec := httptest.NewRecorder()
+	handleDashboardRestart(rec, httptest.NewRequest(http.MethodPost, "/api/v2/dashboard/system/restart/1panel", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("restart without authorization must fail explicitly: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -90,6 +102,31 @@ func TestDashboardNetworkAndDisks(t *testing.T) {
 		if disk["mount"] == nil || disk["path"] == nil || disk["usedPercent"] == nil || disk["device"] == nil {
 			t.Fatalf("disk entry missing identity: %#v", disk)
 		}
+		device := strings.TrimSpace(fmt.Sprint(disk["device"]))
+		mount := strings.TrimSpace(fmt.Sprint(disk["path"]))
+		if !strings.HasPrefix(device, "/dev/") || strings.Contains(mount, "/docker/") || strings.Contains(mount, "/containerd/") {
+			t.Fatalf("dashboard disk entry is not a local disk mount: %#v", disk)
+		}
+	}
+}
+
+func TestDashboardMountFilterKeepsOnlyLocalDiskMounts(t *testing.T) {
+	cases := []struct {
+		device, filesystem, mount string
+		want                      bool
+	}{
+		{device: "/dev/sda1", filesystem: "ext4", mount: "/www", want: true},
+		{device: "/dev/mapper/ubuntu--vg-ubuntu--lv", filesystem: "ext4", mount: "/", want: true},
+		{device: "overlay", filesystem: "overlay", mount: "/var/lib/docker/rootfs/overlayfs/id", want: false},
+		{device: "tmpfs", filesystem: "tmpfs", mount: "/run", want: false},
+		{device: "/dev/sdb2", filesystem: "ext4", mount: "/boot", want: false},
+		{device: "/dev/sda1", filesystem: "ext4", mount: "/var/lib/docker/volumes/data", want: false},
+		{device: "server:/export", filesystem: "nfs4", mount: "/mnt/share", want: false},
+	}
+	for _, tc := range cases {
+		if got := dashboardShouldIncludeMount(tc.device, tc.filesystem, tc.mount); got != tc.want {
+			t.Errorf("dashboardShouldIncludeMount(%q, %q, %q) = %v, want %v", tc.device, tc.filesystem, tc.mount, got, tc.want)
+		}
 	}
 }
 
@@ -140,6 +177,40 @@ func TestDashboardLauncherOptionIncludesHiddenState(t *testing.T) {
 	handleDashboardLauncherOption(options, httptest.NewRequest(http.MethodPost, "/api/v2/dashboard/app/launcher/option", strings.NewReader(`{"filter":"terminal"}`)))
 	if options.Code != http.StatusOK || !strings.Contains(options.Body.String(), `"key":"terminal"`) || !strings.Contains(options.Body.String(), `"isShow":false`) {
 		t.Fatalf("launcher option did not expose persisted hidden state: %s", options.Body.String())
+	}
+}
+
+func TestDashboardAppLaunchersUseCatalogContract(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	appStoreMu.Lock()
+	appStoreInstance = &appStore{
+		path: filepath.Join(dataDir, "apps.json"),
+		state: appStoreState{
+			Catalog: []appRecord{
+				{Key: "demo", Name: "Demo", Type: "website", IconURL: "app_demo", Limit: 1, Recommend: 10, Description: "Demo app"},
+				{Key: "recommended", Name: "Recommended", Type: "tool", IconURL: "app_recommended", Recommend: 20},
+			},
+			Apps: []appRecord{{ID: "install-1", Key: "demo", Name: "Demo instance", Version: "1.2.3", Status: "Running", Config: map[string]any{"httpPort": 8080}}},
+		},
+	}
+	appStoreMu.Unlock()
+	items := dashboardAppLaunchers()
+	if len(items) != 2 {
+		t.Fatalf("launcher count = %d, want 2: %#v", len(items), items)
+	}
+	if got, _ := items[0]["key"].(string); got != "demo" {
+		t.Fatalf("installed app should sort first, got %q", got)
+	}
+	details, ok := items[0]["detail"].([]map[string]any)
+	if !ok || len(details) != 1 {
+		t.Fatalf("launcher detail contract invalid: %#v", items[0]["detail"])
+	}
+	if details[0]["installID"] != "install-1" || details[0]["httpPort"] != 8080 {
+		t.Fatalf("launcher detail fields invalid: %#v", details[0])
+	}
+	if installed, _ := items[0]["isInstall"].(bool); !installed {
+		t.Fatal("installed launcher must set isInstall=true")
 	}
 }
 

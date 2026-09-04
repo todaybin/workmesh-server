@@ -124,7 +124,20 @@ func getAIState() *executionState {
 		return &aiState
 	}
 	data := aiPersistentData{Domains: make(map[string]map[string]any), Configs: make(map[string]map[string]any), Sessions: make(map[string][]map[string]any), Sandboxes: make([]map[string]any, 0), Tasks: make([]map[string]any, 0)}
-	if content, err := os.ReadFile(path); err == nil {
+	if db := sharedDB(); db != nil {
+		// 公共 SQLite 存在时，ai.json 仅作为一次性迁移输入。
+		if !loadJSONState("ai_state", &data) {
+			if content, err := os.ReadFile(path); err == nil && len(content) > 0 && json.Unmarshal(content, &data) == nil {
+				if saveErr := saveJSONState("ai_state", data); saveErr == nil {
+					archiveDir := filepath.Join(filepath.Dir(path), "backups")
+					if os.MkdirAll(archiveDir, 0o750) == nil {
+						archivePath := filepath.Join(archiveDir, "legacy-ai-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".json")
+						_ = os.Rename(path, archivePath)
+					}
+				}
+			}
+		}
+	} else if content, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(content, &data)
 	}
 	if data.Domains == nil {
@@ -150,6 +163,9 @@ func getAIState() *executionState {
 }
 
 func (s *executionState) saveLocked() error {
+	if sharedDB() != nil {
+		return saveJSONState("ai_state", s.data)
+	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
 		return err
 	}

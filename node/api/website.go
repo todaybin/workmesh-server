@@ -6,6 +6,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"regexp"
@@ -189,7 +190,8 @@ func registerDomainRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 			writeError(w, 500, err)
 			return
 		}
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items)}})
+		// 原版前端将 res.data 直接作为表格数组使用，不能套分页对象。
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": items})
 	}
 	// 仅注册旧契约的 websiteId 参数，避免与站点配置通配符产生 ServeMux 冲突。
 	// 兼容旧路径 GET /api/v2/websites/domains/:websiteId；与 HTTPS 双段路径统一分发。
@@ -355,6 +357,19 @@ func registerWebsiteConfigRoutes(mux *http.ServeMux, svc *service.WebsiteService
 			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": cfg})
 			return
 		}
+		if r.PathValue("type") == "openresty" {
+			cfg, err := svc.WebsiteConfigFile(id)
+			if errors.Is(err, os.ErrNotExist) {
+				writeError(w, http.StatusNotFound, err)
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": cfg})
+			return
+		}
 		cfg, err := svc.GetConfig(id, r.PathValue("type"))
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, 404, err)
@@ -482,13 +497,43 @@ func registerWebsiteConfigRoutes(mux *http.ServeMux, svc *service.WebsiteService
 		}
 		wmhttp.JSON(w, 200, map[string]any{"code": 200})
 	})
-	mux.HandleFunc("POST /api/v2/websites/config", func(w http.ResponseWriter, r *http.Request) { websiteConfigWrite(svc, w, r) })
-	mux.HandleFunc("POST /api/v2/websites/config/update", func(w http.ResponseWriter, r *http.Request) { websiteConfigWrite(svc, w, r) })
+	configHandler := func(w http.ResponseWriter, r *http.Request) { websiteConfigWrite(svc, w, r) }
+	mux.HandleFunc("POST /api/v2/websites/config", configHandler)
+	mux.HandleFunc("POST /api/v2/websites/config/update", configHandler)
+	// 代理列表必须读取站点域名目录 nginx/proxy 下的真实配置，不能落入旧扩展元数据兜底。
+	proxyListHandler := func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ID        json.RawMessage `json:"id"`
+			WebsiteID uint            `json:"websiteID"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		id := in.WebsiteID
+		if id == 0 && len(in.ID) > 0 {
+			_ = json.Unmarshal(in.ID, &id)
+		}
+		items, err := svc.ListWebsiteProxies(id)
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": items})
+	}
+	mux.HandleFunc("POST /api/v2/websites/proxies", proxyListHandler)
 	mux.HandleFunc("POST /api/v2/websites/nginx/update", func(w http.ResponseWriter, r *http.Request) { websiteConfigWrite(svc, w, r) })
+	mux.HandleFunc("POST /api/v2/websites/dir", func(w http.ResponseWriter, r *http.Request) { websiteDirRead(svc, w, r) })
+	mux.HandleFunc("POST /api/v2/websites/dir/update", func(w http.ResponseWriter, r *http.Request) { websiteDirUpdate(svc, w, r) })
+	mux.HandleFunc("POST /api/v2/websites/dir/permission", func(w http.ResponseWriter, r *http.Request) { websiteDirPermission(svc, w, r) })
+	mux.HandleFunc("POST /api/v2/websites/rewrite", func(w http.ResponseWriter, r *http.Request) { websiteRewriteRead(svc, w, r) })
+	mux.HandleFunc("POST /api/v2/websites/rewrite/update", func(w http.ResponseWriter, r *http.Request) { websiteRewriteUpdate(svc, w, r) })
 	// 以下配置接口复用同一持久化存储，但每个类型均单独命名，避免配置相互覆盖。
 	for _, item := range []struct{ path, typ string }{
-		{"/api/v2/websites/rewrite", "rewrite"}, {"/api/v2/websites/rewrite/update", "rewrite"},
-		{"/api/v2/websites/dir", "dir"}, {"/api/v2/websites/dir/update", "dir"}, {"/api/v2/websites/dir/permission", "dir-permission"},
 		{"/api/v2/websites/leech", "leech"}, {"/api/v2/websites/leech/update", "leech"},
 		{"/api/v2/websites/redirect", "redirect"}, {"/api/v2/websites/redirect/update", "redirect"}, {"/api/v2/websites/redirect/file", "redirect-file"},
 	} {
@@ -609,6 +654,9 @@ func websiteConfigWrite(svc *service.WebsiteService, w http.ResponseWriter, r *h
 		WebsiteID uint           `json:"websiteID"`
 		ID        uint           `json:"id"`
 		Type      string         `json:"type"`
+		Operate   string         `json:"operate"`
+		Scope     string         `json:"scope"`
+		Params    map[string]any `json:"params"`
 		Config    map[string]any `json:"config"`
 		Content   string         `json:"content"`
 	}
@@ -618,6 +666,54 @@ func websiteConfigWrite(svc *service.WebsiteService, w http.ResponseWriter, r *h
 	}
 	if in.WebsiteID == 0 {
 		in.WebsiteID = in.ID
+	}
+	if in.WebsiteID == 0 {
+		writeError(w, 400, errors.New("网站 ID 无效"))
+		return
+	}
+	if in.Scope == "index" {
+		params := map[string]string{}
+		for k, v := range in.Params {
+			switch value := v.(type) {
+			case string:
+				params[k] = value
+			case []any:
+				parts := make([]string, 0, len(value))
+				for _, item := range value {
+					if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+						parts = append(parts, strings.TrimSpace(text))
+					}
+				}
+				params[k] = strings.Join(parts, " ")
+			}
+		}
+		if in.Operate == "get" || len(params) == 0 {
+			cfg, err := svc.WebsiteNginxScopeConfig(in.WebsiteID, in.Scope)
+			if err != nil {
+				writeError(w, 404, err)
+				return
+			}
+			wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
+			return
+		}
+		documentText := params["index"]
+		documents := strings.Fields(documentText)
+		if len(documents) == 0 {
+			writeError(w, http.StatusBadRequest, errors.New("默认文档不能为空"))
+			return
+		}
+		if err := svc.UpdateWebsiteNginxIndex(in.WebsiteID, documents); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		cfg := map[string]any{"enable": in.Operate != "disable", "params": []map[string]any{{"name": "index", "params": documents}}}
+		result, err := svc.UpdateConfig(in.WebsiteID, "index", cfg)
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": result})
+		return
 	}
 	if in.Type == "" {
 		in.Type = "nginx"
@@ -638,6 +734,136 @@ func websiteConfigWrite(svc *service.WebsiteService, w http.ResponseWriter, r *h
 	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
 }
 
+func websiteDirRead(svc *service.WebsiteService, w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ID        uint `json:"id"`
+		WebsiteID uint `json:"websiteID"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	if in.WebsiteID == 0 {
+		in.WebsiteID = in.ID
+	}
+	result, err := svc.WebsiteDirConfig(in.WebsiteID)
+	if errors.Is(err, os.ErrNotExist) {
+		writeError(w, 404, err)
+		return
+	}
+	if err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": result})
+}
+
+func websiteDirUpdate(svc *service.WebsiteService, w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ID        uint   `json:"id"`
+		WebsiteID uint   `json:"websiteID"`
+		Dir       string `json:"dir"`
+		SiteDir   string `json:"siteDir"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	if in.WebsiteID == 0 {
+		in.WebsiteID = in.ID
+	}
+	if in.Dir == "" {
+		in.Dir = in.SiteDir
+	}
+	result, err := svc.UpdateWebsiteDir(in.WebsiteID, in.Dir)
+	if errors.Is(err, os.ErrNotExist) {
+		writeError(w, 404, err)
+		return
+	}
+	if err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": result})
+}
+
+func websiteDirPermission(svc *service.WebsiteService, w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ID        uint   `json:"id"`
+		WebsiteID uint   `json:"websiteID"`
+		User      string `json:"user"`
+		Group     string `json:"userGroup"`
+		UserGroup string `json:"group"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	if in.WebsiteID == 0 {
+		in.WebsiteID = in.ID
+	}
+	if in.Group == "" {
+		in.Group = in.UserGroup
+	}
+	if err := svc.UpdateWebsiteDirPermission(in.WebsiteID, in.User, in.Group); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"updated": true}})
+}
+
+func websiteRewriteRead(svc *service.WebsiteService, w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		WebsiteID uint   `json:"websiteID"`
+		ID        uint   `json:"id"`
+		Name      string `json:"name"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	if in.WebsiteID == 0 {
+		in.WebsiteID = in.ID
+	}
+	if in.Name == "" {
+		in.Name = "current"
+	}
+	result, err := svc.GetRewrite(in.WebsiteID, in.Name)
+	if errors.Is(err, os.ErrNotExist) {
+		writeError(w, 404, err)
+		return
+	}
+	if err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": result})
+}
+
+func websiteRewriteUpdate(svc *service.WebsiteService, w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		WebsiteID uint   `json:"websiteID"`
+		ID        uint   `json:"id"`
+		Name      string `json:"name"`
+		Content   string `json:"content"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	if in.WebsiteID == 0 {
+		in.WebsiteID = in.ID
+	}
+	if err := svc.UpdateRewrite(in.WebsiteID, in.Name, in.Content); errors.Is(err, os.ErrNotExist) {
+		writeError(w, 404, err)
+		return
+	} else if err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"updated": true}})
+}
+
 func websiteConfigWriteType(svc *service.WebsiteService, typ string, w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		WebsiteID uint           `json:"websiteID"`
@@ -651,6 +877,23 @@ func websiteConfigWriteType(svc *service.WebsiteService, typ string, w http.Resp
 	}
 	if in.WebsiteID == 0 {
 		in.WebsiteID = in.ID
+	}
+	if typ == "redirect" && r.URL.Path == "/api/v2/websites/redirect" {
+		cfg, err := svc.GetConfig(in.WebsiteID, typ)
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if len(cfg) == 0 || strings.TrimSpace(fmt.Sprint(cfg["content"])) == "" {
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "message": "", "data": nil})
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "message": "", "data": cfg})
+		return
 	}
 	value := in.Config
 	if value == nil {
@@ -816,7 +1059,7 @@ func registerWebsiteCRUD(mux *http.ServeMux, svc *service.WebsiteService) {
 			Type            string `json:"type"`
 			Status          string `json:"status"`
 			WebsiteSSLID    uint   `json:"websiteSSLId"`
-			RuntimeID       uint   `json:"runtimeID"`
+			RuntimeID       string `json:"runtimeID"`
 			AppInstallID    uint   `json:"appInstallId"`
 			ParentWebsiteID uint   `json:"parentWebsiteID"`
 			OrderBy         string `json:"orderBy"`
@@ -852,7 +1095,7 @@ func registerWebsiteCRUD(mux *http.ServeMux, svc *service.WebsiteService) {
 			if req.WebsiteSSLID != 0 && item.WebsiteSSLID != req.WebsiteSSLID {
 				continue
 			}
-			if req.RuntimeID != 0 && item.RuntimeID != req.RuntimeID {
+			if strings.TrimSpace(req.RuntimeID) != "" && item.RuntimeID != req.RuntimeID {
 				continue
 			}
 			if req.AppInstallID != 0 && item.AppInstallID != req.AppInstallID {
@@ -1210,6 +1453,15 @@ func registerOpenRestyRoutes(mux *http.ServeMux, svc *service.WebsiteService) {
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": status})
 	})
+	for _, path := range []string{"/api/v2/openresty/clear", "/api/v2/openresty/cache/clear"} {
+		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
+			if err := svc.ClearOpenRestyCache(); err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"cleared": true}})
+		})
+	}
 	mux.HandleFunc("POST /api/v2/openresty/update", openRestyUpdate(svc))
 	mux.HandleFunc("POST /api/v2/openresty/file", openRestyUpdate(svc))
 	mux.HandleFunc("POST /api/v2/openresty/scope", openRestyUpdate(svc))

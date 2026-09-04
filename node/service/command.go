@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -21,7 +22,7 @@ const maxCommandOutput = 1 << 20
 // CommandService 执行受控的系统程序。调用者必须在 HTTP 层完成认证和审计。
 type CommandService struct{}
 
-// Execute 以独立参数执行程序，禁止通过 shell 字符串拼接，最长运行时间为五分钟。
+// Execute 以独立参数执行程序，禁止通过 shell 字符串拼接；普通调用默认五分钟，构建类调用最多一小时。
 func (CommandService) Execute(ctx context.Context, request model.CommandRequest) (model.CommandResult, error) {
 	if strings.TrimSpace(request.Program) == "" {
 		return model.CommandResult{}, errors.New("系统命令不能为空")
@@ -30,7 +31,7 @@ func (CommandService) Execute(ctx context.Context, request model.CommandRequest)
 		return model.CommandResult{}, errors.New("系统命令包含非法字符")
 	}
 	timeout := request.Timeout
-	if timeout <= 0 || timeout > 5*time.Minute {
+	if timeout <= 0 || timeout > time.Hour {
 		timeout = 5 * time.Minute
 	}
 	commandCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -47,8 +48,8 @@ func (CommandService) Execute(ctx context.Context, request model.CommandRequest)
 		}
 	}
 	var stdout, stderr limitedBuffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
+	command.Stdout = io.MultiWriter(&stdout, commandOutputWriter{stream: "stdout", callback: request.Output})
+	command.Stderr = io.MultiWriter(&stderr, commandOutputWriter{stream: "stderr", callback: request.Output})
 	started := time.Now()
 	err := command.Run()
 	result := model.CommandResult{ExitCode: 0, Stdout: stdout.String(), Stderr: stderr.String(), Duration: time.Since(started).Milliseconds()}
@@ -67,6 +68,18 @@ func (CommandService) Execute(ctx context.Context, request model.CommandRequest)
 }
 
 type limitedBuffer struct{ bytes.Buffer }
+
+type commandOutputWriter struct {
+	stream   string
+	callback func(string, []byte)
+}
+
+func (w commandOutputWriter) Write(p []byte) (int, error) {
+	if w.callback != nil && len(p) > 0 {
+		w.callback(w.stream, append([]byte(nil), p...))
+	}
+	return len(p), nil
+}
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
 	remaining := maxCommandOutput - b.Len()

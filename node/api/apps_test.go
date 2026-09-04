@@ -96,11 +96,62 @@ func TestRemoteAppCatalogLazyLoadAndDetails(t *testing.T) {
 	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"id":"`) || !strings.Contains(detail.Body.String(), "demo:1.2.3") || !strings.Contains(detail.Body.String(), `"dockerCompose":"services:`) || !strings.Contains(detail.Body.String(), `"params":{"formFields"`) {
 		t.Fatalf("version detail status=%d body=%s", detail.Code, detail.Body.String())
 	}
+	if !strings.Contains(detail.Body.String(), `"image":"demo"`) {
+		t.Fatalf("runtime image repository missing: %s", detail.Body.String())
+	}
 
 	icon := httptest.NewRecorder()
 	mux.ServeHTTP(icon, httptest.NewRequest(http.MethodGet, "/api/v2/apps/icon/demo", nil))
 	if icon.Code != http.StatusOK || icon.Header().Get("Content-Type") != "image/png" || icon.Body.String() != "png" {
 		t.Fatalf("icon status=%d type=%s body=%q", icon.Code, icon.Header().Get("Content-Type"), icon.Body.String())
+	}
+}
+
+func TestPHPVersionAppUsesOnePanelRuntimeFormFields(t *testing.T) {
+	genericParams := map[string]any{"formFields": []any{
+		map[string]any{"envKey": "PHP_EXTENSIONS", "multiple": true},
+		map[string]any{"envKey": "PHP_VERSION", "default": "7.4.33"},
+		map[string]any{"envKey": "CONTAINER_PACKAGE_URL", "default": "https://mirrors.tuna.tsinghua.edu.cn"},
+		map[string]any{"envKey": "PANEL_APP_PORT_HTTP", "default": 9000},
+	}}
+	catalog := []appRecord{{Key: "php", Type: "php", Versions: []appVersionRecord{{Version: "7", Params: genericParams}}}}
+	selected := appVersionRecord{Version: "7.4.33", Params: map[string]any{"formFields": []any{map[string]any{"envKey": "PANEL_APP_PORT_HTTP"}}}}
+	params := phpRuntimeCatalogParams(catalog, selected)
+	fields, ok := params["formFields"].([]any)
+	if !ok || len(fields) != 4 {
+		t.Fatalf("PHP runtime fields not supplied from 1Panel catalog: %#v", params)
+	}
+	for _, key := range []string{"PHP_EXTENSIONS", "PHP_VERSION", "CONTAINER_PACKAGE_URL", "PANEL_APP_PORT_HTTP"} {
+		found := false
+		for _, raw := range fields {
+			field, _ := raw.(map[string]any)
+			found = found || field["envKey"] == key
+		}
+		if !found {
+			t.Fatalf("PHP runtime field %s missing: %#v", key, fields)
+		}
+	}
+}
+
+func TestRuntimeCatalogTypeIsolationAndUnifiedPHPEntry(t *testing.T) {
+	tests := []struct {
+		name     string
+		app      appRecord
+		typeName string
+		want     bool
+	}{
+		{name: "unified php", app: appRecord{Key: "php", Type: "php"}, typeName: "php", want: true},
+		{name: "deprecated php8", app: appRecord{Key: "php8", Type: "php"}, typeName: "php", want: false},
+		{name: "phpmyadmin is not php", app: appRecord{Key: "phpmyadmin", Type: "app"}, typeName: "php", want: false},
+		{name: "node", app: appRecord{Key: "node", Type: "node"}, typeName: "node", want: true},
+		{name: "cross type", app: appRecord{Key: "go", Type: "go"}, typeName: "java", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := appMatchesRuntimeCatalog(test.app, test.typeName); got != test.want {
+				t.Fatalf("appMatchesRuntimeCatalog(%#v, %q)=%v, want %v", test.app, test.typeName, got, test.want)
+			}
+		})
 	}
 }
 
@@ -139,6 +190,26 @@ func TestAppInstallAndList(t *testing.T) {
 	mux.ServeHTTP(list, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/search", nil))
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "demo") {
 		t.Fatalf("list body=%s", list.Body.String())
+	}
+}
+
+func TestInstalledSyncAndCustomStoreRequireRealSources(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	t.Setenv("WORKMESH_CUSTOM_APP_ARCHIVE", "")
+	t.Setenv("WORKMESH_CUSTOM_APP_PACKAGE", "")
+	resetAppStoreForTest()
+	defer resetAppStoreForTest()
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	sync := httptest.NewRecorder()
+	mux.ServeHTTP(sync, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/sync", strings.NewReader(`{}`)))
+	if sync.Code != http.StatusOK || !strings.Contains(sync.Body.String(), `"synced"`) {
+		t.Fatalf("installed sync failed: %d %s", sync.Code, sync.Body.String())
+	}
+	custom := httptest.NewRecorder()
+	mux.ServeHTTP(custom, httptest.NewRequest(http.MethodPost, "/api/v2/custom/app/sync", strings.NewReader(`{"taskID":"t1"}`)))
+	if custom.Code != http.StatusServiceUnavailable || !strings.Contains(custom.Body.String(), "归档") {
+		t.Fatalf("custom sync should reject missing source: %d %s", custom.Code, custom.Body.String())
 	}
 }
 
@@ -215,10 +286,16 @@ func TestApplyAppContainerStatesMatchesOriginalStatusRules(t *testing.T) {
 
 func TestAppOperationsAndCatalog(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	binDir := t.TempDir()
+	dockerPath := filepath.Join(binDir, "docker")
+	if err := os.WriteFile(dockerPath, []byte("#!/bin/sh\ncase \"$*\" in *ps*) printf 'demo-web\\texited\\n';; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
 	mux := http.NewServeMux()
 	RegisterAppRoutes(mux)
 	install := httptest.NewRecorder()
-	mux.ServeHTTP(install, httptest.NewRequest(http.MethodPost, "/api/v2/apps/install", strings.NewReader(`{"id":"42","key":"demo","name":"Demo","version":"1.0","port":8080}`)))
+	mux.ServeHTTP(install, httptest.NewRequest(http.MethodPost, "/api/v2/apps/install", strings.NewReader(`{"id":"42","key":"demo","name":"Demo","version":"1.0","containerName":"demo-web","port":8080}`)))
 	if install.Code != http.StatusOK || !strings.Contains(install.Body.String(), "running") {
 		t.Fatalf("install: %d %s", install.Code, install.Body.String())
 	}
@@ -234,7 +311,7 @@ func TestAppOperationsAndCatalog(t *testing.T) {
 	}
 	stop := httptest.NewRecorder()
 	mux.ServeHTTP(stop, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/op", strings.NewReader(`{"installId":"42","operate":"stop"}`)))
-	if stop.Code != http.StatusOK || !strings.Contains(stop.Body.String(), "stopped") {
+	if stop.Code != http.StatusOK || !strings.Contains(strings.ToLower(stop.Body.String()), "stopped") {
 		t.Fatalf("stop: %d %s", stop.Code, stop.Body.String())
 	}
 	icon := httptest.NewRecorder()
@@ -257,6 +334,46 @@ func TestAppOperationValidatesTargetAndOperation(t *testing.T) {
 	mux.ServeHTTP(invalid, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/op", strings.NewReader(`{"installId":"missing","operate":"explode"}`)))
 	if invalid.Code != http.StatusNotFound {
 		t.Fatalf("target validation should precede operation validation: %d", invalid.Code)
+	}
+}
+
+func TestAppOperationUsesComposeUpAndRealDockerBinary(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "docker-args.log")
+	dockerPath := filepath.Join(binDir, "docker")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"" + logPath + "\"\ncase \"$*\" in *' ps '*|*' ps --format '* ) printf 'demo-web\\n' ;; esac\n"
+	if err := os.WriteFile(dockerPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+	resetAppStoreForTest()
+	defer resetAppStoreForTest()
+	store := getAppStore()
+	item := appRecord{ID: "42", Key: "demo", Name: "Demo", Version: "1.0", Status: "Stopped", ContainerName: "demo-web", Config: map[string]any{}}
+	if err := os.MkdirAll(appInstallPath(item), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	composePath := appComposePath(item)
+	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: demo:1.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.state.Apps = []appRecord{item}
+	store.mu.Unlock()
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/op", strings.NewReader(`{"installId":"42","operate":"start"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("operation status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	args, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "compose") || !strings.Contains(string(args), "up -d") {
+		t.Fatalf("expected compose up -d invocation, got %q", args)
 	}
 }
 

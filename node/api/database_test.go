@@ -5,12 +5,16 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/todaybin/workmesh-server/node/service"
+	_ "modernc.org/sqlite"
 )
 
 func TestDatabaseRedisCheckUsesRedisPort(t *testing.T) {
@@ -54,6 +58,17 @@ func TestDatabaseGenericOperationDoesNotClaimSuccessWhenUnavailable(t *testing.T
 }
 
 func TestDatabaseCreateAndSearch(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE databases (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, version TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'local', app_install_id INTEGER NOT NULL DEFAULT 0, address TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL DEFAULT 0, initial_db TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', password TEXT NOT NULL DEFAULT '', ssl INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.SetSharedDatabase(db)
+	defer service.SetSharedDatabase(nil)
 	mux := http.NewServeMux()
 	RegisterHostContainerCronRoutes(mux)
 	res := httptest.NewRecorder()

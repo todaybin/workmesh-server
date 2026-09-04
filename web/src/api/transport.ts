@@ -8,7 +8,7 @@
  * relay 的选择标识，不能在浏览器中直接拼接内部地址。
  */
 
-const configuredApiPath = () => {
+export const configuredApiPath = () => {
     const value = String(import.meta.env.VITE_API_URL || '/api/v2').trim();
     if (!value) return '/api/v2';
     try {
@@ -72,4 +72,3 @@ export const buildSameOriginWebSocketUrl = (
     }
     return url.toString();
 };
-

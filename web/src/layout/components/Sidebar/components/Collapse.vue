@@ -98,7 +98,7 @@ import { countExecutingTask } from '@/api/modules/log';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import i18n from '@/lang';
 import { getAgentSettingInfo } from '@/api/modules/setting';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import bus from '@/global/bus';
 import { logOutApi } from '@/api/modules/auth';
 import { submitSAML2Navigation } from '@/utils/saml2';
@@ -131,9 +131,10 @@ const props = defineProps({
 const defaultNodeLimit = 8;
 
 const emit = defineEmits(['openTask', 'refresh']);
-bus.on('refreshTask', () => {
+const refreshTask = () => {
     checkTask();
-});
+};
+bus.on('refreshTask', refreshTask);
 
 const loadCurrentName = () => {
     const item = nodeOptions.value.find((node) => node.name === currentNode.value || node.nodeId === currentNode.value);
@@ -315,6 +316,10 @@ onMounted(() => {
     loadNodes();
     checkTask();
     loadCurrentUser();
+});
+
+onBeforeUnmount(() => {
+    bus.off('refreshTask', refreshTask);
 });
 </script>
 

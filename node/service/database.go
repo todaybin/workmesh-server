@@ -5,12 +5,9 @@ package service
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"errors"
 	"net"
-	"os"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,123 +15,149 @@ import (
 )
 
 type Database struct {
-	ID          int64     `json:"id"`
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	Host        string    `json:"host"`
-	Port        int       `json:"port"`
-	Username    string    `json:"username"`
-	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	Type         string    `json:"type"`
+	Version      string    `json:"version,omitempty"`
+	From         string    `json:"from,omitempty"`
+	AppInstallID int64     `json:"appInstallID,omitempty"`
+	Host         string    `json:"host"`
+	Port         int       `json:"port"`
+	InitialDB    string    `json:"initialDB,omitempty"`
+	Username     string    `json:"username"`
+	Password     string    `json:"-"`
+	SSL          bool      `json:"ssl,omitempty"`
+	Description  string    `json:"description,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 type DatabaseRepository struct {
-	mu    sync.RWMutex
-	next  int64
-	items map[int64]Database
-	path  string
+	db *sql.DB
 }
 
+var sharedDatabaseMu sync.RWMutex
+var sharedDatabase *sql.DB
+
+// SetSharedDatabase 注入统一 SQLite 连接池；正式服务启动后数据库仓库不再写文件。
+func SetSharedDatabase(db *sql.DB) {
+	sharedDatabaseMu.Lock()
+	sharedDatabase = db
+	sharedDatabaseMu.Unlock()
+}
+
+func currentSharedDatabase() *sql.DB {
+	sharedDatabaseMu.RLock()
+	defer sharedDatabaseMu.RUnlock()
+	return sharedDatabase
+}
+
+// SharedDatabase 返回进程统一 SQLite 连接；领域服务使用该连接避免重复打开数据库。
+func SharedDatabase() *sql.DB { return currentSharedDatabase() }
+
 func NewDatabaseRepository() *DatabaseRepository {
-	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
-	if dir == "" {
-		dir = "./data"
+	return &DatabaseRepository{db: currentSharedDatabase()}
+}
+
+func (r *DatabaseRepository) sqlDB() *sql.DB {
+	if db := currentSharedDatabase(); db != nil {
+		return db
 	}
-	r := &DatabaseRepository{next: 1, items: make(map[int64]Database), path: filepath.Join(dir, "databases.json")}
-	if b, err := os.ReadFile(r.path); err == nil {
-		var payload struct {
-			Next  int64              `json:"next"`
-			Items map[int64]Database `json:"items"`
+	return r.db
+}
+
+func (r *DatabaseRepository) List(ctx context.Context, typ, name string) []Database {
+	if db := r.sqlDB(); db != nil {
+		query := `SELECT id,name,type,version,source,app_install_id,address,port,initial_db,username,description,created_at,updated_at FROM databases WHERE (?='' OR lower(type)=lower(?)) AND (?='' OR lower(name) LIKE '%'||lower(?)||'%') ORDER BY id`
+		rows, err := db.QueryContext(ctx, query, typ, typ, name, name)
+		if err != nil {
+			return []Database{}
 		}
-		if json.Unmarshal(b, &payload) == nil {
-			if payload.Next > 0 {
-				r.next = payload.Next
+		defer rows.Close()
+		out := make([]Database, 0)
+		for rows.Next() {
+			var item Database
+			var created, updated string
+			if rows.Scan(&item.ID, &item.Name, &item.Type, &item.Version, &item.From, &item.AppInstallID, &item.Host, &item.Port, &item.InitialDB, &item.Username, &item.Description, &created, &updated) != nil {
+				continue
 			}
-			if payload.Items != nil {
-				r.items = payload.Items
-			}
+			item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+			item.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+			out = append(out, item)
 		}
+		return out
 	}
-	return r
+	return []Database{}
 }
-func (r *DatabaseRepository) List(_ context.Context, typ, name string) []Database {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]Database, 0)
-	for _, item := range r.items {
-		if typ != "" && item.Type != typ {
-			continue
+func (r *DatabaseRepository) Create(ctx context.Context, item Database) (Database, error) {
+	if db := r.sqlDB(); db != nil {
+		if item.Name == "" || item.Type == "" {
+			return Database{}, errors.New("数据库名称和类型不能为空")
 		}
-		if name != "" && !strings.Contains(strings.ToLower(item.Name), strings.ToLower(name)) {
-			continue
+		now := time.Now().UTC()
+		item.CreatedAt, item.UpdatedAt = now, now
+		res, err := db.ExecContext(ctx, `INSERT INTO databases(name,type,version,source,app_install_id,address,port,initial_db,username,password,ssl,description,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, item.Name, item.Type, item.Version, item.From, item.AppInstallID, item.Host, item.Port, item.InitialDB, item.Username, item.Password, databaseBoolInt(item.SSL), item.Description, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+		if err != nil {
+			return Database{}, err
 		}
-		out = append(out, item)
+		item.ID, _ = res.LastInsertId()
+		return item, nil
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	return Database{}, errors.New("公共数据库未初始化")
 }
-func (r *DatabaseRepository) Create(_ context.Context, item Database) (Database, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if item.Name == "" || item.Type == "" {
-		return Database{}, errors.New("数据库名称和类型不能为空")
+func (r *DatabaseRepository) Delete(ctx context.Context, id int64) error {
+	if db := r.sqlDB(); db != nil {
+		res, err := db.ExecContext(ctx, `DELETE FROM databases WHERE id=?`, id)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return errors.New("数据库不存在")
+		}
+		return nil
 	}
-	item.ID = r.next
-	r.next++
-	item.CreatedAt = time.Now().UTC()
-	r.items[item.ID] = item
-	if err := r.saveLocked(); err != nil {
-		delete(r.items, item.ID)
-		r.next--
-		return Database{}, err
-	}
-	return item, nil
-}
-func (r *DatabaseRepository) Delete(_ context.Context, id int64) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.items[id]; !ok {
-		return errors.New("数据库不存在")
-	}
-	delete(r.items, id)
-	return r.saveLocked()
+	return errors.New("公共数据库未初始化")
 }
 
 // Update 修改已登记的数据库连接信息，不会覆盖创建时间。
-func (r *DatabaseRepository) Update(_ context.Context, item Database) (Database, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	current, ok := r.items[item.ID]
-	if !ok {
-		return Database{}, errors.New("数据库不存在")
+func (r *DatabaseRepository) Update(ctx context.Context, item Database) (Database, error) {
+	if db := r.sqlDB(); db != nil {
+		if item.Name == "" || item.Type == "" {
+			return Database{}, errors.New("数据库名称和类型不能为空")
+		}
+		current := r.findSQL(ctx, item.ID)
+		if current.ID == 0 {
+			return Database{}, errors.New("数据库不存在")
+		}
+		item.CreatedAt, item.UpdatedAt = current.CreatedAt, time.Now().UTC()
+		_, err := db.ExecContext(ctx, `UPDATE databases SET name=?,type=?,version=?,source=?,app_install_id=?,address=?,port=?,initial_db=?,username=?,password=CASE WHEN ?='' THEN password ELSE ? END,ssl=?,description=?,updated_at=? WHERE id=?`, item.Name, item.Type, item.Version, item.From, item.AppInstallID, item.Host, item.Port, item.InitialDB, item.Username, item.Password, item.Password, databaseBoolInt(item.SSL), item.Description, item.UpdatedAt.Format(time.RFC3339Nano), item.ID)
+		if err != nil {
+			return Database{}, err
+		}
+		if item.Password == "" {
+			item.Password = current.Password
+		}
+		return item, nil
 	}
-	if item.Name == "" || item.Type == "" {
-		return Database{}, errors.New("数据库名称和类型不能为空")
-	}
-	item.CreatedAt = current.CreatedAt
-	r.items[item.ID] = item
-	if err := r.saveLocked(); err != nil {
-		r.items[item.ID] = current
-		return Database{}, err
-	}
-	return item, nil
+	return Database{}, errors.New("公共数据库未初始化")
 }
 
-func (r *DatabaseRepository) saveLocked() error {
-	if err := os.MkdirAll(filepath.Dir(r.path), 0o750); err != nil {
-		return err
+func (r *DatabaseRepository) findSQL(ctx context.Context, id int64) Database {
+	db := r.sqlDB()
+	if db == nil {
+		return Database{}
 	}
-	b, err := json.Marshal(struct {
-		Next  int64              `json:"next"`
-		Items map[int64]Database `json:"items"`
-	}{r.next, r.items})
+	var item Database
+	var created, updated string
+	var ssl int
+	err := db.QueryRowContext(ctx, `SELECT id,name,type,version,source,app_install_id,address,port,initial_db,username,password,ssl,description,created_at,updated_at FROM databases WHERE id=?`, id).Scan(&item.ID, &item.Name, &item.Type, &item.Version, &item.From, &item.AppInstallID, &item.Host, &item.Port, &item.InitialDB, &item.Username, &item.Password, &ssl, &item.Description, &created, &updated)
 	if err != nil {
-		return err
+		return Database{}
 	}
-	tmp := r.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, r.path)
+	item.SSL = ssl != 0
+	item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+	item.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+	return item
 }
 
 type DatabaseService struct{ repo *DatabaseRepository }
@@ -147,6 +170,21 @@ func NewDatabaseService(repo *DatabaseRepository) *DatabaseService {
 }
 func (s *DatabaseService) Search(ctx context.Context, typ, name string) []Database {
 	return s.repo.List(ctx, typ, name)
+}
+
+// FindConnection 返回应用安装参数所需的完整连接信息，调用方必须自行脱敏输出。
+func (s *DatabaseService) FindConnection(ctx context.Context, typ, name string) (Database, bool) {
+	typ = strings.ToLower(strings.TrimSpace(typ))
+	name = strings.TrimSpace(name)
+	for _, item := range s.repo.List(ctx, typ, name) {
+		if strings.EqualFold(item.Name, name) {
+			if db := s.repo.sqlDB(); db != nil {
+				item = s.repo.findSQL(ctx, item.ID)
+			}
+			return item, true
+		}
+	}
+	return Database{}, false
 }
 func (s *DatabaseService) Create(ctx context.Context, item Database) (Database, error) {
 	if item.Port < 0 || item.Port > 65535 {
@@ -178,4 +216,11 @@ func (s *DatabaseService) Check(ctx context.Context, item Database) bool {
 	}
 	_ = conn.Close()
 	return true
+}
+
+func databaseBoolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }

@@ -162,6 +162,7 @@ const totalLines = ref(0);
 const totalPages = ref(0);
 let resizeObserver: ResizeObserver | null = null;
 const isEndOfFile = ref(false);
+let disposed = false;
 
 const totalHeight = computed(() => logs.value.length * logHeight.value);
 
@@ -243,6 +244,9 @@ const changeTail = (fromOutSide: boolean) => {
         tailLog.value = !tailLog.value;
     }
     if (tailLog.value) {
+        if (timer) {
+            clearInterval(timer);
+        }
         timer = setInterval(() => {
             getContent(false);
         }, 1000 * 3);
@@ -279,6 +283,10 @@ const getContent = async (pre: boolean) => {
     } catch (error) {
         isLoading.value = false;
         firstLoading.value = false;
+        return;
+    }
+
+    if (disposed) {
         return;
     }
 
@@ -428,10 +436,6 @@ const init = async () => {
     }
     readReq.latest = true;
     await getContent(false);
-    if (readReq.page > 1 && totalPages.value == maxPage.value) {
-        readReq.page--;
-        await getContent(true);
-    }
 };
 
 const containerStyle = computed(() => ({
@@ -439,6 +443,7 @@ const containerStyle = computed(() => ({
 }));
 
 onMounted(async () => {
+    disposed = false;
     showTail.value = props.showTail;
     logs.value = [];
     isTailDisabled.value = false;
@@ -469,6 +474,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+    disposed = true;
     onCloseLog();
     if (resizeObserver && logContainer.value) {
         resizeObserver.unobserve(logContainer.value);

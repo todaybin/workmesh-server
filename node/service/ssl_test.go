@@ -55,26 +55,12 @@ func TestSSLServicePersistsPrivateKeyAcrossRestart(t *testing.T) {
 	if loaded.PrivateKey != "" {
 		t.Fatal("重启查询不得泄漏私钥")
 	}
-	raw, err := os.ReadFile(filepath.Join(root, "ssl.json"))
-	if err != nil || !containsBytes(raw, []byte("PRIVATE-KEY")) {
-		t.Fatalf("私钥未安全保存到本地状态文件: %v", err)
+	if reloaded.items[item.ID].PrivateKey != "PRIVATE-KEY" {
+		t.Fatal("私钥未从关系表恢复")
 	}
-}
-
-func containsBytes(value, needle []byte) bool {
-	for i := 0; i+len(needle) <= len(value); i++ {
-		match := true
-		for j := range needle {
-			if value[i+j] != needle[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
+	if _, err := os.Stat(filepath.Join(root, "ssl.json")); !os.IsNotExist(err) {
+		t.Fatalf("不应再创建旧 JSON 证书状态文件: %v", err)
 	}
-	return false
 }
 
 func testCertificatePEM(t *testing.T) string {

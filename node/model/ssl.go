@@ -11,13 +11,18 @@ type WebsiteSSL struct {
 	PrimaryDomain string    `json:"primaryDomain"`
 	Domains       string    `json:"domains"`
 	Certificate   string    `json:"certificate,omitempty"`
+	PEM           string    `json:"pem,omitempty"`
+	CertURL       string    `json:"certUrl,omitempty"`
+	Type          string    `json:"type,omitempty"`
+	Organization  string    `json:"organization,omitempty"`
+	CAID          uint      `json:"caId,omitempty"`
 	PrivateKey    string    `json:"-"`
 	Provider      string    `json:"provider"`
 	AcmeAccountID uint      `json:"acmeAccountId"`
 	DnsAccountID  uint      `json:"dnsAccountId"`
 	AutoRenew     bool      `json:"autoRenew"`
-	ExpireDate    time.Time `json:"expireDate"`
-	StartDate     time.Time `json:"startDate"`
+	ExpireDate    time.Time `json:"expireDate,omitempty"`
+	StartDate     time.Time `json:"startDate,omitempty"`
 	Status        string    `json:"status"`
 	Message       string    `json:"message,omitempty"`
 	KeyType       string    `json:"keyType,omitempty"`
@@ -26,6 +31,19 @@ type WebsiteSSL struct {
 	Description   string    `json:"description,omitempty"`
 	PushNode      bool      `json:"pushNode"`
 	Nodes         string    `json:"nodes,omitempty"`
+	SkipDNS       bool      `json:"skipDns"`
+	Nameserver1   string    `json:"nameserver1,omitempty"`
+	Nameserver2   string    `json:"nameserver2,omitempty"`
+	DisableCNAME  bool      `json:"disableCname"`
+	ExecShell     bool      `json:"execShell"`
+	Shell         string    `json:"shell,omitempty"`
+	MasterSSLID   uint      `json:"masterSslId,omitempty"`
+	PushNodeFlag  bool      `json:"pushNodeFlag"`
+	PrivateKeyPath string   `json:"privateKeyPath,omitempty"`
+	CertPath      string    `json:"certPath,omitempty"`
+	IsIP          bool      `json:"isIp"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // WebsiteSSLCreateRequest 创建证书元数据。

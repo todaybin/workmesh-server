@@ -2,6 +2,7 @@ import http from '@/api';
 import { ResPage } from '../interface';
 import { App } from '../interface/app';
 import { TimeoutEnum } from '@/enums/http-enum';
+import { buildSameOriginApiUrl } from '@/api/transport';
 
 export const syncApp = (req: App.AppStoreSync) => {
     return http.post('apps/sync/remote', req);
@@ -149,9 +150,9 @@ export const getCurrentNodeCustomAppConfig = () => {
 };
 
 export function getAppIconUrl(appKey: string, node?: string): string {
-    const baseURL = import.meta.env.VITE_API_URL as string;
-    const params = node ? `?operateNode=${node}` : '';
-    return `${baseURL}/apps/icon/${appKey}${params}`;
+    return buildSameOriginApiUrl(`/apps/icon/${encodeURIComponent(appKey)}`, {
+        operateNode: node,
+    });
 }
 
 export const installAppToNodes = (param: App.InstallAppToNodes) => {

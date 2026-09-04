@@ -150,9 +150,11 @@ func handleCoreLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	user, session, err := localCore.Login(req.Name, req.Password)
 	if err != nil {
+		if db := sharedDB(); db != nil { _,_=db.Exec(`CREATE TABLE IF NOT EXISTS login_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL DEFAULT '', user TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', agent TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`); now:=time.Now().UTC().Format(time.RFC3339Nano); _,_ = db.Exec(`INSERT INTO login_logs(ip,user,agent,status,message,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,r.RemoteAddr,req.Name,r.UserAgent(),"failed",err.Error(),now,now) }
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
+	if db := sharedDB(); db != nil { _,_=db.Exec(`CREATE TABLE IF NOT EXISTS login_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL DEFAULT '', user TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', agent TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`); now:=time.Now().UTC().Format(time.RFC3339Nano); _,_ = db.Exec(`INSERT INTO login_logs(ip,user,agent,status,message,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,r.RemoteAddr,user.Name,r.UserAgent(),"success","登录成功",now,now) }
 	http.SetCookie(w, &http.Cookie{Name: "workmesh_session", Value: session.ID, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	// 同时返回旧前端使用的扁平字段和会话对象，确保新旧客户端均可登录。
 	coreJSON(w, map[string]any{"name": user.Name, "role": user.Role, "token": session.ID, "mfaStatus": "disabled", "mfaSession": "", "user": user, "session": session})

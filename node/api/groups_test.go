@@ -2,14 +2,23 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/todaybin/workmesh-server/node/service"
+	_ "modernc.org/sqlite"
 )
 
 func TestGroupSearchReturnsArrayAndCreatePersists(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil { t.Fatal(err) }
+	defer db.Close()
+	service.SetSharedDatabase(db)
+	defer service.SetSharedDatabase(nil)
 	mux := http.NewServeMux()
 	registerGroupRoutes(mux)
 	create := httptest.NewRecorder()

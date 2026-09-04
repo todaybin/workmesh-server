@@ -250,8 +250,9 @@ function changeTerminalSize() {
 
 const initWebSocket = async (endpoint_: string, args: string = '') => {
     const token = ++initWebSocketToken;
-    let node = args.indexOf('id=') !== -1 ? 'local' : currentNode.value;
     const query = new URLSearchParams(args);
+    // 按独立查询字段判断本地 SSH 会话，避免把 containerid 中的“id=”误判成本地节点。
+    const node = query.has('id') ? 'local' : currentNode.value;
     query.set('cols', String(term.value.cols));
     query.set('rows', String(term.value.rows));
     const conn = buildSameOriginWebSocketUrl(endpoint_, node, query);
@@ -334,7 +335,17 @@ const flushPromptBuffer = (message: string) => {
 };
 
 const onWSReceive = (message: MessageEvent) => {
-    const wsMsg = JSON.parse(message.data);
+    let wsMsg: any;
+    try {
+        wsMsg = typeof message.data === 'string' ? JSON.parse(message.data) : null;
+    } catch {
+        term.value?.write('\x1b[31m终端服务返回了无效消息。\x1b[m\r\n');
+        return;
+    }
+    if (!wsMsg || typeof wsMsg.type !== 'string') {
+        term.value?.write('\x1b[31m终端服务返回了无效消息。\x1b[m\r\n');
+        return;
+    }
     switch (wsMsg.type) {
         case 'cmd': {
             if (wsMsg.data) {
@@ -362,6 +373,11 @@ const onWSReceive = (message: MessageEvent) => {
                 break;
             }
             showAINotice(wsMsg.level || 'info', message);
+            break;
+        }
+        case 'error': {
+            const detail = String(wsMsg.data || wsMsg.message || '终端连接失败');
+            term.value?.write(`\x1b[31m${detail}\x1b[m\r\n`);
             break;
         }
     }

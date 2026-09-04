@@ -21,3 +21,7 @@ WorkMesh Server 是独立 Git 仓库 `https://github.com/todaybin/workmesh-serve
 ## 数据与安全
 
 节点使用本地 SQLite（WAL）；Redis 仅显式配置时启用。主次角色由 `role_epoch` 和 fencing 保护，Gateway 不能绕过本机角色协议直接选主。所有节点必须独立注册 Gateway，Gateway 凭证和节点私钥只保存加密引用，禁止写入日志或前端响应。
+
+运行环境记录由 `runtime_records` 和 `runtime_settings` 保存，完整运行参数放在受版本化 migration 管理的 payload 中。运行时归档、Compose、环境变量、日志、PHP 配置和 Supervisor 文件只允许位于 `WORKMESH_DATA_DIR/runtimes` 下；代码目录解析符号链接后不得位于运行时目录内。
+
+容器命令通过参数数组和可注入执行器运行，设置单次超时并保留真实输出。应用商店归档只允许受信 HTTPS 来源，重定向重新校验来源，下载与解压均设置大小上限。浏览器仅使用同源 `/api/v2`，不直接访问容器、节点地址或应用商店归档。

@@ -48,6 +48,7 @@ func TestHostCRUDPersists(t *testing.T) {
 	if err := SetSharedStore(store); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(resetSharedStoreForTest)
 	mux := http.NewServeMux()
 	registerHostRoutes(mux)
 	payload, _ := json.Marshal(map[string]any{"name": "test-host", "address": "127.0.0.1", "port": 22})

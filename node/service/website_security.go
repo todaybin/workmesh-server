@@ -17,7 +17,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -154,19 +153,65 @@ func NewWebsiteSecurityService(root string) *WebsiteSecurityService {
 }
 
 func (s *WebsiteSecurityService) load() {
-	read := func(name string, target any) {
-		if s.db == nil {
-			return
+	if s.db != nil {
+		if rows, err := s.db.Query(`SELECT id,email,url,private_key,type,eab_kid,eab_hmac_key,key_type,use_proxy,ca_dir_url,use_eab,created_at,updated_at FROM website_acme_accounts ORDER BY id`); err == nil {
+			for rows.Next() {
+				var x WebsiteACMEAccount
+				var id int64
+				var proxy, eab int
+				var created, updated string
+				if rows.Scan(&id, &x.Email, &x.URL, &x.PrivateKey, &x.Type, &x.EabKid, &x.EabHmacKey, &x.KeyType, &proxy, &x.CaDirURL, &eab, &created, &updated) == nil {
+					x.ID = uint(id)
+					x.UseProxy = proxy != 0
+					x.UseEAB = eab != 0
+					x.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+					x.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+					s.acme = append(s.acme, x)
+					if x.ID >= s.acmeNext {
+						s.acmeNext = x.ID + 1
+					}
+				}
+			}
+			rows.Close()
 		}
-		key := strings.TrimSuffix(name, ".json")
-		var data []byte
-		if err := s.db.QueryRow("SELECT payload FROM website_state WHERE state_key = ?", key).Scan(&data); err == nil && len(data) > 0 {
-			_ = json.Unmarshal(data, target)
+		if rows, err := s.db.Query(`SELECT id,name,key_type,common_name,country,organization,organization_unit,province,city,certificate,private_key,created_at FROM website_cas ORDER BY id`); err == nil {
+			for rows.Next() {
+				var x WebsiteCA
+				var id int64
+				var created string
+				if rows.Scan(&id, &x.Name, &x.KeyType, &x.CommonName, &x.Country, &x.Organization, &x.OrganizationUnit, &x.Province, &x.City, &x.Certificate, &x.PrivateKey, &created) == nil {
+					x.ID = uint(id)
+					x.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+					s.cas = append(s.cas, x)
+					if x.ID >= s.caNext {
+						s.caNext = x.ID + 1
+					}
+				}
+			}
+			rows.Close()
 		}
+		if rows, err := s.db.Query(`SELECT id,ca_id,primary_domain,domains,certificate,private_key,start_date,expire_date,status,type,key_type,auto_renew,description FROM website_ca_ssls ORDER BY id`); err == nil {
+			for rows.Next() {
+				var x WebsiteCASignedSSL
+				var id, caID int64
+				var auto int
+				var start, expire string
+				if rows.Scan(&id, &caID, &x.PrimaryDomain, &x.Domains, &x.Certificate, &x.PrivateKey, &start, &expire, &x.Status, &x.Type, &x.KeyType, &auto, &x.Description) == nil {
+					x.ID = uint(id)
+					x.CAID = uint(caID)
+					x.AutoRenew = auto != 0
+					x.StartDate, _ = time.Parse(time.RFC3339Nano, start)
+					x.ExpireDate, _ = time.Parse(time.RFC3339Nano, expire)
+					s.ssls = append(s.ssls, x)
+					if x.ID >= s.sslNext {
+						s.sslNext = x.ID + 1
+					}
+				}
+			}
+			rows.Close()
+		}
+		return
 	}
-	read("website-acme.json", &s.acme)
-	read("website-ca.json", &s.cas)
-	read("website-ca-ssls.json", &s.ssls)
 	for _, item := range s.acme {
 		if item.ID >= s.acmeNext {
 			s.acmeNext = item.ID + 1
@@ -188,13 +233,54 @@ func (s *WebsiteSecurityService) persist(name string, value any) error {
 	if s.db == nil {
 		return errors.New("证书公共数据库未初始化")
 	}
-	b, err := json.MarshalIndent(value, "", "  ")
+	key := strings.TrimSpace(name)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	key := strings.TrimSuffix(name, ".json")
-	_, err = s.db.Exec(`INSERT INTO website_state(state_key,payload,updated_at) VALUES(?,?,?) ON CONFLICT(state_key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at`, key, b, time.Now().UTC().Format(time.RFC3339Nano))
-	return err
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	switch key {
+	case "website-acme":
+		items, ok := value.([]WebsiteACMEAccount)
+		if !ok {
+			return errors.New("ACME 数据类型无效")
+		}
+		for _, x := range items {
+			_, err = tx.Exec(`INSERT INTO website_acme_accounts(id,email,url,private_key,type,eab_kid,eab_hmac_key,key_type,use_proxy,ca_dir_url,use_eab,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET email=excluded.email,url=excluded.url,private_key=excluded.private_key,type=excluded.type,eab_kid=excluded.eab_kid,eab_hmac_key=excluded.eab_hmac_key,key_type=excluded.key_type,use_proxy=excluded.use_proxy,ca_dir_url=excluded.ca_dir_url,use_eab=excluded.use_eab,updated_at=excluded.updated_at`, x.ID, x.Email, x.URL, x.PrivateKey, x.Type, x.EabKid, x.EabHmacKey, x.KeyType, boolInt(x.UseProxy), x.CaDirURL, boolInt(x.UseEAB), formatTime(x.CreatedAt), formatTime(x.UpdatedAt))
+			if err != nil {
+				return err
+			}
+		}
+	case "website-ca":
+		items, ok := value.([]WebsiteCA)
+		if !ok {
+			return errors.New("CA 数据类型无效")
+		}
+		for _, x := range items {
+			_, err = tx.Exec(`INSERT INTO website_cas(id,name,key_type,common_name,country,organization,organization_unit,province,city,certificate,private_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,key_type=excluded.key_type,common_name=excluded.common_name,country=excluded.country,organization=excluded.organization,organization_unit=excluded.organization_unit,province=excluded.province,city=excluded.city,certificate=excluded.certificate,private_key=excluded.private_key,updated_at=excluded.updated_at`, x.ID, x.Name, x.KeyType, x.CommonName, x.Country, x.Organization, x.OrganizationUnit, x.Province, x.City, x.Certificate, x.PrivateKey, formatTime(x.CreatedAt), formatTime(time.Now()))
+			if err != nil {
+				return err
+			}
+		}
+	case "website-ca-ssls":
+		items, ok := value.([]WebsiteCASignedSSL)
+		if !ok {
+			return errors.New("自签证书数据类型无效")
+		}
+		for _, x := range items {
+			_, err = tx.Exec(`INSERT INTO website_ca_ssls(id,ca_id,primary_domain,domains,certificate,private_key,start_date,expire_date,status,type,key_type,auto_renew,description) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET ca_id=excluded.ca_id,primary_domain=excluded.primary_domain,domains=excluded.domains,certificate=excluded.certificate,private_key=excluded.private_key,start_date=excluded.start_date,expire_date=excluded.expire_date,status=excluded.status,type=excluded.type,key_type=excluded.key_type,auto_renew=excluded.auto_renew,description=excluded.description`, x.ID, x.CAID, x.PrimaryDomain, x.Domains, x.Certificate, x.PrivateKey, formatTime(x.StartDate), formatTime(x.ExpireDate), x.Status, x.Type, x.KeyType, boolInt(x.AutoRenew), x.Description)
+			if err != nil {
+				return err
+			}
+		}
+	default:
+		return errors.New("不支持的证书状态类型")
+	}
+	return tx.Commit()
 }
 
 var emailPattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
@@ -278,7 +364,7 @@ func (s *WebsiteSecurityService) CreateACME(email, typ, keyType, eabKid, eabHmac
 	item.URL = acmeDirectoryURL(typ, item.CaDirURL)
 	s.acmeNext++
 	s.acme = append(s.acme, item)
-	if err := s.persist("website-acme.json", s.acme); err != nil {
+	if err := s.persist("website-acme", s.acme); err != nil {
 		return WebsiteACMEAccount{}, fmt.Errorf("保存 ACME 账户失败: %w", err)
 	}
 	item.PrivateKey, item.EabHmacKey = "", ""
@@ -293,7 +379,7 @@ func (s *WebsiteSecurityService) UpdateACME(id uint, useProxy bool) (WebsiteACME
 		if s.acme[i].ID == id {
 			s.acme[i].UseProxy = useProxy
 			s.acme[i].UpdatedAt = time.Now().UTC()
-			if err := s.persist("website-acme.json", s.acme); err != nil {
+			if err := s.persist("website-acme", s.acme); err != nil {
 				return WebsiteACMEAccount{}, err
 			}
 			item := s.acme[i]
@@ -314,7 +400,7 @@ func (s *WebsiteSecurityService) DeleteACME(id uint) error {
 	for i, item := range s.acme {
 		if item.ID == id {
 			s.acme = append(s.acme[:i], s.acme[i+1:]...)
-			return s.persist("website-acme.json", s.acme)
+			return s.persist("website-acme", s.acme)
 		}
 	}
 	return os.ErrNotExist
@@ -353,7 +439,7 @@ func (s *WebsiteSecurityService) CreateCA(name, commonName, country, organizatio
 	item := WebsiteCA{ID: s.caNext, Name: name, KeyType: keyType, CommonName: commonName, Country: country, Organization: organization, OrganizationUnit: unit, Province: province, City: city, Certificate: string(certPEM), PrivateKey: string(privatePEM), CreatedAt: now}
 	s.caNext++
 	s.cas = append(s.cas, item)
-	if err := s.persist("website-ca.json", s.cas); err != nil {
+	if err := s.persist("website-ca", s.cas); err != nil {
 		return WebsiteCA{}, fmt.Errorf("保存 CA 失败: %w", err)
 	}
 	return publicCA(item), nil
@@ -408,7 +494,7 @@ func (s *WebsiteSecurityService) DeleteCA(id uint) error {
 	for i, item := range s.cas {
 		if item.ID == id {
 			s.cas = append(s.cas[:i], s.cas[i+1:]...)
-			return s.persist("website-ca.json", s.cas)
+			return s.persist("website-ca", s.cas)
 		}
 	}
 	return os.ErrNotExist
@@ -489,7 +575,7 @@ func (s *WebsiteSecurityService) ObtainCA(caID, renewID uint, domains, keyType, 
 			if s.ssls[i].ID == renewID {
 				record.ID = renewID
 				s.ssls[i] = record
-				if err := s.persist("website-ca-ssls.json", s.ssls); err != nil {
+				if err := s.persist("website-ca-ssls", s.ssls); err != nil {
 					return WebsiteCASignedSSL{}, err
 				}
 				record.PrivateKey = ""
@@ -504,7 +590,7 @@ func (s *WebsiteSecurityService) ObtainCA(caID, renewID uint, domains, keyType, 
 	record.ID = s.sslNext
 	s.sslNext++
 	s.ssls = append(s.ssls, record)
-	if err := s.persist("website-ca-ssls.json", s.ssls); err != nil {
+	if err := s.persist("website-ca-ssls", s.ssls); err != nil {
 		return WebsiteCASignedSSL{}, err
 	}
 	record.PrivateKey = ""

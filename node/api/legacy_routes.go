@@ -4,15 +4,12 @@
 package api
 
 import (
-	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 	"net/http"
 	"strings"
 )
 
-const migrationPendingMessage = "该功能暂不可用"
-
-// RegisterLegacyCompatibilityRoutes 为所有旧公开契约提供统一入口。
-// 业务域迁移完成前返回结构化错误，避免前端出现 404；已迁移路由由专用处理器注册。
+// RegisterLegacyCompatibilityRoutes 为尚未拆分到领域文件的 v2 公开契约提供统一入口。
+// 已有真实处理器的路由会被过滤；其余契约明确返回 501，禁止伪造成功响应。
 // routeRegistrar 抽象 HandleFunc，便于过滤已经迁移的旧占位路由。
 type routeRegistrar interface {
 	HandleFunc(string, http.HandlerFunc)
@@ -24,7 +21,7 @@ func (m legacyFilterMux) HandleFunc(pattern string, handler http.HandlerFunc) {
 	if isExplicitCoreAuthRoute(pattern) || isDashboardRoute(pattern) {
 		return
 	}
-	if isBackupAlertLogSettingsRoute(pattern) || isWebsiteFunctionalRoute(pattern) || isAnalyticsRoute(pattern) || isContainerRoute(pattern) || isHostRoute(pattern) || isAIExecutionRoute(pattern) || isCoreResourceRoute(pattern) || isCoreCommandRoute(pattern) || isFileRoute(pattern) || isDatabaseRoute(pattern) || isDeploymentProcessRoute(pattern) || isRuntimeToolboxRoute(pattern) || isAppRoute(pattern) || isSitesRoute(pattern) {
+	if isBackupAlertLogSettingsRoute(pattern) || isWebsiteFunctionalRoute(pattern) || isAnalyticsRoute(pattern) || isContainerRoute(pattern) || isHostRoute(pattern) || isAIExecutionRoute(pattern) || isCoreResourceRoute(pattern) || isCoreCommandRoute(pattern) || isFileRoute(pattern) || isDatabaseRoute(pattern) || isDeploymentProcessRoute(pattern) || isRuntimeToolboxRoute(pattern) || isAppRoute(pattern) || isSitesRoute(pattern) || isCronjobRoute(pattern) || isGroupRoute(pattern) {
 		return
 	}
 	if isCoreAuthRoute(pattern) {
@@ -40,6 +37,25 @@ func (m legacyFilterMux) HandleFunc(pattern string, handler http.HandlerFunc) {
 	registerFallbackRoute(m.mux, normalizeServeMuxPattern(pattern))
 }
 
+// isCronjobRoute 和 isGroupRoute 防止已注册的计划任务、分组契约再次落入兼容占位处理器。
+func isCronjobRoute(pattern string) bool {
+	parts := strings.SplitN(pattern, " ", 2)
+	path := pattern
+	if len(parts) == 2 {
+		path = parts[1]
+	}
+	return path == "/api/v2/cronjobs" || strings.HasPrefix(path, "/api/v2/cronjobs/")
+}
+
+func isGroupRoute(pattern string) bool {
+	parts := strings.SplitN(pattern, " ", 2)
+	path := pattern
+	if len(parts) == 2 {
+		path = parts[1]
+	}
+	return path == "/api/v2/groups" || strings.HasPrefix(path, "/api/v2/groups/")
+}
+
 // isExplicitCoreAuthRoute 判断已由核心认证处理器显式注册的路径，避免兼容层重复注册。
 func isExplicitCoreAuthRoute(pattern string) bool {
 	return pattern == "POST /api/v2/core/auth/login" || pattern == "POST /api/v2/core/auth/logout" || pattern == "GET /api/v2/core/auth/current"
@@ -50,13 +66,19 @@ func isDashboardRoute(pattern string) bool {
 	for _, route := range []string{
 		"GET /api/v2/dashboard/app/launcher",
 		"GET /api/v2/dashboard/base/os",
+		"GET /api/v2/dashboard/base/:ioOption/:netOption",
+		"GET /api/v2/dashboard/base/{ioOption}/{netOption}",
 		"GET /api/v2/dashboard/current/node",
 		"GET /api/v2/dashboard/current/top/cpu",
 		"GET /api/v2/dashboard/current/top/mem",
+		"GET /api/v2/dashboard/current/:ioOption/:netOption",
+		"GET /api/v2/dashboard/current/{ioOption}/{netOption}",
 		"GET /api/v2/dashboard/quick/option",
 		"POST /api/v2/dashboard/app/launcher/option",
 		"POST /api/v2/dashboard/app/launcher/show",
 		"POST /api/v2/dashboard/quick/change",
+		"POST /api/v2/dashboard/system/restart/:operation",
+		"POST /api/v2/dashboard/system/restart/{operation}",
 	} {
 		if pattern == route {
 			return true
@@ -127,117 +149,43 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 	// 兼容契约路径：PHP 扩展与配置动态段由下方统一子路径处理器承接。
 	// HandleFunc("GET /api/v2/runtimes/php/:id/extensions", ...)
 	// HandleFunc("GET /api/v2/runtimes/php/config/:id", ...)
-	mux.HandleFunc("GET /api/v2/access-lists", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/ai/accounts/providers", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/ai/gpu/load", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/ai/gpu/options", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/ai/mcp/domain/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/alert/clams/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/alert/disks/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/:key", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/checkupdate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/detail/:appId/:version/:type", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/detail/node/:appKey/:version", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/details/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/icon/:key", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/ignored/detail", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/installed/delete/check/:appInstallId", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/installed/info/:appInstallId", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/installed/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/installed/params/:appInstallId", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/services/:key", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/apps/tags", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/backups/check/:name", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/backups/local", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/backups/options", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/config/global", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/daemonjson", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/daemonjson/file", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/image", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/image/all", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/limit", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/list/stats", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/network", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/repo", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/search/log", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/stats/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/template", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/containers/volume", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("GET /api/v2/access-lists", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/ai/accounts/providers", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/ai/gpu/load", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/ai/gpu/options", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/ai/mcp/domain/get", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/alert/clams/list", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/alert/disks/list", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/:key", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/checkupdate", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/detail/:appId/:version/:type", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/detail/node/:appKey/:version", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/details/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/icon/:key", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/ignored/detail", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/installed/delete/check/:appInstallId", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/installed/info/:appInstallId", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/installed/list", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/installed/params/:appInstallId", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/services/:key", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/apps/tags", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/backups/check/:name", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/backups/local", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/backups/options", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/config/global", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/daemonjson", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/daemonjson/file", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/image", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/image/all", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/limit", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/list/stats", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/network", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/repo", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/search/log", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/stats/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/status", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/template", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/containers/volume", fallbackRouteHandler)
 	mux.HandleFunc("GET /api/v2/core/auth/captcha", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreCaptcha(w, r)
 	})
@@ -250,42 +198,20 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 	mux.HandleFunc("GET /api/v2/core/auth/welcome", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreWelcome(w, r)
 	})
-	mux.HandleFunc("GET /api/v2/core/backups/client/:clientType", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/core/script/run", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/core/settings/apps/store/config", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/core/settings/interface", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("GET /api/v2/core/backups/client/:clientType", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/core/script/run", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/core/settings/apps/store/config", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/core/settings/interface", fallbackRouteHandler)
 	mux.HandleFunc("GET /api/v2/core/settings/memo", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreSettings(w, r)
 	})
-	mux.HandleFunc("GET /api/v2/core/settings/search/available", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/core/settings/ssl/info", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/core/settings/upgrade", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/core/settings/upgrade/releases", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/cronjobs/script/options", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/cubesandbox/health", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/cubesandbox/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("GET /api/v2/core/settings/search/available", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/core/settings/ssl/info", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/core/settings/upgrade", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/core/settings/upgrade/releases", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/cronjobs/script/options", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/cubesandbox/health", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/cubesandbox/status", fallbackRouteHandler)
 	mux.HandleFunc("GET /api/v2/dashboard/app/launcher", func(w http.ResponseWriter, r *http.Request) {
 		handleDashboardLauncher(w, r)
 	})
@@ -322,9 +248,7 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 	mux.HandleFunc("GET /api/v2/databases/redis/check", func(w http.ResponseWriter, r *http.Request) {
 		databaseRoute(w, r)
 	})
-	mux.HandleFunc("GET /api/v2/deployment/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("GET /api/v2/deployment/status", fallbackRouteHandler)
 	mux.HandleFunc("GET /api/v2/files/download", func(w http.ResponseWriter, r *http.Request) {
 		handleFilesDownload(w, r)
 	})
@@ -343,871 +267,299 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 	mux.HandleFunc("GET /api/v2/files/share/qrcode", func(w http.ResponseWriter, r *http.Request) {
 		fileAdvancedHandler(w, r)
 	})
-	mux.HandleFunc("GET /api/v2/files/wget/process", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/files/wget/process/keys", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/diagnostics/goroutines", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/diagnostics/summary", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/disks", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/firewall/docker/endpoints", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/firewall/docker/ports", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/firewall/rules/sync/task", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/firewall/settings", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/monitor/iooptions", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/monitor/netoptions", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/monitor/setting", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/terminal/container", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/terminal/local", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/terminal/ssh", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/hosts/tool/supervisor/process", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/images/*filename", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/logs/system/files", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/logs/system/services", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/logs/system/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/logs/tasks/executing/count", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/openresty/https", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/openresty/modules", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/openresty/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/process/ws", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/runtimes/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/runtimes/installed/delete/check/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("GET /api/v2/files/wget/process", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/files/wget/process/keys", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/diagnostics/goroutines", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/diagnostics/summary", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/disks", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/firewall/docker/endpoints", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/firewall/docker/ports", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/firewall/rules/sync/task", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/firewall/settings", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/monitor/iooptions", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/monitor/netoptions", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/monitor/setting", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/terminal/container", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/terminal/local", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/terminal/ssh", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/hosts/tool/supervisor/process", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/images/*filename", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/logs/system/files", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/logs/system/services", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/logs/system/status", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/logs/tasks/executing/count", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/openresty/https", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/openresty/modules", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/openresty/status", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/process/ws", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/runtimes/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/runtimes/installed/delete/check/:id", fallbackRouteHandler)
 	// PHP 子路径统一进入兼容处理器，避免 ServeMux 动态段与静态段产生歧义。
-	mux.HandleFunc("GET /api/v2/runtimes/php/{path...}", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/runtimes/php/container/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/runtimes/php/fpm/config/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/runtimes/php/fpm/status/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/runtimes/supervisor/process/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/settings/basedir", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/settings/search/available", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/settings/snapshot/load", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/settings/ssh/conn", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/settings/website/dir", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/sites", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/sites/:id/rules", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/standard-rules", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/static/*filename", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/toolbox/device/users", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/toolbox/device/zone/options", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/base", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/load/conf", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/toolbox/ftp/base", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/:id/config/:type", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/:id/https", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/:id/lbs", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/ca/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/cors/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/databases", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/default/html/:type", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/domains/:websiteId", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/monitor/config/global", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/proxy/config/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/realip/config/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/resource/:id", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/rewrite/custom", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/waf/access-lists", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/waf/sites", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/waf/sites/:id/rules", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/waf/standard-rules", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("GET /api/v2/websites/waf/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/access-lists", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts/counts", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts/models", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts/models/create", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts/models/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts/models/discover", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts/models/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/accounts/verify", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/agent/bind", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/agent/channels", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/agent/create", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/agent/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/agent/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/agent/md/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/agent/md/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/agent/unbind", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/batch/install", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/batch/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/batch/skill/install", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/batch/upgrade", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/dingtalk/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/dingtalk/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/discord/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/discord/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/feishu/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/feishu/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/pairing/approve", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/qqbot/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/qqbot/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/telegram/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/telegram/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/wecom/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/wecom/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/weixin/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/channel/weixin/login", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/config-file/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/config-file/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/delete/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/hermes/chat/sessions", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/hermes/chat/sessions/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/hermes/chat/sessions/rename", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/model/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/model/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/other/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/other/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/overview", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/plugin/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/plugin/install", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/plugin/uninstall", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/plugin/upgrade", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/plugins/install", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/plugins/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/plugins/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/plugins/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/remark", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/security/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/security/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/skills/install", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/skills/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/skills/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/skills/uninstall", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/skills/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/token/reset", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/website/bind", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/agents/website/unbind", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/domain/bind", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/domain/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/domain/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/gpu/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/mcp/domain/bind", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/mcp/domain/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/mcp/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/mcp/server", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/mcp/server/connection/test", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/mcp/server/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/mcp/server/detail", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/mcp/server/op", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/mcp/server/status/sync", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/mcp/server/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/ollama/close", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/ollama/model", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/ollama/model/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/ollama/model/load", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/ollama/model/recreate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/ollama/model/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/ollama/model/sync", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/tensorrt/create", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/tensorrt/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/tensorrt/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/tensorrt/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/ai/tensorrt/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/config/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/config/info", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/config/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/config/test", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/config/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/cronjob/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/logs/clean", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/logs/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/alert/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/ignored/cancel", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/install", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/conf", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/config/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/conninfo", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/ignore", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/loadport", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/op", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/params/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/port/change", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/sort/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/sync", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/installed/update/versions", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/sync/local", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/apps/sync/remote", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/attack/stat", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/backup", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/buckets", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/conn/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/record/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/record/description/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/record/download", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/record/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/record/search/bycronjob", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/record/size", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/recover", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/recover/byupload", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/refresh/token", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/search/files", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/backups/upload", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/block/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/config/global", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/config/site", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/config/site/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/clean/log", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/commit", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/compose", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/compose/clean/log", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/compose/env", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/compose/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/compose/pin", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/compose/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/compose/test", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/compose/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/daemonjson/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/daemonjson/update/byfile", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/docker/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/download/log", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/files/content", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/files/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/files/download", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/files/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/files/size", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/files/upload", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/image/build", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/image/load", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/image/pull", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/image/push", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/image/remove", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/image/save", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/image/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/image/tag", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/info", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/inspect", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/ipv6option/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/item/stats", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/list/byimage", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/logoption/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/network", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/network/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/network/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/prune", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/rename", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/repo", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/repo/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/repo/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/repo/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/repo/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/template", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/template/batch", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/template/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/template/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/template/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/upgrade", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/users", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/volume", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/volume/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/containers/volume/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("GET /api/v2/runtimes/php/{path...}", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/runtimes/php/container/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/runtimes/php/fpm/config/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/runtimes/php/fpm/status/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/runtimes/supervisor/process/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/settings/basedir", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/settings/search/available", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/settings/snapshot/load", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/settings/ssh/conn", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/settings/website/dir", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/sites", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/sites/:id/rules", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/standard-rules", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/static/*filename", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/status", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/toolbox/device/users", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/toolbox/device/zone/options", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/base", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/load/conf", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/toolbox/ftp/base", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/:id/config/:type", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/:id/https", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/:id/lbs", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/ca/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/cors/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/databases", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/default/html/:type", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/domains/:websiteId", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/list", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/monitor/config/global", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/proxy/config/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/realip/config/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/resource/:id", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/rewrite/custom", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/waf/access-lists", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/waf/sites", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/waf/sites/:id/rules", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/waf/standard-rules", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/websites/waf/status", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/access-lists", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts/counts", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts/models", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts/models/create", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts/models/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts/models/discover", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts/models/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/accounts/verify", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/agent/bind", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/agent/channels", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/agent/create", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/agent/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/agent/list", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/agent/md/list", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/agent/md/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/agent/unbind", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/batch/install", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/batch/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/batch/skill/install", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/batch/upgrade", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/dingtalk/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/dingtalk/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/discord/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/discord/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/feishu/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/feishu/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/pairing/approve", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/qqbot/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/qqbot/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/telegram/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/telegram/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/wecom/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/wecom/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/weixin/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/channel/weixin/login", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/config-file/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/config-file/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/delete/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/hermes/chat/sessions", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/hermes/chat/sessions/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/hermes/chat/sessions/rename", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/model/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/model/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/other/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/other/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/overview", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/plugin/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/plugin/install", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/plugin/uninstall", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/plugin/upgrade", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/plugins/install", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/plugins/list", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/plugins/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/plugins/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/remark", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/security/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/security/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/skills/install", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/skills/list", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/skills/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/skills/uninstall", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/skills/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/token/reset", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/website/bind", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/agents/website/unbind", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/domain/bind", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/domain/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/domain/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/gpu/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/mcp/domain/bind", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/mcp/domain/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/mcp/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/mcp/server", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/mcp/server/connection/test", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/mcp/server/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/mcp/server/detail", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/mcp/server/op", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/mcp/server/status/sync", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/mcp/server/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/ollama/close", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/ollama/model", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/ollama/model/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/ollama/model/load", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/ollama/model/recreate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/ollama/model/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/ollama/model/sync", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/tensorrt/create", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/tensorrt/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/tensorrt/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/tensorrt/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/ai/tensorrt/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/config/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/config/info", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/config/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/config/test", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/config/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/cronjob/list", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/logs/clean", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/logs/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/status", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/alert/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/ignored/cancel", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/install", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/conf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/config/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/conninfo", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/ignore", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/loadport", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/op", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/params/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/port/change", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/sort/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/sync", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/installed/update/versions", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/sync/local", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/apps/sync/remote", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/attack/stat", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/backup", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/buckets", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/conn/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/record/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/record/description/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/record/download", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/record/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/record/search/bycronjob", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/record/size", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/recover", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/recover/byupload", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/refresh/token", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/search/files", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/backups/upload", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/block/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/config/global", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/config/site", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/config/site/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/clean/log", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/commit", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/compose", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/compose/clean/log", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/compose/env", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/compose/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/compose/pin", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/compose/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/compose/test", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/compose/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/daemonjson/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/daemonjson/update/byfile", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/docker/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/download/log", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/files/content", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/files/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/files/download", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/files/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/files/size", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/files/upload", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/image/build", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/image/load", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/image/pull", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/image/push", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/image/remove", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/image/save", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/image/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/image/tag", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/info", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/inspect", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/ipv6option/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/item/stats", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/list", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/list/byimage", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/logoption/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/network", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/network/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/network/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/prune", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/rename", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/repo", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/repo/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/repo/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/repo/status", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/repo/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/template", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/template/batch", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/template/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/template/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/template/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/upgrade", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/users", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/volume", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/volume/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/containers/volume/search", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/core/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreLogin(w, r)
 	})
 	mux.HandleFunc("POST /api/v2/core/auth/logout", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreLogout(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/core/backups/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/backups/refresh/token", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/backups/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/commands/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/commands/export", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/commands/import", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/commands/list", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/commands/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/commands/tree", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/commands/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/commands/upload", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/core/backups/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/backups/refresh/token", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/backups/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/commands/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/commands/export", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/commands/import", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/commands/list", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/commands/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/commands/tree", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/commands/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/commands/upload", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/core/groups/del", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreGroups(w, r)
 	})
@@ -1217,120 +569,54 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 	mux.HandleFunc("POST /api/v2/core/groups/update", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreGroups(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/core/logs/clean", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/logs/login", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/logs/operation", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/script/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/script/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/script/sync", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/script/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/settings/apps/store/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/settings/bind/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/core/logs/clean", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/logs/login", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/logs/operation", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/script/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/script/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/script/sync", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/script/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/settings/apps/store/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/settings/bind/update", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/core/settings/memo", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreSettings(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/core/settings/menu/default", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/core/settings/menu/default", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/core/settings/menu/update", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreSettings(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/core/settings/port/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/settings/proxy/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/core/settings/port/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/settings/proxy/update", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/core/settings/search", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreSettings(w, r)
 	})
 	mux.HandleFunc("POST /api/v2/core/settings/search/base", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreSettings(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/core/settings/ssl/download", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/settings/ssl/reload", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/settings/ssl/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/settings/terminal/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/settings/terminal/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/core/settings/ssl/download", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/settings/ssl/reload", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/settings/ssl/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/settings/terminal/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/settings/terminal/update", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/core/settings/update", func(w http.ResponseWriter, r *http.Request) {
 		handleCoreSettings(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/core/settings/upgrade", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/core/settings/upgrade/notes", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/export", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/group/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/import", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/load/info", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/next", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/records/clean", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/records/log", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/search/records", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/stop", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cronjobs/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cubesandbox/reconcile", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cubesandbox/start", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/cubesandbox/stop", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/core/settings/upgrade", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/core/settings/upgrade/notes", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/export", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/group/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/import", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/load/info", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/next", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/records/clean", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/records/log", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/search/records", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/status", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/stop", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cronjobs/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cubesandbox/reconcile", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cubesandbox/start", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cubesandbox/stop", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/dashboard/app/launcher/option", func(w http.ResponseWriter, r *http.Request) {
 		handleDashboardLauncherOption(w, r)
 	})
@@ -1343,21 +629,11 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 	mux.HandleFunc("POST /api/v2/dashboard/system/restart/:operation", func(w http.ResponseWriter, r *http.Request) {
 		handleDashboardRestart(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/databases/change/access", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/change/password", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/common/info", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/common/load/file", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/common/update/conf", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/databases/change/access", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/change/password", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/common/info", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/common/load/file", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/common/update/conf", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/databases/db", func(w http.ResponseWriter, r *http.Request) {
 		handleDatabaseCreate(w, r)
 	})
@@ -1367,276 +643,106 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 	mux.HandleFunc("POST /api/v2/databases/db/del", func(w http.ResponseWriter, r *http.Request) {
 		handleDatabaseDelete(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/databases/db/del/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/databases/db/del/check", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/databases/db/search", func(w http.ResponseWriter, r *http.Request) {
 		handleDatabaseSearch(w, r)
 	})
 	mux.HandleFunc("POST /api/v2/databases/db/update", func(w http.ResponseWriter, r *http.Request) {
 		handleDatabaseUpdate(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/databases/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/del/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/description/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/format/options", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/grants", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/grants/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/grants/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/grants/summary", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/load", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb/bind", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb/del/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb/description", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb/load", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb/password", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb/privileges", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb/privileges/change", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb/root/password", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/mongodb/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/pg", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/pg/:database/load", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/pg/bind", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/pg/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/pg/del/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/pg/description", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/pg/password", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/pg/privileges", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/pg/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/redis/conf", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/redis/conf/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/redis/install/cli", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/redis/password", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/redis/persistence/conf", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/redis/persistence/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/redis/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/remote", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/users", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/users/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/users/password", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/users/password/save", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/users/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/users/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/variables", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/databases/variables/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/deployment-artifact/activate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/deployment-manifest/verify", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/deployment/execute", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/deployment/rollback", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/ai-search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/batch/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/batch/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/batch/role", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/chunkdownload", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/chunkupload", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/chunkupload/stop", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/compress", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/compress/stop", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/databases/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/del/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/description/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/format/options", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/grants", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/grants/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/grants/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/grants/summary", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/load", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb/bind", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb/del/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb/description", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb/load", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb/password", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb/privileges", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb/privileges/change", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb/root/password", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/mongodb/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/pg", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/pg/:database/load", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/pg/bind", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/pg/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/pg/del/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/pg/description", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/pg/password", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/pg/privileges", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/pg/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/redis/conf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/redis/conf/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/redis/install/cli", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/redis/password", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/redis/persistence/conf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/redis/persistence/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/redis/status", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/remote", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/status", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/users", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/users/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/users/password", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/users/password/save", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/users/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/users/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/variables", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/databases/variables/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/deployment-artifact/activate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/deployment-manifest/verify", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/deployment/execute", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/deployment/rollback", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/ai-search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/batch/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/batch/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/batch/role", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/chunkdownload", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/chunkupload", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/chunkupload/stop", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/compress", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/compress/stop", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/files/content", func(w http.ResponseWriter, r *http.Request) {
 		handleFilesContent(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/files/convert", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/convert/log", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/decompress", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/decompress/stop", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/files/convert", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/convert/log", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/decompress", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/decompress/stop", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/files/del", func(w http.ResponseWriter, r *http.Request) {
 		handleFilesDelete(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/files/depth/size", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/favorite", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/favorite/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/favorite/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/history/content", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/history/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/history/restore", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/history/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/mode", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/mount", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/files/depth/size", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/favorite", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/favorite/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/favorite/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/history/content", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/history/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/history/restore", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/history/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/mode", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/mount", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/files/move", func(w http.ResponseWriter, r *http.Request) {
 		handleFilesMove(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/files/move/stop", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/owner", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/preview", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/read/:type", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/recycle/clear", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/recycle/reduce", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/recycle/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/remark", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/remarks", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/files/move/stop", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/owner", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/preview", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/read/:type", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/recycle/clear", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/recycle/reduce", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/recycle/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/remark", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/remarks", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/files/rename", func(w http.ResponseWriter, r *http.Request) {
 		handleFilesRename(w, r)
 	})
@@ -1646,847 +752,287 @@ func registerLegacyCompatibilityRoutes(mux routeRegistrar) {
 	mux.HandleFunc("POST /api/v2/files/search", func(w http.ResponseWriter, r *http.Request) {
 		handleFilesSearch(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/files/share/create", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/share/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/share/detail", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/share/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/files/share/create", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/share/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/share/detail", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/share/search", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/files/size", func(w http.ResponseWriter, r *http.Request) {
 		handleFilesSize(w, r)
 	})
-	mux.HandleFunc("POST /api/v2/files/tree", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/upload", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/upload/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/user/group", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/wget", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/files/wget/stop", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/global", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/groups/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/groups/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/groups/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/diagnostics/profiles", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/disks/mount", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/disks/partition", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/disks/unmount", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/base", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/docker/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/docker/policies/batch", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/docker/policies/delete/batch", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/docker/sync", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/filter/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/forward/base", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/forward/enable", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/forward/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/forward/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/rules", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/native/detail", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/reorder", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/reset", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/sync", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/sync/preview", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/firewall/settings/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/info", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/monitor/clean", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/monitor/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/monitor/setting/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/cert", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/cert/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/cert/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/cert/sync", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/cert/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/file", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/file/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/log", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/log/clean", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/log/export", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/ssh/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/test/byid", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/test/byinfo", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/tool/config/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/tool/config/set", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/tool/init", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/tool/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/tool/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/tool/supervisor/process", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/tool/supervisor/process/file", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/tool/supervisor/process/file/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/tree", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/update/group", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/log/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/logs/clear", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/logs/detail", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/logs/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/logs/stat", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/logs/system/read", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/logs/tasks/read", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/logs/tasks/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/openresty/build", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/openresty/file", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/openresty/https", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/openresty/modules/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/openresty/scope", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/openresty/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/qps", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/rank", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/relation/stat", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/rules", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/rules/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/node/modules", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/node/modules/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/node/package", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/config", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/container/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/extensions", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/extensions/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/extensions/install", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/extensions/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/extensions/uninstall", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/extensions/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/file", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/fpm/config", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/php/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/remark", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/supervisor/process", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/supervisor/process/file", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/sync", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/runtimes/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/description/save", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/file-history/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/file-history/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/files/ai/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/files/ai/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/snapshot", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/snapshot/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/snapshot/description/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/snapshot/import", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/snapshot/recover", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/snapshot/recreate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/snapshot/rollback", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/snapshot/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/ssh", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/ssh/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/ssh/check/info", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/ssh/default", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/terminal/ai/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/terminal/ai/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/settings/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/sites", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/stat", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/test", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/base", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/file/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/file/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/handle", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/record/clean", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/record/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/status/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clam/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/clean", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/device/base", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/device/check/dns", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/device/conf", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/device/update/byconf", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/device/update/conf", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/device/update/host", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/device/update/passwd", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/device/update/swap", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/operate/sshd", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/update/byconf", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/ftp", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/ftp/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/ftp/log/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/ftp/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/ftp/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/ftp/sync", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/ftp/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/toolbox/scan", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/trend", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/visitors", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/visitors/loc", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/:id/https", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/acme/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/acme/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/acme/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/auths", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/auths/path", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/auths/path/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/auths/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/batch/group", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/batch/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/batch/ssl", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/ca/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/ca/download", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/ca/obtain", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/ca/renew", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/ca/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/config", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/config/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/cors/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/crosssite", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/databases", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/default/html/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/default/server", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/dir", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/dir/permission", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/dir/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/dns/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/dns/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/dns/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/domains", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/domains/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/domains/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/exec/composer", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/group/change", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/lbs/create", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/lbs/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/lbs/file", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/lbs/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/leech", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/leech/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/log/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/log/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/config/global", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/config/site", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/config/site/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/logs/clear", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/logs/detail", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/logs/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/logs/stat", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/qps", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/rank", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/stat", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/trend", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/visitors", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/visitors/loc", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/monitor/websites", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/nginx/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/operate", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/options", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/php/version", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/proxies", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/proxies/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/proxies/file", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/proxies/status", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/proxies/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/proxy/clear", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/proxy/config", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/realip/config", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/redirect", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/redirect/file", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/redirect/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/rewrite", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/rewrite/custom", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/rewrite/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/stream/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/templates/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/templates/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/templates/outputs", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/templates/outputs/del", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/templates/outputs/get", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/templates/outputs/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/templates/preview", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/templates/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/templates/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/templates/upload", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/update", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/waf/access-lists", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/waf/attack/stat", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/waf/block/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/waf/global", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/waf/log/search", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/waf/relation/stat", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/waf/rules", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/waf/rules/delete", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/waf/sites", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/websites/waf/test", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/workmesh/tasks/cancel", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/workmesh/tasks/collect", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/workmesh/tasks/create", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/workmesh/tasks/destroy", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/workmesh/tasks/exec", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
-	mux.HandleFunc("POST /api/v2/workmesh/tasks/start", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, http.StatusNotImplemented, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "MIGRATION_PENDING", "method": r.Method, "path": r.URL.Path}, "message": migrationPendingMessage})
-	})
+	mux.HandleFunc("POST /api/v2/files/tree", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/upload", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/upload/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/user/group", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/wget", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/files/wget/stop", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/global", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/groups/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/groups/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/groups/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/diagnostics/profiles", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/disks/mount", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/disks/partition", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/disks/unmount", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/base", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/docker/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/docker/policies/batch", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/docker/policies/delete/batch", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/docker/sync", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/filter/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/forward/base", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/forward/enable", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/forward/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/forward/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/rules", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/native/detail", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/reorder", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/reset", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/sync", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/sync/preview", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/rules/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/firewall/settings/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/info", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/monitor/clean", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/monitor/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/monitor/setting/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/cert", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/cert/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/cert/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/cert/sync", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/cert/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/file", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/file/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/log", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/log/clean", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/log/export", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/ssh/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/test/byid", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/test/byinfo", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/tool/config/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/tool/config/set", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/tool/init", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/tool/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/tool/status", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/tool/supervisor/process", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/tool/supervisor/process/file", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/tool/supervisor/process/file/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/tree", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/hosts/update/group", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/log/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/clear", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/detail", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/stat", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/system/read", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/tasks/read", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/tasks/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/openresty/build", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/openresty/file", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/openresty/https", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/openresty/modules/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/openresty/scope", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/openresty/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/qps", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/rank", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/relation/stat", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/rules", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/rules/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/node/modules", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/node/modules/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/node/package", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/config", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/container/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/extensions", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/extensions/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/extensions/install", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/extensions/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/extensions/uninstall", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/extensions/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/file", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/fpm/config", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/php/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/remark", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/supervisor/process", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/supervisor/process/file", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/sync", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/runtimes/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/description/save", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/file-history/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/file-history/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/files/ai/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/files/ai/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/snapshot", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/snapshot/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/snapshot/description/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/snapshot/import", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/snapshot/recover", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/snapshot/recreate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/snapshot/rollback", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/snapshot/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/ssh", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/ssh/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/ssh/check/info", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/ssh/default", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/terminal/ai/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/terminal/ai/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/settings/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/sites", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/stat", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/test", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/base", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/file/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/file/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/handle", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/record/clean", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/record/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/status/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clean", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/base", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/check/dns", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/conf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/byconf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/conf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/host", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/passwd", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/swap", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/operate/sshd", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/update/byconf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/log/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/sync", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/scan", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/trend", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/visitors", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/visitors/loc", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/:id/https", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/acme/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/acme/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/acme/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/auths", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/auths/path", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/auths/path/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/auths/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/batch/group", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/batch/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/batch/ssl", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/ca/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/ca/download", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/ca/obtain", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/ca/renew", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/ca/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/check", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/config", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/config/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/cors/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/crosssite", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/databases", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/default/html/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/default/server", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/dir", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/dir/permission", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/dir/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/dns/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/dns/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/dns/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/domains", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/domains/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/domains/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/exec/composer", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/group/change", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/lbs/create", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/lbs/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/lbs/file", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/lbs/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/leech", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/leech/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/log/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/log/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/config/global", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/config/site", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/config/site/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/logs/clear", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/logs/detail", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/logs/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/logs/stat", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/qps", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/rank", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/stat", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/trend", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/visitors", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/visitors/loc", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/monitor/websites", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/nginx/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/options", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/php/version", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/proxies", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/proxies/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/proxies/file", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/proxies/status", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/proxies/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/proxy/clear", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/proxy/config", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/realip/config", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/redirect", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/redirect/file", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/redirect/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/rewrite", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/rewrite/custom", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/rewrite/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/stream/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/templates/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/templates/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/templates/outputs", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/templates/outputs/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/templates/outputs/get", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/templates/outputs/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/templates/preview", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/templates/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/templates/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/templates/upload", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/waf/access-lists", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/waf/attack/stat", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/waf/block/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/waf/global", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/waf/log/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/waf/relation/stat", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/waf/rules", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/waf/rules/delete", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/waf/sites", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/websites/waf/test", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/cancel", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/collect", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/create", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/destroy", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/exec", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/start", fallbackRouteHandler)
 }

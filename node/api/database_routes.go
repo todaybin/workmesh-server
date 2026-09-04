@@ -5,14 +5,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/todaybin/workmesh-server/node/service"
@@ -29,36 +27,17 @@ type databaseOperation struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-var databaseOperationMu sync.Mutex
-
 func appendDatabaseOperation(op databaseOperation) error {
-	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
-	if dir == "" {
-		dir = "./data"
-	}
-	path := filepath.Join(dir, "database-operations.json")
-	databaseOperationMu.Lock()
-	defer databaseOperationMu.Unlock()
-	var items []databaseOperation
-	if b, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(b, &items)
-	}
-	items = append(items, op)
-	if len(items) > 1000 {
-		items = items[len(items)-1000:]
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	if db := sharedDB(); db != nil {
+		_, err := db.Exec(`INSERT INTO database_operations(id,type,target,status,message,created_at) VALUES(?,?,?,?,?,?)`, op.ID, op.Type, op.Target, op.Status, op.Message, op.CreatedAt.UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec(`DELETE FROM database_operations WHERE id NOT IN (SELECT id FROM database_operations ORDER BY created_at DESC LIMIT 1000)`)
 		return err
+	} else {
+		return errors.New("公共数据库未初始化")
 	}
-	b, err := json.Marshal(items)
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
 
 func databasePort(typ string, port int) int {
@@ -189,7 +168,7 @@ func databaseRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	// 统一处理旧版数据库管理入口：元数据操作写入本地仓库，远程管理操作写入审计记录并执行可验证的连接探测。
 	if path == "" || path == "pg" || path == "mongodb" || path == "db" {
-		item, err := databaseService.Create(r.Context(), service.Database{Name: strings.TrimSpace(payload.Name), Type: payload.Type, Host: strings.TrimSpace(payload.Host), Port: databasePort(payload.Type, payload.Port), Username: payload.Username, Description: payload.Description})
+		item, err := databaseService.Create(r.Context(), service.Database{Name: strings.TrimSpace(payload.Name), Type: payload.Type, Host: strings.TrimSpace(payload.Host), Port: databasePort(payload.Type, payload.Port), Username: payload.Username, Password: payload.Password, Description: payload.Description})
 		if err != nil {
 			wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": err.Error()})
 			return
@@ -227,12 +206,17 @@ func databaseRoute(w http.ResponseWriter, r *http.Request) {
 		status = "failed"
 	}
 	op := databaseOperation{ID: strconv.FormatInt(time.Now().UnixNano(), 10), Type: payload.Type, Target: payload.Database, Status: status, Message: message, CreatedAt: time.Now().UTC()}
-	if err := appendDatabaseOperation(op); err != nil {
-		wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error()})
+	persistErr := appendDatabaseOperation(op)
+	if !available {
+		details := map[string]any{"errCode": "DATABASE_UNAVAILABLE", "operation": payload.Operate}
+		if persistErr != nil {
+			details["auditError"] = persistErr.Error()
+		}
+		wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "details": details, "message": message})
 		return
 	}
-	if !available {
-		wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "details": map[string]any{"errCode": "DATABASE_UNAVAILABLE", "operation": payload.Operate}, "message": message})
+	if persistErr != nil {
+		wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": persistErr.Error()})
 		return
 	}
 	// 密码等敏感字段永不回显，仅返回操作审计状态。

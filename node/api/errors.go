@@ -98,3 +98,8 @@ func writeError(w http.ResponseWriter, status int, err error) {
 		"message": message,
 	})
 }
+
+// notImplementedError 统一返回明确的未接入错误，避免 handler 用固定成功值掩盖能力缺失。
+func notImplementedError(w http.ResponseWriter, message string) {
+	runtimeErr(w, http.StatusNotImplemented, message)
+}

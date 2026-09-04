@@ -21,7 +21,7 @@ func TestGatewayRoutesUseExternalProtocolClient(t *testing.T) {
 		calls[r.URL.Path]++
 		w.Header().Set("Content-Type", "application/json")
 		response := map[string]any{"code": 200, "data": map[string]any{"bindingId": "binding-1", "refreshable": true, "scopes": []string{"node"}}}
-		if r.URL.Path == "/api/workmesh/v1/nodes/heartbeat" || r.URL.Path == "/api/workmesh/v1/nodes/authorization/revoke" {
+		if r.URL.Path == "/api/workmesh/v2/nodes/heartbeat" || r.URL.Path == "/api/workmesh/v2/nodes/authorization/revoke" {
 			response = map[string]any{"code": 200, "data": nil}
 		}
 		_ = json.NewEncoder(w).Encode(response)
@@ -61,7 +61,7 @@ func TestGatewayRoutesUseExternalProtocolClient(t *testing.T) {
 	if unbind.Code != http.StatusOK {
 		t.Fatalf("unbind status = %d, body = %s", unbind.Code, unbind.Body.String())
 	}
-	wantCalls := map[string]int{"/workmesh/node/register": 1, "/workmesh/auth/login": 1, "/workmesh/node/heartbeat": 2, "/api/workmesh/v1/nodes/authorization/refresh": 1, "/api/workmesh/v1/nodes/authorization/revoke": 1}
+	wantCalls := map[string]int{"/workmesh/node/register": 1, "/workmesh/auth/login": 1, "/workmesh/node/heartbeat": 2, "/api/workmesh/v2/nodes/authorization/refresh": 1, "/api/workmesh/v2/nodes/authorization/revoke": 1}
 	for path, want := range wantCalls {
 		if calls[path] != want {
 			t.Errorf("cloud %s calls = %d, want %d", path, calls[path], want)

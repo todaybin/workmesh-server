@@ -17,10 +17,14 @@ class Bus {
         }
     }
 
-    off(name: string) {
-        if (this.list[name]) {
+    off(name: string, fn?: Function) {
+        if (!this.list[name]) return;
+        if (!fn) {
             delete this.list[name];
+            return;
         }
+        this.list[name] = this.list[name].filter((listener) => listener !== fn);
+        if (this.list[name].length === 0) delete this.list[name];
     }
 }
 export default Bus;

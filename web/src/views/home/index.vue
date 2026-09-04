@@ -297,16 +297,6 @@
                                             {{ showSensitiveInfo ? baseInfo.ipV4Addr : '****' }}
                                         </el-descriptions-item>
                                         <el-descriptions-item
-                                            v-if="baseInfo.httpProxy && baseInfo.httpProxy !== 'noProxy'"
-                                            class-name="system-content"
-                                            label-class-name="system-label"
-                                        >
-                                            <template #label>
-                                                <span class="system-label">{{ $t('home.proxy') }}</span>
-                                                {{ baseInfo.httpProxy }}
-                                            </template>
-                                        </el-descriptions-item>
-                                        <el-descriptions-item
                                             class-name="system-content"
                                             label-class-name="system-label"
                                         >

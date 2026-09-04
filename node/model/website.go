@@ -26,7 +26,7 @@ type Website struct {
 	IPV6            bool            `json:"IPV6"`
 	Rewrite         string          `json:"rewrite,omitempty"`
 	WebsiteSSLID    uint            `json:"websiteSSLId,omitempty"`
-	RuntimeID       uint            `json:"runtimeID,omitempty"`
+	RuntimeID       string          `json:"runtimeID,omitempty"`
 	AppInstallID    uint            `json:"appInstallId,omitempty"`
 	FtpID           uint            `json:"ftpId,omitempty"`
 	ParentWebsiteID uint            `json:"parentWebsiteID,omitempty"`
@@ -40,6 +40,7 @@ type Website struct {
 	WebsiteGroupID  uint            `json:"webSiteGroupId"`
 	Protocol        string          `json:"protocol,omitempty"`
 	ExpireDate      time.Time       `json:"expireDate,omitempty"`
+	SSLExpireDate   *time.Time      `json:"sslExpireDate,omitempty"`
 	CreatedAt       time.Time       `json:"createdAt"`
 	UpdatedAt       time.Time       `json:"updatedAt"`
 	Domains         []WebsiteDomain `json:"domains,omitempty"`
@@ -61,7 +62,7 @@ type WebsiteCreateRequest struct {
 	ProxyType       string          `json:"proxyType"`
 	WebsiteSSLID    uint            `json:"websiteSSLId"`
 	SSLID           uint            `json:"SSLID"`
-	RuntimeID       uint            `json:"runtimeID"`
+	RuntimeID       string          `json:"runtimeID"`
 	AppInstallID    uint            `json:"appInstallId"`
 	FtpID           uint            `json:"ftpId"`
 	ParentWebsiteID uint            `json:"parentWebsiteID"`
@@ -82,6 +83,7 @@ type WebsiteCreateRequest struct {
 // WebsiteUpdateRequest 更新网站元数据。
 type WebsiteUpdateRequest struct {
 	ID              uint       `json:"id"`
+	Type            string     `json:"type,omitempty"`
 	PrimaryDomain   string     `json:"primaryDomain"`
 	Alias           string     `json:"alias"`
 	Remark          string     `json:"remark"`
@@ -99,7 +101,7 @@ type WebsiteUpdateRequest struct {
 	AccessLog       *bool      `json:"accessLog"`
 	DefaultServer   *bool      `json:"defaultServer"`
 	Rewrite         string     `json:"rewrite"`
-	RuntimeID       *uint      `json:"runtimeID"`
+	RuntimeID       *string    `json:"runtimeID"`
 	AppInstallID    *uint      `json:"appInstallId"`
 	FtpID           *uint      `json:"ftpId"`
 	ParentWebsiteID *uint      `json:"parentWebsiteID"`

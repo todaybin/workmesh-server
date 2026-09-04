@@ -45,11 +45,39 @@ export const searchTasks = (req: Log.SearchTaskReq, node?: string) => {
     return http.post<ResPage<Log.Task>>(`/logs/tasks/search${params}`, req);
 };
 
+const taskLogRequests = new Map<string, ReturnType<typeof http.post<any>>>();
+
 export const readTaskLogByLine = (req: Log.TaskLogReadReq, node?: string) => {
     const params = node ? `?operateNode=${node}` : '';
-    return http.post<any>(`/logs/tasks/read${params}`, req, TimeoutEnum.T_40S);
+    const key = `${node || ''}:${JSON.stringify(req)}`;
+    const existing = taskLogRequests.get(key);
+    if (existing) {
+        return existing;
+    }
+    const request = http.post<any>(`/logs/tasks/read${params}`, req, TimeoutEnum.T_40S);
+    taskLogRequests.set(key, request);
+    request.finally(() => {
+        if (taskLogRequests.get(key) === request) {
+            taskLogRequests.delete(key);
+        }
+    });
+    return request;
 };
 
+let executingTaskRequest: ReturnType<typeof http.get<number>> | undefined;
+let executingTaskRequestedAt = 0;
+
 export const countExecutingTask = () => {
-    return http.get<number>(`/logs/tasks/executing/count`);
+    const now = Date.now();
+    if (executingTaskRequest && now - executingTaskRequestedAt < 300) {
+        return executingTaskRequest;
+    }
+    executingTaskRequestedAt = now;
+    executingTaskRequest = http.get<number>(`/logs/tasks/executing/count`);
+    executingTaskRequest.finally(() => {
+        if (Date.now() - executingTaskRequestedAt >= 300) {
+            executingTaskRequest = undefined;
+        }
+    });
+    return executingTaskRequest;
 };

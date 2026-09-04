@@ -16,7 +16,7 @@ export namespace File {
         type: string;
         updateTime: string;
         modTime: string;
-        mode: number;
+        mode: number | string;
         mimeType: string;
         dirSize: number;
         items: File[];

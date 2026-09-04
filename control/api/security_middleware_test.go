@@ -147,6 +147,31 @@ func TestSecurityMiddlewareSecurityEntrance(t *testing.T) {
 	}
 }
 
+func TestSecurityMiddlewareUsesSQLiteSettingsProvider(t *testing.T) {
+	handler := NewSecurityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), SecurityMiddlewareOptions{
+		DataDir: t.TempDir(),
+		Settings: func() map[string]any {
+			return map[string]any{"securityEntrance": "sqlite-entry", "bindDomain": "panel.example.test"}
+		},
+	})
+	blocked := httptest.NewRequest(http.MethodGet, "/login", nil)
+	blocked.Host = "panel.example.test"
+	blockedRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(blockedRecorder, blocked)
+	if blockedRecorder.Code != http.StatusNotFound {
+		t.Fatalf("SQLite 安全入口未生效: %d", blockedRecorder.Code)
+	}
+	allowed := httptest.NewRequest(http.MethodGet, "/sqlite-entry", nil)
+	allowed.Host = "panel.example.test"
+	allowedRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(allowedRecorder, allowed)
+	if allowedRecorder.Code != http.StatusNoContent {
+		t.Fatalf("SQLite 安全入口路径未放行: %d", allowedRecorder.Code)
+	}
+}
+
 func TestSecurityMiddlewareLocalizesSecurityErrors(t *testing.T) {
 	root := t.TempDir()
 	writeSecurityDomains(t, root, map[string]any{"bindDomain": "panel.example.test"})

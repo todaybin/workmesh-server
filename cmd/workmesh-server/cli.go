@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/todaybin/workmesh-server/config"
+	"github.com/todaybin/workmesh-server/internal/storage"
 )
 
 const (
@@ -643,6 +644,36 @@ func saveSecurityEntrance(dataDir, entrance string) error {
 				return errors.New("安全入口仅支持数字或字母")
 			}
 		}
+	}
+	// Production state lives in SQLite. Keep the JSON path only as a fallback
+	// for isolated CLI tests or pre-database installations.
+	dbPath := filepath.Join(dataDir, "workmesh.db")
+	if _, statErr := os.Stat(dbPath); statErr == nil {
+		store, err := storage.Open(dbPath)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		var payload []byte
+		if err := store.DB().QueryRow(`SELECT payload FROM functional_domain_state WHERE id=1`).Scan(&payload); err != nil {
+			return fmt.Errorf("读取 SQLite 安全设置失败: %w", err)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(payload, &doc); err != nil {
+			return fmt.Errorf("解析 SQLite 安全设置失败: %w", err)
+		}
+		settings, ok := doc["settings"].(map[string]any)
+		if !ok {
+			settings = map[string]any{}
+			doc["settings"] = settings
+		}
+		settings["securityEntrance"] = entrance
+		updated, err := json.Marshal(doc)
+		if err != nil {
+			return err
+		}
+		_, err = store.DB().Exec(`UPDATE functional_domain_state SET payload=?, updated_at=? WHERE id=1`, updated, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	}
 	path := filepath.Join(dataDir, "domains.json")
 	doc := map[string]any{"settings": map[string]any{}}

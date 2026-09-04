@@ -76,7 +76,7 @@ func TestFileHistoryAndAdvancedOperations(t *testing.T) {
 		t.Fatalf("save=%d %s", rr.Code, rr.Body.String())
 	}
 	search := post("/api/v2/files/history/search", map[string]any{"path": path})
-	if search.Code != 200 || !bytes.Contains(search.Body.Bytes(), []byte("v1")) {
+	if search.Code != 200 || !bytes.Contains(search.Body.Bytes(), []byte("v1")) || !bytes.Contains(search.Body.Bytes(), []byte(`"fileName":"history.txt"`)) || !bytes.Contains(search.Body.Bytes(), []byte(`"operation":"save"`)) {
 		t.Fatalf("history search=%d %s", search.Code, search.Body.String())
 	}
 	var env struct {
