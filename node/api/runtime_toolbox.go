@@ -1483,6 +1483,9 @@ func registerRuntimeRoutes(mux *http.ServeMux, s *runtimeStore) {
 			}
 		}
 		if install {
+			if strings.TrimSpace(item.TaskID) == "" {
+				item.TaskID = idToken()
+			}
 			item.Status = "Creating"
 			item.TaskStatus = "installing"
 		} else {
@@ -1496,6 +1499,10 @@ func registerRuntimeRoutes(mux *http.ServeMux, s *runtimeStore) {
 			return
 		}
 		if install {
+			// Create the task record and first log line before returning. This
+			// lets the task drawer attach immediately and keeps installation
+			// independent from the lifecycle of the creating page.
+			ensureAppTaskLog(item.TaskID, item.ID, item.Name, "installing", "开始安装运行时")
 			go runRuntimeInstallTask(s, item)
 		}
 		runtimeOK(w, item)
