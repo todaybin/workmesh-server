@@ -6,6 +6,9 @@ data/
 .workmesh-data/
 *.exe
 *.test
+/workmesh-server
+release/*
+!release/.gitkeep
 web/node_modules/
 web/dist/
 internal/webassets/dist/*
