@@ -187,7 +187,7 @@ func (s *WebsiteService) writeInitialSiteConfigWithRoot(site model.Website, runD
 			target = "127.0.0.1:9000"
 		}
 		base += "    root " + root + ";\n    index index.php index.html;\n    location ~ \\.php$ {\n        include fastcgi_params;\n        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n        fastcgi_pass " + target + ";\n    }\n"
-	} else if (site.Type == "proxy" || site.Type == "runtime" || site.Type == "deployment") && strings.TrimSpace(site.Proxy) != "" {
+	} else if (site.Type == "runtime" || site.Type == "deployment") && strings.TrimSpace(site.Proxy) != "" {
 		target := strings.TrimSpace(site.Proxy)
 		if !strings.Contains(target, "://") && !strings.HasPrefix(target, "unix:") {
 			target = "http://" + target
@@ -215,6 +215,9 @@ func (s *WebsiteService) writeInitialSiteConfigWithRoot(site model.Website, runD
 				base += "    location / {\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_pass " + target + ";\n    }\n"
 			}
 		}
+	} else if site.Type == "proxy" {
+		// 反向代理由 nginx/proxy/*.conf 托管；主站点只保留可加载的 server 基础块。
+		base += "    root " + root + ";\n    index index.html;\n"
 	} else {
 		base += "    root " + root + ";\n    index index.php index.html index.htm default.php default.htm default.html;\n    error_page 404 /404.html;\n"
 	}

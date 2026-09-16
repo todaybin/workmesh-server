@@ -212,6 +212,8 @@ func (s *WebsiteService) load() {
 	if s.websites == nil {
 		s.websites = []model.Website{}
 	}
+	// 旧版本反向站点可能只有 site.conf 中的 proxy_pass；先补齐菜单所需的 root.conf。
+	s.reconcileReverseProxyFiles()
 	// SQLite is authoritative after restart, but runtime files can be removed
 	// by a package upgrade or an operator cleanup. Rebuild only missing/empty
 	// files for running sites from the persisted typed settings; stopped sites

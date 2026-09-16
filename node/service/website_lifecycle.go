@@ -246,6 +246,11 @@ func (s *WebsiteService) Create(req model.WebsiteCreateRequest) (model.Website, 
 	if err := s.writeInitialSiteConfigWithRoot(site, req.SiteDir); err != nil {
 		return model.Website{}, fmt.Errorf("生成站点配置失败: %w", err)
 	}
+	if typeName == "proxy" {
+		if err := s.initializeReverseProxySite(site); err != nil {
+			return model.Website{}, fmt.Errorf("生成反向代理配置失败: %w", err)
+		}
+	}
 	if typeName == "stream" && len(site.Servers) > 0 {
 		ports, portErr := normalizeStreamPorts(site.StreamPorts)
 		if portErr != nil {
@@ -301,6 +306,20 @@ func (s *WebsiteService) Create(req model.WebsiteCreateRequest) (model.Website, 
 		domains = append([]model.WebsiteDomain{primary}, domains...)
 	}
 	s.domains[id] = domains
+	if typeName == "proxy" {
+		if s.configs[id] == nil {
+			s.configs[id] = map[string]any{}
+		}
+		configPath := s.SitePath(site, "site.conf")
+		current, readErr := os.ReadFile(configPath)
+		if readErr != nil {
+			return model.Website{}, rollbackCreatedWebsite(s, id, previousState, fmt.Errorf("读取反向代理站点配置失败: %w", readErr))
+		}
+		if err := writeWebsiteAtomic(configPath, []byte(s.syncManagedWebsiteIncludes(site, string(current))), 0o640); err != nil {
+			return model.Website{}, rollbackCreatedWebsite(s, id, previousState, fmt.Errorf("同步反向代理配置失败: %w", err))
+		}
+		s.configs[id]["proxy:root"] = map[string]any{"enabled": true, "name": "root", "proxyPass": site.Proxy, "match": "/", "proxyHost": "$host"}
+	}
 	if _, syncErr := s.syncWebsiteServerNamesLocked(site); syncErr != nil {
 		return model.Website{}, rollbackCreatedWebsite(s, id, previousState, fmt.Errorf("同步网站域名配置失败: %w", syncErr))
 	}
@@ -338,7 +357,7 @@ func (s *WebsiteService) Create(req model.WebsiteCreateRequest) (model.Website, 
 	if err := s.persist("website-domains", s.domains); err != nil {
 		return model.Website{}, rollbackCreatedWebsite(s, id, previousState, err)
 	}
-	if typeName == "subsite" && strings.TrimSpace(req.SiteDir) != "" {
+	if (typeName == "subsite" && strings.TrimSpace(req.SiteDir) != "") || typeName == "proxy" {
 		if err := s.persist("website-configs", s.configs); err != nil {
 			return model.Website{}, rollbackCreatedWebsite(s, id, previousState, err)
 		}

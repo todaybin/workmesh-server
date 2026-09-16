@@ -5,7 +5,23 @@
 
 这是开发恢复的唯一快速入口。先看本页，再打开对应任务详情；不要默认重新扫描全部迁移文档。
 
-更新时间：2026-09-13
+更新时间：2026-09-16
+
+## 2026-09-16 反向站点代理配置
+
+- [x] 反向站点创建后生成 `nginx/proxy/root.conf` 并由 `site.conf` 引用，代理菜单可读取默认配置。
+- [x] 新增代理改为按名称独立维护 `.conf/.bak`，补齐编辑、启停、删除、文件更新和失败回滚；历史站点支持启动/首次读取补偿。
+- [x] 代理定向测试（`GOWORK=off go test ./node/service -run 'TestWebsite' -count=1`、`GOWORK=off go test ./node/api -run 'TestWebsite' -count=1`）、`GOWORK=off go vet ./node/service ./node/api` 和 `git diff --check` 通过；完整测试在当前沙盒因 `httptest` IPv6 监听权限受阻，真实 OpenResty/上游访问待部署环境验收。
+- [x] 详情见 [`2026-09-16-website-proxy-create.md`](progress/2026-09-16-website-proxy-create.md)。
+
+## 2026-09-16 编译与部署状态
+
+- [x] 已执行 `make clean-frontend && GOOS=linux GOARCH=amd64 make build-release`，生成单二进制发布包 `release/workmesh-server-linux-amd64`，SHA-256 为 `70943fc3fec6b7e17ba1cbceebbb4a710f16580dbfba547e21cab3899a0ab597`。
+- [x] 发布包自校验通过，`--help` 可正常执行；源码工作区 `git diff --check` 通过。
+- [x] 已部署到 `/opt/workmesh-server`：`workmesh-server.service` 于 `2026-09-16 16:48:11` 重启，MainPID 为 `3951658`；运行二进制与发布包 SHA-256 均为 `70943fc3fec6b7e17ba1cbceebbb4a710f16580dbfba547e21cab3899a0ab597`。
+- [x] 部署后 `GET /health` 返回 `code=200,status=ok`，`GET /ready` 返回 `code=200,status=ready`；旧版本备份为 `/opt/workmesh-server/bin/workmesh-server.bak.20260916164810-3951537`。
+- [!] 生产预检存在 Docker daemon、WAF 镜像引用、域名解析和浏览器验收阻塞，需在真实维护主机完成 `activate-release.sh` 与 `/health`、`/ready`、反向代理配置和上游访问验收。
+- [x] 先前只读挂载阻塞已解除；本次使用 `deploy/install/activate-release.sh` 完成原子替换、systemd 重启、MainPID 和 9999 端口归属检查。
 
 ## 2026-09-13 网站监控概览与菜单层级
 

@@ -212,7 +212,14 @@ func (s *WebsiteService) renderWebsiteProxySetting(site model.Website, value map
 	if modifier != "" && modifier != "=" && modifier != "~" && modifier != "~*" {
 		return nil, errors.New("代理匹配修饰符无效")
 	}
-	headers := "        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n"
+	proxyHost := websiteSettingString(value, "proxyHost", "host")
+	if proxyHost == "" {
+		proxyHost = "$host"
+	}
+	if _, err := validateNginxSettingValue(proxyHost, true); err != nil {
+		return nil, err
+	}
+	headers := fmt.Sprintf("        proxy_set_header Host %s;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n", proxyHost)
 	if raw, ok := value["headers"].(map[string]any); ok {
 		for key, val := range raw {
 			if key != "Host" && key != "X-Real-IP" && key != "X-Forwarded-For" && key != "X-Forwarded-Proto" {
@@ -225,8 +232,139 @@ func (s *WebsiteService) renderWebsiteProxySetting(site model.Website, value map
 			headers += fmt.Sprintf("        proxy_set_header %s %s;\n", key, text)
 		}
 	}
-	write("proxy", fmt.Sprintf("location %s%s {\n        proxy_http_version 1.1;\n        proxy_connect_timeout 10s;\n        proxy_send_timeout 60s;\n        proxy_read_timeout 60s;\n%s        proxy_pass %s;\n}\n", modifier, match, headers, target))
+	lines := []string{fmt.Sprintf("location %s%s {", modifier, match), "        proxy_http_version 1.1;", "        proxy_connect_timeout 10s;", "        proxy_send_timeout 60s;", "        proxy_read_timeout 60s;"}
+	lines = append(lines, strings.TrimRight(headers, "\n"))
+	if strings.HasPrefix(target, "https://") {
+		sni := websiteSettingBool(value, "sni", websiteSettingBool(value, "SNI", true))
+		if sni {
+			lines = append(lines, "        proxy_ssl_server_name on;")
+		} else {
+			lines = append(lines, "        proxy_ssl_server_name off;")
+		}
+		sslName := websiteSettingString(value, "proxySSLName", "sslName")
+		if sslName == "" {
+			sslName = "$proxy_host"
+		}
+		if _, err := validateNginxSettingValue(sslName, true); err != nil {
+			return nil, err
+		}
+		lines = append(lines, "        proxy_ssl_name "+sslName+";")
+		if websiteSettingBool(value, "sslVerify", websiteSettingBool(value, "proxySSLVerify", false)) {
+			lines = append(lines, "        proxy_ssl_verify on;", "        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;")
+		}
+	}
+	cache := websiteSettingBool(value, "cache", false)
+	serverCacheTime := websiteSettingInt(value, "serverCacheTime", 0)
+	serverCacheUnit := normalizeCacheUnit(websiteSettingString(value, "serverCacheUnit", "serverCacheUint"))
+	if cache {
+		if serverCacheTime <= 0 {
+			serverCacheTime = 10
+		}
+		if serverCacheUnit == "" {
+			serverCacheUnit = "m"
+		}
+		zone := "proxy_cache_zone_of_" + sanitizeCacheName(site.Alias)
+		lines = append(lines, "        proxy_ignore_headers Set-Cookie Cache-Control expires;", "        proxy_cache "+zone+";", "        proxy_cache_key $host$uri$is_args$args;", fmt.Sprintf("        proxy_cache_valid 200 304 301 302 %d%s;", serverCacheTime, serverCacheUnit))
+		cachePath := filepath.Join(s.SitePath(site, "root"), ".workmesh", "cache")
+		cacheConf := fmt.Sprintf("proxy_cache_path %s levels=1:2 keys_zone=%s:10m inactive=60m max_size=1g use_temp_path=off;\n", cachePath, zone)
+		files[filepath.Join(s.SitePath(site, "root"), "nginx", "proxy-cache.conf")] = []byte(cacheConf)
+	} else {
+		files[filepath.Join(s.SitePath(site, "root"), "nginx", "proxy-cache.conf")] = nil
+	}
+	cacheTime := websiteSettingInt(value, "cacheTime", 0)
+	cacheUnit := normalizeCacheUnit(websiteSettingString(value, "cacheUnit", "cacheUint"))
+	if cacheTime > 0 {
+		if cacheUnit == "" {
+			cacheUnit = "d"
+		}
+		lines = append(lines, fmt.Sprintf("        expires %d%s;", cacheTime, cacheUnit))
+	} else if cacheTime < 0 {
+		lines = append(lines, "        add_header Cache-Control no-cache;")
+	}
+	if replaces := websiteSettingStringMap(value["replaces"]); len(replaces) > 0 {
+		lines = append(lines, "        proxy_set_header Accept-Encoding \"\";")
+		for from, to := range replaces {
+			lines = append(lines, fmt.Sprintf("        sub_filter \"%s\" \"%s\";", escapeNginxQuoted(from), escapeNginxQuoted(to)))
+		}
+		lines = append(lines, "        sub_filter_once off;", "        sub_filter_types *;")
+	}
+	if websiteSettingBool(value, "cors", false) {
+		origin := websiteSettingString(value, "allowOrigins", "allowOrigin")
+		if origin == "" {
+			origin = "*"
+		}
+		lines = append(lines, "        add_header Access-Control-Allow-Origin "+origin+" always;")
+		if methods := websiteSettingString(value, "allowMethods"); methods != "" {
+			lines = append(lines, "        add_header Access-Control-Allow-Methods "+methods+" always;")
+		}
+		if hdrs := websiteSettingString(value, "allowHeaders"); hdrs != "" {
+			lines = append(lines, "        add_header Access-Control-Allow-Headers "+hdrs+" always;")
+		}
+		if websiteSettingBool(value, "allowCredentials", false) {
+			lines = append(lines, "        add_header Access-Control-Allow-Credentials true always;")
+		}
+		if websiteSettingBool(value, "preflight", true) {
+			lines = append(lines, "        if ($request_method = 'OPTIONS') {", "            add_header Access-Control-Max-Age 1728000;", "            add_header Content-Type 'text/plain;charset=UTF-8';", "            add_header Content-Length 0;", "            return 204;", "        }")
+		}
+	}
+	lines = append(lines, "        proxy_pass "+target+";", "}")
+	write("proxy", strings.Join(lines, "\n")+"\n")
 	return files, nil
+}
+
+func websiteSettingInt(value map[string]any, key string, fallback int) int {
+	raw, ok := value[key]
+	if !ok {
+		return fallback
+	}
+	switch x := raw.(type) {
+	case int:
+		return x
+	case int64:
+		return int(x)
+	case float64:
+		return int(x)
+	case string:
+		n, _ := strconv.Atoi(strings.TrimSpace(x))
+		return n
+	}
+	return fallback
+}
+func normalizeCacheUnit(unit string) string {
+	unit = strings.ToLower(strings.TrimSpace(unit))
+	switch unit {
+	case "s", "m", "h", "d", "w", "y":
+		return unit
+	}
+	return ""
+}
+func sanitizeCacheName(name string) string {
+	name = regexp.MustCompile(`[^A-Za-z0-9_]+`).ReplaceAllString(name, "_")
+	if name == "" {
+		return "site"
+	}
+	return name
+}
+func escapeNginxQuoted(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), `"`, `\"`)
+}
+func websiteSettingStringMap(value any) map[string]string {
+	out := map[string]string{}
+	raw, ok := value.(map[string]any)
+	if !ok {
+		if typed, ok2 := value.(map[string]string); ok2 {
+			return typed
+		}
+		return out
+	}
+	for k, v := range raw {
+		ks, ke := validateNginxSettingValue(fmt.Sprint(k), false)
+		vs, ve := validateNginxSettingValue(fmt.Sprint(v), true)
+		if ke == nil && ve == nil {
+			out[ks] = vs
+		}
+	}
+	return out
 }
 
 // renderWebsiteLoadBalanceSetting 渲染 upstream 和对应的代理入口。

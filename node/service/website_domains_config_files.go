@@ -70,6 +70,14 @@ func (s *WebsiteService) ListWebsiteProxies(websiteID uint) ([]map[string]any, e
 	if err != nil {
 		return nil, err
 	}
+	// 兼容历史反向站点：旧版本只把 proxy 写进 site.conf，首次进入菜单时补齐 root.conf。
+	if err := s.ensureReverseProxyConfig(websiteID); err != nil {
+		return nil, err
+	}
+	site, err = s.Get(websiteID)
+	if err != nil {
+		return nil, err
+	}
 	dir := s.SitePath(site, "proxy")
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -92,18 +100,52 @@ func (s *WebsiteService) ListWebsiteProxies(websiteID uint) ([]map[string]any, e
 		proxyHost := firstRegexpValue(`(?m)\bproxy_set_header\s+Host\s+([^;\s]+)`, string(content))
 		match, modifier := parseProxyLocation(string(content))
 		contentText := string(content)
+		cacheTime, cacheUnit := parseDurationDirective(contentText, `(?m)\bexpires\s+([^;\s]+)`)
+		serverCacheTime, serverCacheUnit := parseDurationDirective(contentText, `(?m)\bproxy_cache_valid\s+200\s+304\s+301\s+302\s+([^;\s]+)`)
+		replaces := map[string]string{}
+		for _, m := range regexp.MustCompile(`(?m)\bsub_filter\s+"((?:\\.|[^"])*)"\s+"((?:\\.|[^"])*)"`).FindAllStringSubmatch(contentText, -1) {
+			if len(m) > 2 {
+				replaces[m[1]] = m[2]
+			}
+		}
+		cache := strings.TrimSpace(firstRegexpValue(`(?m)\bproxy_cache\s+([^;\s]+)`, contentText)) != ""
+		cors := strings.Contains(contentText, "Access-Control-Allow-Origin")
 		proxies = append(proxies, map[string]any{
 			"id": websiteID, "name": name, "enable": strings.HasSuffix(entry.Name(), ".conf"),
 			"proxyPass": proxyPass, "proxyHost": proxyHost, "match": match, "modifier": modifier,
 			"content": string(content), "filePath": filepath.Join(dir, entry.Name()),
-			"cache": false, "cacheTime": 0, "cacheUnit": "", "serverCacheTime": 0, "serverCacheUnit": "",
-			"replaces": map[string]string{}, "sni": strings.Contains(contentText, "proxy_ssl_server_name on"),
+			"cache": cache, "cacheTime": cacheTime, "cacheUnit": cacheUnit, "serverCacheTime": serverCacheTime, "serverCacheUnit": serverCacheUnit,
+			"replaces": replaces, "sni": strings.Contains(contentText, "proxy_ssl_server_name on"),
 			"proxySSLName": firstRegexpValue(`(?m)\bproxy_ssl_name\s+([^;\s]+)`, string(content)),
-			"sslVerify":    strings.Contains(contentText, "proxy_ssl_verify on"), "cors": false,
+			"sslVerify":    strings.Contains(contentText, "proxy_ssl_verify on"), "cors": cors,
+			"allowOrigins":     firstRegexpValue(`(?m)\bAccess-Control-Allow-Origin\s+([^;\s]+)`, contentText),
+			"allowMethods":     firstRegexpValue(`(?m)\bAccess-Control-Allow-Methods\s+([^;\s]+)`, contentText),
+			"allowHeaders":     firstRegexpValue(`(?m)\bAccess-Control-Allow-Headers\s+([^;\s]+)`, contentText),
+			"allowCredentials": strings.Contains(contentText, "Access-Control-Allow-Credentials true"),
+			"preflight":        strings.Contains(contentText, "$request_method = 'OPTIONS'"),
 		})
 	}
 	sort.Slice(proxies, func(i, j int) bool { return fmt.Sprint(proxies[i]["name"]) < fmt.Sprint(proxies[j]["name"]) })
 	return proxies, nil
+}
+
+func parseDurationDirective(content, pattern string) (int, string) {
+	raw := firstRegexpValue(pattern, content)
+	if raw == "" {
+		return 0, ""
+	}
+	unit := raw[len(raw)-1:]
+	number := raw
+	if unit < "0" || unit > "9" {
+		number = raw[:len(raw)-1]
+	} else {
+		unit = "s"
+	}
+	n, err := strconv.Atoi(number)
+	if err != nil {
+		return 0, ""
+	}
+	return n, unit
 }
 
 // firstRegexpValue 返回正则表达式第一个捕获组的去空白结果。

@@ -73,7 +73,7 @@
 | `deployment` | `appType`, `appInstallId`, `templateOutputID`, `taskID` | 应用商店/模板一键部署 | 应用包、任务执行器 |
 | `runtime` | `runtimeID`, `runtimeType`（php/node/java/go/python/dotnet） | 绑定运行环境的网站 | 对应容器/运行时 |
 | `static` | `siteDir`, `domains` | 静态站点 | OpenResty 文件目录 |
-| `proxy` | `proxyType`, `proxyAddress`, `proxyProtocol` | 反向代理 | 可访问真实上游 |
+| `proxy` | `proxyType`, `proxyAddress`, `proxyProtocol` | 反向代理；创建后生成 `nginx/proxy/root.conf` 并由站点配置引用 | 可访问真实上游 |
 | `subsite` | `parentWebsiteID` | 主站点下的次站点 | 已存在主站点、域名隔离 |
 | `stream` | `streamPorts`, `udp`, `algorithm`, `servers` | TCP/UDP Stream | 真实 TCP/UDP 上游 |
 
@@ -196,7 +196,7 @@
 | 函数 | 方法和路径 | 多操作/关键字段 | 响应 | WorkMesh | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | `getProxyConfig` | POST `/api/v2/websites/proxies` | 网站 ID、筛选 | `ProxyConfig[]` | `website_config_routes.go`, `website_proxy.go` | `explicit-real-handler` / `not-run` |
-| `operateProxyConfig` | POST `/api/v2/websites/proxies/update` | `operate: create/edit/delete`；`name`, `match`, `proxyPass`, `proxyProtocol`, `proxyAddress`, `proxyHost`, `sni`, `sslVerify`, `replaces`, CORS/缓存字段 | 操作结果 | `website_proxy.go` | `wildcard-real-handler` / `not-run` |
+| `operateProxyConfig` | POST `/api/v2/websites/proxies/update` | `operate: create/edit/delete`；按 `name.conf` 独立维护；`name`, `match`, `proxyPass`, `proxyProtocol`, `proxyAddress`, `proxyHost`, `sni`, `sslVerify`, `replaces`, CORS/缓存字段 | 操作结果 | `website_proxy.go` | `wildcard-real-handler` / `not-run` |
 | `deleteProxyConfig` | POST `/api/v2/websites/proxies/delete` | `{ id, websiteID }` | 操作结果 | 扩展分发器 | `wildcard-real-handler` / `not-run` |
 | `updateProxyConfigStatus` | POST `/api/v2/websites/proxies/status` | `{ id, name, status }` | 操作结果 | 扩展分发器 | `wildcard-real-handler` / `not-run` |
 | `updateProxyConfigFile` | POST `/api/v2/websites/proxies/file` | 配置内容/文件字段 | 操作结果 | 扩展分发器 | `wildcard-real-handler` / `not-run` |
@@ -388,4 +388,3 @@ POST /api/v2/openresty/update
 - `enabled`/`SSLID` 等 WorkMesh 历史兼容字段必须在服务端兼容读取，但响应应同时提供原版字段（如 `enable`、`websiteSSLId`）以保证 1Panel 前端无感切换。
 - 任何 v1→v2 变更必须在 `docs/migration` 增加：旧路径、旧方法、旧请求/响应、v2 路径、兼容期限、调用方和测试证据。
 - 迁移完成标准不是路由返回 200，而是前端页面真实操作、SQLite 持久化、OpenResty 配置和日志审计均一致。
-

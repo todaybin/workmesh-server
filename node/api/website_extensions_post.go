@@ -326,24 +326,43 @@ func websiteExtensionPostHandler(store *websiteExtensionStore) http.HandlerFunc 
 				fileName := bodyString(body, "name", "fileName", "filePath")
 				content := bodyString(body, "content")
 				result, err = svc.UpdateWebsiteProxyFile(id, fileName, content)
+			} else if rest == "proxies/status" {
+				name := bodyString(body, "name", "fileName")
+				status := strings.ToLower(bodyString(body, "status", "operate"))
+				enabled := status == "enable" || status == "enabled" || status == "running" || status == "on"
+				err = svc.UpdateNamedWebsiteProxyStatus(id, name, enabled)
+				result = map[string]any{"id": id, "name": name, "enabled": enabled}
 			} else {
-				if rest == "proxies/status" {
-					status := strings.ToLower(bodyString(body, "status", "operate"))
-					// 状态接口的前端契约只提交 id/name/status；合并已保存的
-					// 代理配置，避免状态切换要求调用方重复提交 proxyPass。
-					current, currentErr := svc.GetConfig(id, "proxy")
-					if currentErr != nil {
-						extensionError(w, http.StatusBadRequest, currentErr)
+				operation := strings.ToLower(bodyString(body, "operate", "action"))
+				if operation == "delete" {
+					err = svc.DeleteWebsiteProxy(id, bodyString(body, "name", "fileName"))
+					result = map[string]any{"id": id, "deleted": true}
+					if err != nil {
+						extensionError(w, http.StatusBadRequest, err)
 						return
 					}
-					for key, value := range current {
-						if _, exists := body[key]; !exists {
-							body[key] = value
-						}
-					}
-					body["enabled"] = status == "enable" || status == "enabled" || status == "running" || status == "on"
+					break
 				}
-				result, err = svc.UpdateWebsiteProxy(id, body)
+				if operation == "enable" || operation == "disable" {
+					err = svc.UpdateNamedWebsiteProxyStatus(id, bodyString(body, "name", "fileName"), operation == "enable")
+					result = map[string]any{"id": id, "name": bodyString(body, "name", "fileName"), "enabled": operation == "enable"}
+					if err != nil {
+						extensionError(w, http.StatusBadRequest, err)
+						return
+					}
+					break
+				}
+				if bodyString(body, "proxyPass", "proxy", "target", "url", "address") == "" {
+					protocol := bodyString(body, "proxyProtocol")
+					address := bodyString(body, "proxyAddress")
+					if address != "" {
+						if protocol == "" {
+							protocol = "http://"
+						}
+						body["proxyPass"] = protocol + address
+					}
+				}
+				result, err = svc.UpdateNamedWebsiteProxy(id, bodyString(body, "name", "fileName"), bodyString(body, "operate", "action"), body)
 			}
 			if err != nil {
 				extensionError(w, http.StatusBadRequest, err)

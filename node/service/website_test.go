@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -436,10 +437,77 @@ func TestWebsiteServiceCreatesAllWebsiteTypesWithRuntimeConfig(t *testing.T) {
 		if check.name == "stream" {
 			path = svc.SitePath(check.site, "stream.conf")
 		}
+		if check.name == "proxy" {
+			path = filepath.Join(svc.SitePath(check.site, "proxy"), "root.conf")
+		}
 		content, readErr := os.ReadFile(path)
 		if readErr != nil || !strings.Contains(string(content), check.want) {
 			t.Fatalf("%s 配置不符合预期: err=%v want=%q content=%s", check.name, readErr, check.want, content)
 		}
+	}
+	proxySiteConfig, err := os.ReadFile(svc.SitePath(proxy, "site.conf"))
+	if err != nil || !strings.Contains(string(proxySiteConfig), "nginx/proxy/*.conf") {
+		t.Fatalf("反向站点 site.conf 未引用代理托管目录: err=%v content=%s", err, proxySiteConfig)
+	}
+}
+
+func TestNamedWebsiteProxyLifecycleAndLegacyRepair(t *testing.T) {
+	root := t.TempDir()
+	websiteRoot := filepath.Join(root, "wwwroot")
+	t.Setenv("WORKMESH_DATA_DIR", root)
+	t.Setenv("WORKMESH_WEBSITE_ROOT", websiteRoot)
+	svc := NewWebsiteService(root)
+	site, err := svc.Create(model.WebsiteCreateRequest{PrimaryDomain: "named-proxy.example", Type: "static"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpdateNamedWebsiteProxy(site.ID, "api", "create", map[string]any{"proxyPass": "127.0.0.1:18080", "match": "/api"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpdateNamedWebsiteProxy(site.ID, "web", "create", map[string]any{"proxyPass": "https://upstream.example"}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := svc.ListWebsiteProxies(site.ID)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("命名代理列表错误: err=%v items=%#v", err, items)
+	}
+	if err := svc.UpdateNamedWebsiteProxyStatus(site.ID, "api", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(svc.SitePath(site, "proxy"), "api.bak")); err != nil {
+		t.Fatalf("禁用代理未生成 bak: %v", err)
+	}
+	if err := svc.UpdateNamedWebsiteProxyStatus(site.ID, "api", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(svc.SitePath(site, "proxy"), "api.conf")); err != nil {
+		t.Fatalf("启用代理未恢复 conf: %v", err)
+	}
+	if err := svc.DeleteWebsiteProxy(site.ID, "api"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(svc.SitePath(site, "proxy"), "api.conf")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("删除代理后 conf 仍存在: %v", err)
+	}
+
+	legacy, err := svc.Create(model.WebsiteCreateRequest{PrimaryDomain: "legacy-proxy.example", Type: "static"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.mu.Lock()
+	for i := range svc.websites {
+		if svc.websites[i].ID == legacy.ID {
+			svc.websites[i].Type = "proxy"
+			svc.websites[i].Proxy = "127.0.0.1:19090"
+		}
+	}
+	svc.mu.Unlock()
+	if err := os.RemoveAll(svc.SitePath(legacy, "proxy")); err != nil {
+		t.Fatal(err)
+	}
+	items, err = svc.ListWebsiteProxies(legacy.ID)
+	if err != nil || len(items) != 1 || items[0]["name"] != "root" || !strings.Contains(fmt.Sprint(items[0]["proxyPass"]), "127.0.0.1:19090") {
+		t.Fatalf("历史反向站点未自动补齐: err=%v items=%#v", err, items)
 	}
 }
 

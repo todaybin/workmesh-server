@@ -59,12 +59,24 @@ func registerWebsiteConfigRoutes(mux *http.ServeMux, svc *service.WebsiteService
 		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
 	}
 	mux.HandleFunc("GET /api/v2/websites/{id}/config/{type}", get)
+	mux.HandleFunc("GET /api/v2/websites/proxy/config/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := parseID(r.PathValue("id"))
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		cfg, err := svc.GetWebsiteProxyCache(id)
+		if err != nil {
+			writeError(w, 404, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
+	})
 	// 为旧客户端保留的专用配置查询路由，均读取 WebsiteService 持久化配置。
 	for _, item := range []struct {
 		path string
 		typ  string
 	}{
-		{"/api/v2/websites/proxy/config/{id}", "proxy"},
 		{"/api/v2/websites/realip/config/{id}", "realip"},
 	} {
 		typ := item.typ
@@ -91,8 +103,6 @@ func registerWebsiteConfigRoutes(mux *http.ServeMux, svc *service.WebsiteService
 		{"/api/v2/websites/cors/update", "cors"},
 		{"/api/v2/websites/lbs/create", "lbs"},
 		{"/api/v2/websites/lbs/update", "lbs"},
-		{"/api/v2/websites/proxy/clear", "proxy"},
-		{"/api/v2/websites/proxy/config", "proxy"},
 		{"/api/v2/websites/realip/config", "realip"},
 		{"/api/v2/websites/stream/update", "stream"},
 		{"/api/v2/websites/default/server", "default-server"},
@@ -102,6 +112,54 @@ func registerWebsiteConfigRoutes(mux *http.ServeMux, svc *service.WebsiteService
 			websiteConfigWriteType(svc, typ, w, r)
 		})
 	}
+	mux.HandleFunc("POST /api/v2/websites/proxy/config", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			WebsiteID       uint           `json:"websiteID"`
+			ID              uint           `json:"id"`
+			Config          map[string]any `json:"config"`
+			Open            bool           `json:"open"`
+			CacheLimit      int            `json:"cacheLimit"`
+			CacheLimitUnit  string         `json:"cacheLimitUnit"`
+			ShareCache      int            `json:"shareCache"`
+			ShareCacheUnit  string         `json:"shareCacheUnit"`
+			CacheExpire     int            `json:"cacheExpire"`
+			CacheExpireUnit string         `json:"cacheExpireUnit"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if in.WebsiteID == 0 {
+			in.WebsiteID = in.ID
+		}
+		if in.Config == nil {
+			in.Config = map[string]any{"open": in.Open, "cacheLimit": in.CacheLimit, "cacheLimitUnit": in.CacheLimitUnit, "shareCache": in.ShareCache, "shareCacheUnit": in.ShareCacheUnit, "cacheExpire": in.CacheExpire, "cacheExpireUnit": in.CacheExpireUnit}
+		}
+		cfg, err := svc.UpdateWebsiteProxyCache(in.WebsiteID, in.Config)
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": cfg})
+	})
+	mux.HandleFunc("POST /api/v2/websites/proxy/clear", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			WebsiteID uint `json:"websiteID"`
+			ID        uint `json:"id"`
+		}
+		if err := decodeJSON(r, &in); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if in.WebsiteID == 0 {
+			in.WebsiteID = in.ID
+		}
+		if err := svc.ClearWebsiteProxyCache(in.WebsiteID); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"cleared": true}})
+	})
 	mux.HandleFunc("POST /api/v2/websites/lbs/file", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			WebsiteID uint   `json:"websiteID"`
