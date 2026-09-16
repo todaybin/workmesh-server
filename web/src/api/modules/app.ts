@@ -76,7 +76,7 @@ export const checkAppInstalled = (key: string, name: string) => {
     return http.post<App.CheckInstalled>(`apps/installed/check`, { key: key, name: name });
 };
 
-export const appInstalledDeleteCheck = (appInstallId: number, node?: string) => {
+export const appInstalledDeleteCheck = (appInstallId: number | string, node?: string) => {
     const params = node ? `?operateNode=${node}` : '';
     return http.get<App.AppInstallResource[]>(`apps/installed/delete/check/${appInstallId}${params}`);
 };
@@ -85,7 +85,7 @@ export const getAppInstalled = (search: App.AppInstalledSearch) => {
     return searchAppInstalled(search) as Promise<{ data: ResPage<App.AppInstalled> }>;
 };
 
-export const getAppInstalledByID = (installID: number, node?: string) => {
+export const getAppInstalledByID = (installID: number | string, node?: string) => {
     const params = node ? `?operateNode=${node}` : '';
     return http.get<App.AppInstalledInfo>(`apps/installed/info/${installID}${params}`);
 };

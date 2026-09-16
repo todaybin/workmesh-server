@@ -76,11 +76,13 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import i18n from '@/lang';
 import { dateFormatForName } from '@/utils/date';
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { ElMessageBox } from 'element-plus';
 import { MsgError, MsgSuccess } from '@/utils/message';
 import { useGlobalStore } from '@/composables/useGlobalStore';
-import { checkStreamAuth } from '@/utils/stream-auth';
+import { buildSameOriginApiUrl } from '@/api/transport';
+import { buildSseRequestHeaders, SseParser } from '@/utils/sse';
+import { handleAuthResponseCode, handleAuthResponseStatus } from '@/utils/auth-response';
 const { currentNode: globalCurrentNode } = useGlobalStore();
 
 const em = defineEmits(['update:loading']);
@@ -112,7 +114,7 @@ const props = defineProps({
     },
     defaultFollow: {
         type: Boolean,
-        default: false,
+        default: true,
     },
     defaultIsShowTimestamp: {
         type: Boolean,
@@ -125,7 +127,11 @@ const styleVars = computed(() => ({
 }));
 
 const terminalElement = ref<HTMLDivElement | null>(null);
-let eventSource: EventSource | null = null;
+let streamAbortController: AbortController | null = null;
+let reconnectTimer: number | null = null;
+let reconnectResolver: (() => void) | null = null;
+let streamGeneration = 0;
+let lastEventId = 0;
 let term: Terminal | null = null;
 const fitAddon = new FitAddon();
 let onScrollDisposable: { dispose: () => void } | null = null;
@@ -133,11 +139,11 @@ const MAX_VIEW_LINES = 20000;
 const followBottom = ref(true);
 
 const logSearch = reactive({
-    isWatch: props.defaultFollow ? true : true,
+    isWatch: props.defaultFollow,
     isShowTimestamp: props.defaultIsShowTimestamp,
     container: '',
     mode: 'all',
-    tail: props.defaultFollow ? 0 : 100,
+    tail: 100,
     compose: '',
     resource: '',
 });
@@ -168,10 +174,17 @@ const timeOptions = ref([
 ]);
 
 const stopListening = () => {
-    if (eventSource) {
-        eventSource.close();
-        eventSource = null;
+    streamGeneration++;
+    if (streamAbortController) {
+        streamAbortController.abort();
+        streamAbortController = null;
     }
+    if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    reconnectResolver?.();
+    reconnectResolver = null;
 };
 
 const clearTerminal = () => {
@@ -197,9 +210,31 @@ const bindXTermEvents = () => {
     });
 };
 
-const showEventSourceAuthError = (message: string) => {
-    MsgError(message);
-    writeLogLine(message);
+const getPayloadMessage = (payload: unknown): string => {
+    if (typeof payload === 'string') {
+        try {
+            return getPayloadMessage(JSON.parse(payload));
+        } catch {
+            return payload.trim();
+        }
+    }
+    if (payload && typeof payload === 'object') {
+        const value = payload as Record<string, unknown>;
+        if (typeof value.message === 'string' && value.message.trim()) return value.message.trim();
+        if (typeof value.error === 'string' && value.error.trim()) return value.error.trim();
+        if (value.details && typeof value.details === 'object') {
+            const details = value.details as Record<string, unknown>;
+            if (typeof details.message === 'string' && details.message.trim()) return details.message.trim();
+            if (typeof details.errCode === 'string' && details.errCode.trim()) return details.errCode.trim();
+        }
+    }
+    return '';
+};
+
+const showStreamError = (message: string) => {
+    const text = message || i18n.global.t('commons.msg.requestTimeout');
+    MsgError(text);
+    writeLogLine(`[error] ${text}`);
 };
 
 const initTerminal = () => {
@@ -242,7 +277,143 @@ const handleClose = async () => {
     stopListening();
 };
 
-const searchLogs = async () => {
+interface StreamReadResult {
+    completed: boolean;
+    serverError: boolean;
+}
+
+const handleSseEvent = (eventName: string, data: string, eventId?: string): StreamReadResult => {
+    if (eventId && /^\d+$/.test(eventId)) {
+        lastEventId = Number(eventId);
+    }
+    if (eventName === 'error') {
+        showStreamError(getPayloadMessage(data) || data);
+        return { completed: true, serverError: true };
+    }
+    if (eventName === 'close') {
+        return { completed: true, serverError: false };
+    }
+    if (eventName === 'message' && data !== '') {
+        writeLogLine(data);
+    }
+    return { completed: false, serverError: false };
+};
+
+const readSseStream = async (response: Response, generation: number): Promise<StreamReadResult> => {
+    if (!response.body) {
+        return { completed: true, serverError: false };
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const parser = new SseParser();
+    let result: StreamReadResult = { completed: false, serverError: false };
+
+    const dispatch = (events: Array<{ event: string; data: string; id?: string }>) => {
+        for (const event of events) {
+            const eventResult = handleSseEvent(event.event, event.data, event.id);
+            result = {
+                completed: result.completed || eventResult.completed,
+                serverError: result.serverError || eventResult.serverError,
+            };
+            if (result.completed) return;
+        }
+    };
+
+    try {
+        while (generation === streamGeneration) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            // 切换容器或关闭窗口可能在 read() 等待期间发生；旧连接的数据不能写入新窗口。
+            if (generation !== streamGeneration) return result;
+            dispatch(parser.push(decoder.decode(value, { stream: true })));
+            if (result.completed) return result;
+        }
+        if (generation !== streamGeneration) {
+            return result;
+        }
+        dispatch(parser.push(decoder.decode()));
+        if (!result.completed) dispatch(parser.finish());
+        return result;
+    } finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+    }
+};
+
+const readNonStreamResponse = async (response: Response) => {
+    const text = await response.text();
+    if (!text.trim()) return;
+    try {
+        const payload = JSON.parse(text) as Record<string, unknown>;
+        const authResult = handleAuthResponseCode(payload);
+        if (authResult.handled) {
+            showStreamError(authResult.message);
+            return;
+        }
+        if (payload.code !== undefined && Number(payload.code) !== 200) {
+            showStreamError(getPayloadMessage(payload) || text);
+            return;
+        }
+        if (typeof payload.data === 'string') {
+            payload.data.split(/\r?\n/).forEach((line) => writeLogLine(line));
+            return;
+        }
+        if (payload.code !== undefined) return;
+    } catch {
+        text.split(/\r?\n/).forEach((line) => writeLogLine(line));
+    }
+};
+
+const connectLogStream = async (url: string, currentNode: string, generation: number) => {
+    let firstConnection = true;
+    while (generation === streamGeneration && (firstConnection || logSearch.isWatch)) {
+        firstConnection = false;
+        const controller = new AbortController();
+        streamAbortController = controller;
+        let shouldReconnect = false;
+        try {
+            const response = await fetch(url, {
+                credentials: 'include',
+                headers: buildSseRequestHeaders(currentNode, lastEventId),
+                signal: controller.signal,
+            });
+            if (!response.ok) {
+                const authResult = handleAuthResponseStatus(response.status);
+                if (authResult.handled) {
+                    showStreamError(authResult.message);
+                    return;
+                }
+                await readNonStreamResponse(response);
+                if (response.status >= 500) shouldReconnect = true;
+                else return;
+            } else if (!(response.headers.get('content-type') || '').toLowerCase().includes('text/event-stream')) {
+                await readNonStreamResponse(response);
+                return;
+            } else {
+                const result = await readSseStream(response, generation);
+                if (result.serverError || result.completed || !logSearch.isWatch) return;
+                shouldReconnect = true;
+            }
+        } catch (error) {
+            if (controller.signal.aborted || generation !== streamGeneration) return;
+            shouldReconnect = true;
+            writeLogLine('[log stream disconnected, retrying in 1 second]');
+        } finally {
+            if (streamAbortController === controller) streamAbortController = null;
+        }
+        if (!shouldReconnect || generation !== streamGeneration || !logSearch.isWatch) return;
+        await new Promise<void>((resolve) => {
+            reconnectResolver = resolve;
+            reconnectTimer = window.setTimeout(() => {
+                reconnectTimer = null;
+                reconnectResolver = null;
+                resolve();
+            }, 1000);
+        });
+    }
+};
+
+const searchLogs = () => {
     if (Number(logSearch.tail) < 0) {
         MsgError(i18n.global.t('container.linesHelper'));
         return;
@@ -267,26 +438,22 @@ const searchLogs = async () => {
         params.delete('container');
         params.set('compose', logSearch.compose);
     }
-    const url = `/api/v2/containers/search/log?${params.toString()}`;
+    const url = buildSameOriginApiUrl('/containers/search/log', params);
+    lastEventId = 0;
+    const generation = streamGeneration;
+    void connectLogStream(url, currentNode, generation);
+};
 
-    const authError = await checkStreamAuth(url, currentNode);
-    if (authError) {
-        showEventSourceAuthError(authError);
-        return;
-    }
-    eventSource = new EventSource(url);
-    eventSource.onmessage = (event: MessageEvent) => {
-        writeLogLine(event.data);
-    };
-    eventSource.onerror = (event: MessageEvent) => {
-        if (event.data && event.data != '') {
-            MsgError(event.data);
-        }
-        // follow 模式保留 EventSource 的原生退避重连；一次性读取完成后立即释放连接。
-        if (!logSearch.isWatch) {
-            stopListening();
-        }
-    };
+const syncPropsAndSearch = () => {
+    if (!term) return;
+    logSearch.container = props.container;
+    logSearch.compose = props.compose;
+    logSearch.resource = props.resource;
+    logSearch.tail = 100;
+    logSearch.mode = 'all';
+    logSearch.isWatch = props.defaultFollow;
+    logSearch.isShowTimestamp = props.defaultIsShowTimestamp;
+    searchLogs();
 };
 
 const openDownloadDialog = () => {
@@ -366,7 +533,7 @@ onMounted(() => {
 
     logSearch.tail = 100;
     logSearch.mode = 'all';
-    logSearch.isWatch = true;
+    logSearch.isWatch = props.defaultFollow;
 
     nextTick(() => {
         initTerminal();
@@ -379,6 +546,20 @@ onMounted(() => {
         searchLogs();
     });
 });
+
+watch(
+    () => [
+        props.container,
+        props.compose,
+        props.resource,
+        props.node,
+        props.defaultFollow,
+        props.defaultIsShowTimestamp,
+    ],
+    () => {
+        syncPropsAndSearch();
+    },
+);
 
 onUnmounted(() => {
     handleClose();

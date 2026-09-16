@@ -90,6 +90,10 @@ export namespace Website {
         remark: string;
         appType: string;
         appInstallId: number;
+        appInstallID?: number;
+        appInstall?: NewAppInstall;
+        appinstall?: NewAppInstall;
+        appID?: number;
         runtimeID?: string;
         runtimeType?: string;
         webSiteGroupId: number;
@@ -240,6 +244,9 @@ export namespace Website {
         startDate: string;
         provider: string;
         websites?: Website.Website[];
+        acmeAccount?: AcmeAccount;
+        dnsAccount?: DnsAccount;
+        logPath?: string;
         autoRenew: boolean;
         acmeAccountId: number;
         status: string;
@@ -275,6 +282,19 @@ export namespace Website {
         id?: number;
         description: string;
         isIP: boolean;
+		keyType?: string;
+		pushDir?: boolean;
+		dir?: string;
+		autoRenew?: boolean;
+		disableCNAME?: boolean;
+		skipDNS?: boolean;
+		nameserver1?: string;
+		nameserver2?: string;
+		execShell?: boolean;
+		shell?: string;
+		pushNode?: boolean;
+		nodes?: string;
+		apply?: boolean;
     }
 
     export interface SSLApply {
@@ -529,6 +549,7 @@ export namespace Website {
 
     export interface LeechConfig {
         enable: boolean;
+        enabled?: boolean;
         cache: boolean;
         cacheTime: number;
         cacheUint: string;
@@ -713,6 +734,10 @@ export namespace Website {
         ipFrom: string;
         ipHeader: string;
         ipOther: string;
+        enabled?: boolean;
+        trusted?: string | string[];
+        header?: string;
+        other?: string;
     }
 
     export interface WebsiteResource {
@@ -727,7 +752,7 @@ export namespace Website {
         databaseID: number;
         websiteID: number;
         from: string;
-        databaseName: number;
+        databaseName: string;
     }
 
     export interface ChangeDatabase {

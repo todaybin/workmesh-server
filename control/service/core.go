@@ -9,13 +9,14 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/todaybin/workmesh-server/internal/storage"
 )
 
 // ErrUnauthenticated 表示请求未提供有效的本机会话。
@@ -69,41 +70,7 @@ type CoreService struct {
 	passkeyPath     string
 	usersPath       string
 	db              *sql.DB
-}
-
-// SetDatabase attaches the shared SQLite store used for authentication data.
-// Existing users.json data is imported once when the SQLite table is empty;
-// subsequent reads and writes stay entirely in SQLite.
-func (s *CoreService) SetDatabase(db *sql.DB) error {
-	if db == nil {
-		return errors.New("SQLite 数据库不能为空")
-	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS core_users (id TEXT PRIMARY KEY, payload BLOB NOT NULL, updated_at TEXT NOT NULL)`); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	s.db = db
-	s.mu.Unlock()
-	var payload []byte
-	err := db.QueryRow(`SELECT payload FROM core_users ORDER BY id LIMIT 1`).Scan(&payload)
-	if err == nil {
-		var users map[string]persistedUser
-		if json.Unmarshal(payload, &users) == nil && len(users) > 0 {
-			s.mu.Lock()
-			s.users = make(map[string]User, len(users))
-			for key, item := range users {
-				s.users[key] = User{ID: item.ID, Name: item.Name, Role: item.Role, Password: item.Password, Groups: item.Groups, MFA: item.MFA, API: item.API}
-			}
-			s.mu.Unlock()
-			return nil
-		}
-	}
-	if err != sql.ErrNoRows && err != nil {
-		return err
-	}
-	// One-time compatibility import. If no legacy file exists, persist the
-	// environment/default administrator as the initial SQLite record.
-	return s.saveUsersToDB()
+	repository      storage.Transactional
 }
 
 // NewCoreService 创建默认管理员和基础设置。
@@ -122,79 +89,13 @@ func NewCoreService() *CoreService {
 		adminPassword = "admin"
 	}
 	s := &CoreService{users: map[string]User{adminName: {ID: adminName, Name: adminName, Role: "ADMIN", Password: hashPassword(adminPassword), Groups: []string{"administrators"}}}, sessions: make(map[string]Session), groups: make(map[string]map[string]any), settings: map[string]string{"language": "zh", "theme": "system", "securityEntrance": ""}, passkeys: make(map[string]Passkey), passkeySessions: make(map[string]time.Time), passkeyPath: filepath.Join(dataDir, "passkeys.json"), usersPath: filepath.Join(dataDir, "users.json")}
-	s.loadUsers()
-	s.loadPasskeys()
+	// 包级服务会在 SQLite 注入前创建；仅在数据库尚未存在时预加载旧文件，
+	// 便于首次启动导入和无数据库的单元测试，避免已初始化实例每次启动回读 JSON。
+	if shouldLoadLegacyFiles(dataDir) {
+		s.loadUsers()
+		s.loadPasskeys()
+	}
 	return s
-}
-
-// loadUsers 读取本地用户哈希；文件损坏或不存在时保留首次启动管理员。
-func (s *CoreService) loadUsers() {
-	raw, err := os.ReadFile(s.usersPath)
-	if err != nil {
-		return
-	}
-	var users map[string]persistedUser
-	if json.Unmarshal(raw, &users) != nil || len(users) == 0 {
-		return
-	}
-	s.users = make(map[string]User, len(users))
-	for key, item := range users {
-		s.users[key] = User{ID: item.ID, Name: item.Name, Role: item.Role, Password: item.Password, Groups: item.Groups, MFA: item.MFA, API: item.API}
-	}
-}
-
-type persistedUser struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	Role     string    `json:"role"`
-	Password string    `json:"password"`
-	Groups   []string  `json:"groups,omitempty"`
-	MFA      bool      `json:"mfa"`
-	API      APIConfig `json:"api,omitempty"`
-}
-
-func (s *CoreService) saveUsersLocked() error {
-	if s.db != nil {
-		return s.saveUsersToDBLocked()
-	}
-	if err := os.MkdirAll(filepath.Dir(s.usersPath), 0o700); err != nil {
-		return err
-	}
-	items := make(map[string]persistedUser, len(s.users))
-	for key, user := range s.users {
-		items[key] = persistedUser{ID: user.ID, Name: user.Name, Role: user.Role, Password: user.Password, Groups: user.Groups, MFA: user.MFA, API: user.API}
-	}
-	raw, err := json.MarshalIndent(items, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.usersPath + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.usersPath)
-}
-
-func (s *CoreService) saveUsersToDB() error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.saveUsersToDBLocked()
-}
-
-func (s *CoreService) saveUsersToDBLocked() error {
-	if s.db == nil {
-		return errors.New("SQLite 数据库未初始化")
-	}
-	items := make(map[string]persistedUser, len(s.users))
-	for key, user := range s.users {
-		items[key] = persistedUser{ID: user.ID, Name: user.Name, Role: user.Role, Password: user.Password, Groups: user.Groups, MFA: user.MFA, API: user.API}
-	}
-	raw, err := json.Marshal(items)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`INSERT INTO core_users(id,payload,updated_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at`, "local", raw, time.Now().UTC().Format(time.RFC3339Nano))
-	return err
 }
 
 // ListUsers 返回脱敏后的本地用户列表，不包含密码和 API 密钥。
@@ -208,115 +109,6 @@ func (s *CoreService) ListUsers() []User {
 		result = append(result, user)
 	}
 	return result
-}
-
-func (s *CoreService) loadPasskeys() {
-	raw, err := os.ReadFile(s.passkeyPath)
-	if err != nil {
-		return
-	}
-	var items []Passkey
-	if json.Unmarshal(raw, &items) != nil {
-		return
-	}
-	for _, item := range items {
-		if item.ID != "" && item.CredentialID != "" {
-			s.passkeys[item.ID] = item
-		}
-	}
-}
-
-func (s *CoreService) savePasskeysLocked() error {
-	items := make([]Passkey, 0, len(s.passkeys))
-	for _, item := range s.passkeys {
-		items = append(items, item)
-	}
-	if err := os.MkdirAll(filepath.Dir(s.passkeyPath), 0o700); err != nil {
-		return err
-	}
-	raw, err := json.MarshalIndent(items, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.passkeyPath + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.passkeyPath)
-}
-
-// ListPasskeys 返回当前服务已登记的 Passkey 元数据。
-func (s *CoreService) ListPasskeys() []Passkey {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]Passkey, 0, len(s.passkeys))
-	for _, item := range s.passkeys {
-		result = append(result, item)
-	}
-	return result
-}
-
-// BeginPasskeyRegistration 创建短时注册挑战；挑战本身不包含凭据秘密。
-func (s *CoreService) BeginPasskeyRegistration(sessionID string) (string, error) {
-	if _, err := s.Current(sessionID); err != nil {
-		return "", err
-	}
-	id := randomToken()
-	s.mu.Lock()
-	s.passkeySessions[id] = time.Now().Add(5 * time.Minute)
-	s.mu.Unlock()
-	return id, nil
-}
-
-// FinishPasskeyRegistration 持久化浏览器提交的凭据标识，并拒绝重复注册。
-func (s *CoreService) FinishPasskeyRegistration(authSessionID, challengeID, credentialID, name string) (Passkey, error) {
-	if _, err := s.Current(authSessionID); err != nil {
-		return Passkey{}, err
-	}
-	if strings.TrimSpace(credentialID) == "" {
-		return Passkey{}, errors.New("credentialId 不能为空")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	challenge, ok := s.passkeySessions[challengeID]
-	if !ok || time.Now().After(challenge) {
-		return Passkey{}, errors.New("Passkey 注册会话无效或已过期")
-	}
-	for _, item := range s.passkeys {
-		if subtle.ConstantTimeCompare([]byte(item.CredentialID), []byte(credentialID)) == 1 {
-			return Passkey{}, errors.New("Passkey 凭据已存在")
-		}
-	}
-	if strings.TrimSpace(name) == "" {
-		name = "Passkey"
-	}
-	item := Passkey{ID: randomToken()[:16], Name: strings.TrimSpace(name), CredentialID: strings.TrimSpace(credentialID), CreatedAt: time.Now().UTC()}
-	s.passkeys[item.ID] = item
-	if err := s.savePasskeysLocked(); err != nil {
-		delete(s.passkeys, item.ID)
-		return Passkey{}, err
-	}
-	delete(s.passkeySessions, challengeID)
-	return item, nil
-}
-
-// DeletePasskey 删除指定凭据。
-func (s *CoreService) DeletePasskey(sessionID, id string) error {
-	if _, err := s.Current(sessionID); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.passkeys[id]; !ok {
-		return errors.New("Passkey 不存在")
-	}
-	item := s.passkeys[id]
-	delete(s.passkeys, id)
-	if err := s.savePasskeysLocked(); err != nil {
-		s.passkeys[id] = item
-		return err
-	}
-	return nil
 }
 
 // Login 验证用户名和密码并创建 24 小时会话。
@@ -489,72 +281,22 @@ func (s *CoreService) APIConfig(sessionID string) (APIConfig, error) {
 	return user.API, nil
 }
 
-// Groups 返回分组列表。
-func (s *CoreService) Groups() []map[string]any {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]map[string]any, 0, len(s.groups))
-	for _, group := range s.groups {
-		result = append(result, group)
-	}
-	return result
-}
-
-// UpsertGroup 创建或更新分组。
-func (s *CoreService) UpsertGroup(id, name, kind string) map[string]any {
-	if id == "" {
-		id = randomToken()[:12]
-	}
-	item := map[string]any{"id": id, "name": name, "type": kind}
-	s.mu.Lock()
-	s.groups[id] = item
-	s.mu.Unlock()
-	return item
-}
-
-// DeleteGroup 删除分组。
-func (s *CoreService) DeleteGroup(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.groups[id]; !ok {
-		return errors.New("分组不存在")
-	}
-	delete(s.groups, id)
-	return nil
-}
-
-// Settings 返回设置快照。
-func (s *CoreService) Settings() map[string]string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make(map[string]string, len(s.settings))
-	for key, value := range s.settings {
-		result[key] = value
-	}
-	return result
-}
-
-// UpdateSettings 合并设置字段。
-func (s *CoreService) UpdateSettings(values map[string]string) {
-	s.mu.Lock()
-	for key, value := range values {
-		if strings.TrimSpace(key) != "" {
-			s.settings[key] = value
-		}
-	}
-	s.mu.Unlock()
-}
-
+// publicUser 清除密码哈希后返回可用于公开响应的用户副本。
 func publicUser(user User) User { user.Password = ""; return user }
 
+// hashPassword 生成当前兼容凭据格式使用的 SHA-256 十六进制摘要。
 func hashPassword(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
+
+// verifyPassword 以常量时间比较用户输入与已保存的密码摘要。
 func verifyPassword(encoded, value string) bool {
 	candidate := hashPassword(value)
 	return subtle.ConstantTimeCompare([]byte(encoded), []byte(candidate)) == 1
 }
+
+// randomToken 生成会话、API Key 和临时资源使用的随机十六进制标识。
 func randomToken() string {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {

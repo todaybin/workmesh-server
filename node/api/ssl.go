@@ -4,10 +4,12 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
-	"net"
 	"net/http"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -45,6 +47,10 @@ func RegisterSSLRoutes(mux *http.ServeMux) {
 			return
 		}
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
+		provider := strings.ToLower(strings.TrimSpace(item.Provider))
+		if item.AcmeAccountID != 0 && (provider == "http" || provider == "letsencrypt" || provider == "dnsaccount") {
+			go func(id uint) { _ = ssls.Obtain(context.Background(), id, false) }(item.ID)
+		}
 	})
 	mux.HandleFunc("POST /api/v2/websites/ssl/upload", func(w http.ResponseWriter, r *http.Request) {
 		var req model.WebsiteSSLUploadRequest
@@ -110,7 +116,8 @@ func RegisterSSLRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("POST /api/v2/websites/ssl/obtain", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			ID uint `json:"ID"`
+			ID         uint              `json:"ID"`
+			TXTRecords map[string]string `json:"TXTRecords"`
 		}
 		if err := decodeJSON(r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, err)
@@ -120,7 +127,33 @@ func RegisterSSLRoutes(mux *http.ServeMux) {
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
-		writeError(w, http.StatusServiceUnavailable, errors.New("ACME 证书签发执行器未配置，未创建申请任务"))
+		item, err := ssls.Get(r.Context(), req.ID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if strings.EqualFold(strings.TrimSpace(item.Provider), "http") || strings.EqualFold(strings.TrimSpace(item.Provider), "letsencrypt") {
+			certbot := strings.TrimSpace(os.Getenv("WORKMESH_CERTBOT_BIN"))
+			if certbot == "" {
+				certbot = "certbot"
+			}
+			if _, lookErr := exec.LookPath(certbot); lookErr != nil {
+				writeError(w, http.StatusServiceUnavailable, errors.New("certbot 执行器未配置，未创建申请任务"))
+				return
+			}
+		}
+		if !strings.EqualFold(strings.TrimSpace(item.Provider), "http") && !strings.EqualFold(strings.TrimSpace(item.Provider), "dnsaccount") && !strings.EqualFold(strings.TrimSpace(item.Provider), "dnsmanual") {
+			writeError(w, http.StatusServiceUnavailable, errors.New("证书提供商暂不支持本机自动签发"))
+			return
+		}
+		// DNS 手动验证需要把用户确认的 TXT 记录交给 ACME order finalize。
+		if strings.EqualFold(strings.TrimSpace(item.Provider), "dnsmanual") {
+			go func() { _ = ssls.FinalizeDNSManual(context.Background(), req.ID, req.TXTRecords) }()
+		} else {
+			// 与 1Panel 一致：申请已进入执行状态，HTTP 请求不等待 ACME 完成。
+			go func() { _ = ssls.Obtain(context.Background(), req.ID, false) }()
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"id": req.ID, "status": "applying"}})
 	})
 	mux.HandleFunc("POST /api/v2/websites/ssl/resolve", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -135,19 +168,86 @@ func RegisterSSLRoutes(mux *http.ServeMux) {
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
-		txt, lookupErr := net.LookupTXT("_acme-challenge." + item.PrimaryDomain)
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"domain": item.PrimaryDomain, "records": txt, "resolved": lookupErr == nil}})
+		if strings.EqualFold(strings.TrimSpace(item.Provider), "dnsmanual") {
+			account, accountErr := ssls.LoadACMEForSSL(item)
+			if accountErr != nil {
+				writeError(w, http.StatusBadRequest, accountErr)
+				return
+			}
+			values, resolveErr := ssls.GetDNSManualResolve(r.Context(), item, account)
+			if resolveErr != nil {
+				writeError(w, http.StatusBadRequest, resolveErr)
+				return
+			}
+			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": values})
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": []any{}})
 	})
 	mux.HandleFunc("POST /api/v2/websites/ssl/push", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID       uint   `json:"id"`
+			SSLID    uint   `json:"sslID"`
+			PushNode bool   `json:"pushNode"`
+			Nodes    string `json:"nodes"`
+			TaskID   string `json:"taskID"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if req.ID == 0 {
+			req.ID = req.SSLID
+		}
+		if req.ID == 0 {
+			writeError(w, http.StatusBadRequest, errors.New("证书 ID 无效"))
+			return
+		}
+		item, err := ssls.Get(r.Context(), req.ID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		nodes := strings.TrimSpace(req.Nodes)
+		if !req.PushNode || nodes == "" {
+			writeError(w, http.StatusServiceUnavailable, errors.New("证书推送执行器未配置，未执行推送"))
+			return
+		}
+		for _, node := range strings.Split(nodes, ",") {
+			node = strings.TrimSpace(node)
+			if node == "" || len(node) > 128 || strings.ContainsAny(node, "\\\"'\r\n") {
+				writeError(w, http.StatusBadRequest, errors.New("推送节点标识无效"))
+				return
+			}
+		}
+		if !strings.EqualFold(strings.TrimSpace(item.Status), "ready") {
+			writeError(w, http.StatusBadRequest, errors.New("只有 ready 状态的证书才能推送"))
+			return
+		}
+		// 当前 WorkMesh 进程没有多节点推送执行器；不要把本地元数据更新伪装成已推送。
 		writeError(w, http.StatusServiceUnavailable, errors.New("证书推送执行器未配置，未执行推送"))
 	})
 	mux.HandleFunc("POST /api/v2/websites/ssl/import", func(w http.ResponseWriter, r *http.Request) {
-		var item struct { ID uint `json:"id"`; SSLID uint `json:"sslID"`; PrivateKey string `json:"privateKey"`; Certificate string `json:"certificate"`; PEM string `json:"pem"`; Description string `json:"description"` }
+		var item struct {
+			ID          uint   `json:"id"`
+			SSLID       uint   `json:"sslID"`
+			PrivateKey  string `json:"privateKey"`
+			Certificate string `json:"certificate"`
+			PEM         string `json:"pem"`
+			Description string `json:"description"`
+		}
 		if err := decodeJSON(r, &item); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		id := item.ID; if id == 0 { id = item.SSLID }; cert := item.Certificate; if cert == "" { cert = item.PEM }
+		id := item.ID
+		if id == 0 {
+			id = item.SSLID
+		}
+		cert := item.Certificate
+		if cert == "" {
+			cert = item.PEM
+		}
 		result, err := ssls.Upload(r.Context(), model.WebsiteSSLUploadRequest{ID: id, PrivateKey: item.PrivateKey, Certificate: cert, Type: "paste", Description: item.Description})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)

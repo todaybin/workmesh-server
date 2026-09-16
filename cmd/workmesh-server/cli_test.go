@@ -15,6 +15,7 @@ import (
 	"testing"
 )
 
+// TestCLIListenIPPersistsSettings 验证 listen-ip 命令会把 IPv6 监听地址写入设置。
 func TestCLIListenIPPersistsSettings(t *testing.T) {
 	dir := t.TempDir()
 	handled, err := runCLI([]string{"listen-ip", "ipv6"}, dir)
@@ -27,6 +28,7 @@ func TestCLIListenIPPersistsSettings(t *testing.T) {
 	}
 }
 
+// TestCLIHelpFlagsNeverStartServer 验证帮助、语言和未知命令参数不会启动服务进程。
 func TestCLIHelpFlagsNeverStartServer(t *testing.T) {
 	for _, args := range [][]string{{"-h"}, {"--help"}, {"-l"}, {"--language"}, {"-l", "zh"}, {"unknown-command"}} {
 		handled, err := runCLI(args, t.TempDir())
@@ -36,6 +38,7 @@ func TestCLIHelpFlagsNeverStartServer(t *testing.T) {
 	}
 }
 
+// TestCLIUserAndSecuritySettingsPersist 验证用户凭据、安全入口和域名解绑命令均能持久化。
 func TestCLIUserAndSecuritySettingsPersist(t *testing.T) {
 	dir := t.TempDir()
 	if handled, err := runCLI([]string{"update", "username", "operator"}, dir); !handled || err != nil {
@@ -59,6 +62,7 @@ func TestCLIUserAndSecuritySettingsPersist(t *testing.T) {
 	}
 }
 
+// TestCLIUpdatePortPersistsEnvironmentOverride 验证更新端口会同步覆盖 server.env 中的地址。
 func TestCLIUpdatePortPersistsEnvironmentOverride(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "server.json")
@@ -81,6 +85,7 @@ func TestCLIUpdatePortPersistsEnvironmentOverride(t *testing.T) {
 	}
 }
 
+// TestCLIAppInitCreatesDataDirectory 验证 app init 仅创建应用数据目录并正确处理 CLI 调用。
 func TestCLIAppInitCreatesDataDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "data")
 	handled, err := runCLI([]string{"app", "init"}, dir)
@@ -92,6 +97,7 @@ func TestCLIAppInitCreatesDataDirectory(t *testing.T) {
 	}
 }
 
+// TestInitializeDataDirCreatesRuntimeLayout 验证初始化只创建启动必需目录，按需目录保持延迟创建。
 func TestInitializeDataDirCreatesRuntimeLayout(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "data")
 	if err := initializeDataDir(dir); err != nil {
@@ -110,6 +116,7 @@ func TestInitializeDataDirCreatesRuntimeLayout(t *testing.T) {
 	}
 }
 
+// TestInitializeDataDirRejectsFileAndFilesystemRoot 验证数据目录不能指向普通文件或文件系统根目录。
 func TestInitializeDataDirRejectsFileAndFilesystemRoot(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "data")
 	if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
@@ -124,6 +131,7 @@ func TestInitializeDataDirRejectsFileAndFilesystemRoot(t *testing.T) {
 	}
 }
 
+// TestCLIUpdateVerifiesSignatureAndAtomicallyInstalls 验证更新命令校验签名并写入制品元数据。
 func TestCLIUpdateVerifiesSignatureAndAtomicallyInstalls(t *testing.T) {
 	dir := t.TempDir()
 	artifact := filepath.Join(dir, "release.bin")
@@ -161,6 +169,7 @@ func TestCLIUpdateVerifiesSignatureAndAtomicallyInstalls(t *testing.T) {
 	}
 }
 
+// TestCLIRestoreRejectsTamperedArtifactAndUnsafeTarget 验证恢复会拒绝篡改制品和越界目标路径。
 func TestCLIRestoreRejectsTamperedArtifactAndUnsafeTarget(t *testing.T) {
 	dir := t.TempDir()
 	artifact := filepath.Join(dir, "release.bin")
@@ -190,6 +199,7 @@ func TestCLIRestoreRejectsTamperedArtifactAndUnsafeTarget(t *testing.T) {
 	}
 }
 
+// TestCLIRestoreRequiresSigningMaterial 验证恢复命令缺少公钥时返回明确错误。
 func TestCLIRestoreRequiresSigningMaterial(t *testing.T) {
 	dir := t.TempDir()
 	artifact := filepath.Join(dir, "release.bin")

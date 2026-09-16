@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -131,6 +132,58 @@ func TestLinkServerSyncAndFencingRejectsStaleEpoch(t *testing.T) {
 	}
 }
 
+// TestLinkStatusRequiresAuthenticationWhenSecretConfigured 验证 status 与其他链路接口使用相同认证策略。
+func TestLinkStatusRequiresAuthenticationWhenSecretConfigured(t *testing.T) {
+	const secret = "status-secret"
+	clock := func() time.Time { return time.Unix(1_700_000_000, 0) }
+	server, err := NewServer(ServerOptions{NodeID: "status-node", Role: role.Primary, Secret: []byte(secret), Clock: clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	server.Register(mux)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	response, err := (&http.Client{}).Get(ts.URL + "/api/v2/link/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("未签名 status status=%d, want 401", response.StatusCode)
+	}
+
+	status, body := signedGet(t, ts.URL+"/api/v2/link/status", secret, "peer-status", "status-nonce-1", clock)
+	if status != http.StatusOK || !strings.Contains(body, `"code":200`) {
+		t.Fatalf("签名 status 失败 status=%d body=%s", status, body)
+	}
+	status, body = signedGet(t, ts.URL+"/api/v2/workmesh/link/status", secret, "peer-status", "status-nonce-2", clock)
+	if status != http.StatusOK || !strings.Contains(body, `"code":200`) {
+		t.Fatalf("兼容前缀 status 失败 status=%d body=%s", status, body)
+	}
+	status, body = signedGet(t, ts.URL+"/api/v2/link/status", secret, "peer-status", "status-nonce-1", clock)
+	if status != http.StatusConflict || !strings.Contains(body, `"code":"ERR"`) {
+		t.Fatalf("status nonce 重放未拒绝 status=%d body=%s", status, body)
+	}
+}
+
+// TestLinkStatusAllowsAnonymousDevelopmentMode 保留未配置密钥时的本地开发兼容行为。
+func TestLinkStatusAllowsAnonymousDevelopmentMode(t *testing.T) {
+	server, err := NewServer(ServerOptions{NodeID: "dev-status-node", Role: role.Secondary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	server.Register(mux)
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/link/status", nil)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"code":200`) {
+		t.Fatalf("开发模式匿名 status 失败 status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func signedPost(t *testing.T, endpoint, secret, nodeID string, clock Clock, value any) (int, string) {
 	t.Helper()
 	body, err := json.Marshal(value)
@@ -148,6 +201,27 @@ func signedPost(t *testing.T, endpoint, secret, nodeID string, clock Clock, valu
 	req.Header.Set(HeaderNonce, nonce)
 	req.Header.Set(HeaderSignature, Sign([]byte(secret), req.Method, req.URL.RequestURI(), timestamp, nonce, body))
 	// 通过请求目标的测试服务器发送，保留请求头和签名。
+	result, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Body.Close()
+	data, _ := io.ReadAll(result.Body)
+	return result.StatusCode, string(data)
+}
+
+func signedGet(t *testing.T, endpoint, secret, nodeID, nonce string, clock Clock) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timestamp := strconv.FormatInt(clock().Unix(), 10)
+	body := []byte{}
+	req.Header.Set(HeaderNodeID, nodeID)
+	req.Header.Set(HeaderTimestamp, timestamp)
+	req.Header.Set(HeaderNonce, nonce)
+	req.Header.Set(HeaderSignature, Sign([]byte(secret), req.Method, req.URL.RequestURI(), timestamp, nonce, body))
 	result, err := (&http.Client{}).Do(req)
 	if err != nil {
 		t.Fatal(err)

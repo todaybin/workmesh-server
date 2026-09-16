@@ -554,7 +554,9 @@ const rules = ref<any>({
     appInstallId: [Rules.requiredSelectBusiness],
     appType: [Rules.requiredInput],
     proxyAddress: [Rules.requiredInput],
-    runtimeID: [Rules.requiredSelectBusiness],
+    // 运行环境 ID 在 WorkMesh/1Panel 中是字符串（可包含非数字 ID），
+    // 不能使用要求 number 的 requiredSelectBusiness，否则已选运行时仍会被判定为空。
+    runtimeID: [Rules.requiredSelect],
     appinstall: {
         name: [Rules.appName],
         appId: [Rules.requiredSelectBusiness],
@@ -634,6 +636,7 @@ const userSelectedSSL = ref(false);
 const parentWebsites = ref();
 const dirs = ref([]);
 const runtimePorts = ref([]);
+let runtimeLoadSerial = 0;
 const WebsiteTypes = getWebsiteTypes();
 const installFormRef = ref();
 const lbFormRef = ref();
@@ -683,6 +686,8 @@ const changeType = (type: string) => {
         website.value.proxyAddress = '';
         website.value.proxy = '';
     }
+    // 先切换类型，再启动异步加载；否则 activeRules 在请求完成前仍保留上一种类型。
+    website.value.type = type;
     switch (type) {
         case 'deployment':
             website.value.appType = 'installed';
@@ -703,7 +708,6 @@ const changeType = (type: string) => {
             website.value.appInstallId = undefined;
             break;
     }
-    website.value.type = type;
     versionExist.value = true;
 };
 
@@ -799,7 +803,7 @@ const changeRuntime = (runID?: string) => {
             if (runtimeResource.value == 'local') {
                 website.value.port = 9000;
             } else {
-                runtimePorts.value = item.port.split(',').map((port: string) => parseInt(port.trim(), 10));
+                runtimePorts.value = runtimePortValues(item.port);
                 if (runtimePorts.value.length > 0) {
                     website.value.port = runtimePorts.value[0];
                 }
@@ -809,22 +813,42 @@ const changeRuntime = (runID?: string) => {
 };
 
 const getRuntimes = async () => {
+    const serial = ++runtimeLoadSerial;
     website.value.port = 0;
+    website.value.runtimeID = undefined;
+    runtimePorts.value = [];
     try {
         const res = await SearchRuntimes(runtimeReq.value);
+        if (serial !== runtimeLoadSerial) {
+            return;
+        }
         runtimes.value = res.data.items || [];
         if (runtimes.value.length > 0) {
             const first = runtimes.value[0];
             website.value.runtimeID = String(first.id);
             runtimeResource.value = first.resource;
-            if (first.port != '') {
-                runtimePorts.value = first.port.split(',').map((port: string) => parseInt(port.trim(), 10));
-                if (runtimePorts.value.length > 0) {
-                    website.value.port = runtimePorts.value[0];
-                }
+            runtimePorts.value = runtimePortValues(first.port);
+            if (runtimePorts.value.length > 0) {
+                website.value.port = runtimePorts.value[0];
             }
         }
-    } catch (error) {}
+    } catch (error) {
+        if (serial === runtimeLoadSerial) {
+            runtimes.value = [];
+            MsgError(i18n.global.t('runtime.runtime') + ': ' + String(error));
+        }
+    }
+};
+
+const runtimePortValues = (value: string | number | null | undefined): number[] => {
+    if (value === null || value === undefined || value === '') {
+        return [];
+    }
+    const values = String(value)
+        .split(',')
+        .map((port) => Number.parseInt(port.trim(), 10))
+        .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535);
+    return Array.from(new Set(values));
 };
 
 const acceptParams = async (openrestyVersion: string) => {
@@ -1180,12 +1204,15 @@ const fillAliasFromDomainIfEmpty = (value: string) => {
 const listWebsites = async () => {
     try {
         const res = await getWebsiteOptions({ types: ['static', 'runtime'] });
-        parentWebsites.value = res.data;
-        if (res.data.length > 0) {
-            website.value.parentWebsiteID = res.data[0].id;
-            getDir(res.data[0].id);
+        parentWebsites.value = Array.isArray(res.data) ? res.data : [];
+        if (parentWebsites.value.length > 0) {
+            website.value.parentWebsiteID = parentWebsites.value[0].id;
+            getDir(parentWebsites.value[0].id);
         }
-    } catch (error) {}
+    } catch (error) {
+        parentWebsites.value = [];
+        MsgError(i18n.global.t('website.website') + ': ' + String(error));
+    }
 };
 
 const getDir = async (websiteID: number) => {

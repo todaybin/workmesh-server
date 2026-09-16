@@ -13,7 +13,6 @@ import (
 	"os"
 	osuser "os/user"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -49,6 +48,7 @@ type fileRequest struct {
 	PageSize    int      `json:"pageSize"`
 }
 
+// decodeFileRequest 读取并限制文件接口的 JSON 请求体大小。
 func decodeFileRequest(r *http.Request) (fileRequest, error) {
 	var req fileRequest
 	if r.Body == nil {
@@ -57,6 +57,8 @@ func decodeFileRequest(r *http.Request) (fileRequest, error) {
 	err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&req)
 	return req, err
 }
+
+// cleanFilePath 规范化文件路径并拒绝路径穿越输入。
 func cleanFilePath(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -73,6 +75,8 @@ func cleanFilePath(path string) (string, error) {
 	}
 	return clean, nil
 }
+
+// fileInfo 将操作系统文件信息转换为前端需要的对象结构。
 func fileInfo(path string, info os.FileInfo) map[string]any {
 	extension := filepath.Ext(info.Name())
 	uid, gid, user, group := fileOwner(info)
@@ -86,6 +90,7 @@ func fileInfo(path string, info os.FileInfo) map[string]any {
 	}
 }
 
+// fileOwner 解析文件的数字 UID/GID 及可读用户名和组名。
 func fileOwner(info os.FileInfo) (uid, gid, user, group string) {
 	uid, gid = "-", "-"
 	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
@@ -102,6 +107,7 @@ func fileOwner(info os.FileInfo) (uid, gid, user, group string) {
 	return
 }
 
+// applyWebsiteOwnership 为网站目录中的新文件应用面板约定的属主。
 func applyWebsiteOwnership(path string) {
 	if !isWebsiteContentPath(path) {
 		return
@@ -118,305 +124,7 @@ func applyWebsiteOwnership(path string) {
 	}
 }
 
-// sortFileItems keeps directories before regular files, matching the original
-// panel behavior, while honoring the table's requested field and direction.
-func sortFileItems(items []map[string]any, sortBy, sortOrder string) {
-	if len(items) < 2 {
-		return
-	}
-	if sortBy == "" {
-		sortBy = "name"
-	}
-	ascending := sortOrder != "descending"
-	valueString := func(item map[string]any, key string) string {
-		if value, ok := item[key].(string); ok {
-			return value
-		}
-		return ""
-	}
-	valueInt64 := func(item map[string]any, key string) int64 {
-		switch value := item[key].(type) {
-		case int64:
-			return value
-		case int:
-			return int64(value)
-		case float64:
-			return int64(value)
-		}
-		return 0
-	}
-	valueTime := func(item map[string]any, key string) time.Time {
-		if value, ok := item[key].(time.Time); ok {
-			return value
-		}
-		return time.Time{}
-	}
-	less := func(a, b map[string]any) bool {
-		var result int
-		switch sortBy {
-		case "size":
-			av, bv := valueInt64(a, "size"), valueInt64(b, "size")
-			if av < bv {
-				result = -1
-			} else if av > bv {
-				result = 1
-			}
-		case "modTime", "updateTime":
-			av, bv := valueTime(a, "modTime"), valueTime(b, "modTime")
-			if av.Before(bv) {
-				result = -1
-			} else if av.After(bv) {
-				result = 1
-			}
-		default:
-			av, bv := valueString(a, "name"), valueString(b, "name")
-			if av < bv {
-				result = -1
-			} else if av > bv {
-				result = 1
-			}
-		}
-		if result == 0 {
-			// Ensure stable output when the primary field ties.
-			av, bv := valueString(a, "name"), valueString(b, "name")
-			if av < bv {
-				result = -1
-			} else if av > bv {
-				result = 1
-			}
-		}
-		if !ascending {
-			result = -result
-		}
-		return result < 0
-	}
-	var dirs, files []map[string]any
-	for _, item := range items {
-		if isDir, _ := item["isDir"].(bool); isDir {
-			dirs = append(dirs, item)
-		} else {
-			files = append(files, item)
-		}
-	}
-	sort.SliceStable(dirs, func(i, j int) bool { return less(dirs[i], dirs[j]) })
-	sort.SliceStable(files, func(i, j int) bool { return less(files[i], files[j]) })
-	copy(items, append(dirs, files...))
-}
-
-func handleFilesSearch(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeFileRequest(r)
-	if err != nil {
-		fileError(w, http.StatusBadRequest, err)
-		return
-	}
-	root, err := cleanFilePath(req.Path)
-	if err != nil {
-		fileError(w, http.StatusBadRequest, err)
-		return
-	}
-	rootInfo, err := os.Stat(root)
-	if err != nil {
-		fileError(w, http.StatusNotFound, err)
-		return
-	}
-	if !rootInfo.IsDir() {
-		root = filepath.Dir(root)
-		rootInfo, err = os.Stat(root)
-		if err != nil {
-			fileError(w, http.StatusNotFound, err)
-			return
-		}
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		fileError(w, http.StatusNotFound, err)
-		return
-	}
-	items := make([]map[string]any, 0, len(entries))
-	for _, entry := range entries {
-		if !req.ShowHidden && strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
-		if strings.TrimSpace(req.Search) != "" && !strings.Contains(strings.ToLower(entry.Name()), strings.ToLower(strings.TrimSpace(req.Search))) {
-			continue
-		}
-		info, e := entry.Info()
-		if e == nil {
-			items = append(items, fileInfo(filepath.Join(root, entry.Name()), info))
-		}
-	}
-	sortFileItems(items, req.SortBy, req.SortOrder)
-	// 原系统返回完整的 FileInfo 根对象，前端依赖 data.path 判断当前目录是否有效。
-	result := fileInfo(root, rootInfo)
-	result["items"] = items
-	result["itemTotal"] = len(items)
-	result["total"] = len(items)
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": result})
-}
-
-func handleFilesContent(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeFileRequest(r)
-	if err != nil {
-		fileError(w, 400, err)
-		return
-	}
-	path, err := cleanFilePath(req.Path)
-	if err != nil {
-		fileError(w, 400, err)
-		return
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fileError(w, 404, err)
-		return
-	}
-	info, _ := os.Stat(path)
-	extension := filepath.Ext(path)
-	result := map[string]any{
-		"path": path, "name": filepath.Base(path), "content": string(data), "size": len(data),
-		"extension": extension, "mimeType": mime.TypeByExtension(extension),
-	}
-	if info != nil {
-		result["isDir"] = info.IsDir()
-		result["mode"] = info.Mode().Perm()
-		result["isSymlink"] = info.Mode()&os.ModeSymlink != 0
-	}
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": result})
-}
-func handleFilesSave(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeFileRequest(r)
-	if err != nil {
-		fileError(w, 400, err)
-		return
-	}
-	path, err := cleanFilePath(req.Path)
-	if err != nil {
-		fileError(w, 400, err)
-		return
-	}
-	// 临时文件与目标位于同一目录，确保 rename 在同一文件系统内原子替换，
-	// 避免服务中断或并发读取时看到半写入内容。
-	if err = os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		fileError(w, http.StatusInternalServerError, err)
-		return
-	}
-	// 保存前保留有限历史版本，供历史查询与恢复接口使用。
-	if old, readErr := os.ReadFile(path); readErr == nil && len(old) <= 2<<20 {
-		fileAux.Lock()
-		loadFileAuxLocked()
-		now := time.Now().UTC()
-		fileAux.data.History = append(fileAux.data.History, fileHistoryItem{
-			ID: fileAuxID("history"), FileID: path, Path: path, CurrentPath: path,
-			FileName: filepath.Base(path), Extension: filepath.Ext(path), FileMode: "",
-			Operation: "save", ContentSize: int64(len(old)), Content: string(old), CreatedAt: now, UpdatedAt: now,
-		})
-		if len(fileAux.data.History) > 200 {
-			fileAux.data.History = fileAux.data.History[len(fileAux.data.History)-200:]
-		}
-		_ = saveFileAuxLocked()
-		fileAux.Unlock()
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".workmesh-save-*")
-	if err != nil {
-		fileError(w, http.StatusInternalServerError, err)
-		return
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err = tmp.Chmod(0600); err == nil {
-		_, err = tmp.WriteString(req.Content)
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = os.Rename(tmpName, path)
-	}
-	if err != nil {
-		fileError(w, 500, err)
-		return
-	}
-	applyWebsiteOwnership(path)
-	wmhttp.JSON(w, 200, map[string]any{"code": 200})
-}
-func handleFilesCreate(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeFileRequest(r)
-	if err != nil {
-		fileError(w, 400, err)
-		return
-	}
-	path, err := cleanFilePath(req.Path)
-	if err != nil {
-		fileError(w, 400, err)
-		return
-	}
-	if req.IsDir {
-		err = os.MkdirAll(path, 0755)
-	} else {
-		f, e := os.OpenFile(path, os.O_CREATE|os.O_EXCL, 0644)
-		if e == nil {
-			e = f.Close()
-		}
-		err = e
-	}
-	if err != nil {
-		fileError(w, 409, err)
-		return
-	}
-	applyWebsiteOwnership(path)
-	info, _ := os.Stat(path)
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": fileInfo(path, info)})
-}
-func handleFilesDelete(w http.ResponseWriter, r *http.Request) {
-	req, err := decodeFileRequest(r)
-	if err != nil {
-		fileError(w, 400, err)
-		return
-	}
-	path, err := cleanFilePath(req.Path)
-	if err != nil {
-		fileError(w, 400, err)
-		return
-	}
-	if req.ForceDelete {
-		err = os.RemoveAll(path)
-	} else {
-		// 非强制删除进入本服务自己的回收目录，保留原路径以支持恢复。
-		info, statErr := os.Stat(path)
-		if statErr != nil {
-			fileError(w, http.StatusNotFound, statErr)
-			return
-		}
-		trashRoot := filepath.Join(filepath.Dir(fileAuxPath()), "recycle")
-		if err = os.MkdirAll(trashRoot, 0o750); err == nil {
-			trashPath := filepath.Join(trashRoot, fileAuxID("item"))
-			err = os.Rename(path, trashPath)
-			// 数据目录可能位于另一挂载点（测试临时目录也常见），此时
-			// rename 会返回 EXDEV；回收到源目录旁可保持原子移动语义。
-			if errors.Is(err, syscall.EXDEV) {
-				localRoot := filepath.Join(filepath.Dir(path), ".workmesh-recycle")
-				if mkdirErr := os.MkdirAll(localRoot, 0o750); mkdirErr != nil {
-					err = mkdirErr
-				} else {
-					trashPath = filepath.Join(localRoot, fileAuxID("item"))
-					err = os.Rename(path, trashPath)
-				}
-			}
-			if err == nil {
-				fileAux.Lock()
-				loadFileAuxLocked()
-				fileAux.data.Recycle = append(fileAux.data.Recycle, fileRecycleItem{ID: fileAuxID("recycle"), OriginalPath: path, TrashPath: trashPath, Name: info.Name(), Size: info.Size(), IsDir: info.IsDir(), DeletedAt: time.Now().UTC()})
-				err = saveFileAuxLocked()
-				fileAux.Unlock()
-			}
-		}
-	}
-	if err != nil {
-		fileError(w, 404, err)
-		return
-	}
-	wmhttp.JSON(w, 200, map[string]any{"code": 200})
-}
+// handleFilesRename 重命名文件或目录并返回新的路径。
 func handleFilesRename(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeFileRequest(r)
 	if err != nil {
@@ -455,6 +163,8 @@ func handleFilesRename(w http.ResponseWriter, r *http.Request) {
 	}
 	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": dst}})
 }
+
+// handleFilesMove 移动或复制一个或多个文件，并记录异步任务完成状态。
 func handleFilesMove(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeFileRequest(r)
 	if err != nil {
@@ -477,54 +187,27 @@ func handleFilesMove(w http.ResponseWriter, r *http.Request) {
 		fileError(w, 400, err)
 		return
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		fileError(w, 500, err)
+	taskID := strings.TrimSpace(req.TaskID)
+	if taskID == "" {
+		taskID = idToken()
+	}
+	ctx, err := startFileAsyncTask(taskID, "move", "开始文件移动")
+	if err != nil {
+		fileError(w, http.StatusConflict, err)
 		return
 	}
-	for _, raw := range paths {
-		src, e := cleanFilePath(raw)
-		if e != nil {
-			fileError(w, 400, e)
+	copyMode := req.Type == "copy"
+	go func() {
+		if err := moveFilesContext(ctx, paths, dir, copyMode, req.Cover, req.Name); err != nil {
+			fileTaskError(taskID, err)
 			return
 		}
-		name := filepath.Base(src)
-		if len(paths) == 1 && req.Name != "" {
-			name = filepath.Base(req.Name)
-		}
-		target := filepath.Join(dir, name)
-		if filepath.Clean(target) == filepath.Clean(src) {
-			continue
-		}
-		if req.Cover {
-			_ = os.RemoveAll(target)
-		} else if _, e := os.Stat(target); e == nil {
-			fileError(w, http.StatusConflict, fmt.Errorf("目标已存在: %s", target))
-			return
-		}
-		if req.Type == "copy" {
-			e = copyPath(src, target)
-		} else {
-			e = os.Rename(src, target)
-			if errors.Is(e, syscall.EXDEV) {
-				e = copyPath(src, target)
-				if e == nil {
-					e = os.RemoveAll(src)
-				}
-			}
-		}
-		if e != nil {
-			fileError(w, 500, e)
-			return
-		}
-		applyWebsiteOwnership(target)
-	}
-	if req.TaskID != "" {
-		ensureAppTaskLog(req.TaskID, "", "file-move", "completed", "文件操作完成")
-		appendAppTaskLog(req.TaskID, "[TASK-END]")
-	}
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"taskID": req.TaskID, "path": dir}})
+		fileTaskSuccess(taskID, "文件操作完成")
+	}()
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"taskID": taskID, "path": dir, "status": "queued"}})
 }
 
+// copyPath 递归复制文件或目录，处理跨设备移动的回退场景。
 func copyPath(source, destination string) error {
 	info, err := os.Stat(source)
 	if err != nil {
@@ -568,6 +251,8 @@ func copyPath(source, destination string) error {
 	}
 	return closeErr
 }
+
+// handleFilesSize 计算文件或目录下的实际文件总大小。
 func handleFilesSize(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeFileRequest(r)
 	if err != nil {
@@ -589,6 +274,7 @@ func handleFilesSize(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"path": path, "size": total}})
 }
 
+// handleFilesTree 构建最多三层的文件树，供文件选择器使用。
 func handleFilesTree(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeFileRequest(r)
 	if err != nil {
@@ -645,6 +331,7 @@ func handleFilesTree(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": []map[string]any{rootNode}})
 }
 
+// handleFilesUpload 接收 multipart 文件并以临时文件原子写入目标目录。
 func handleFilesUpload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
@@ -695,16 +382,4 @@ func handleFilesUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	wmhttp.JSON(w, 200, map[string]any{"code": 200})
-}
-func handleFilesDownload(w http.ResponseWriter, r *http.Request) {
-	path, err := cleanFilePath(r.URL.Query().Get("path"))
-	if err != nil {
-		fileError(w, 400, err)
-		return
-	}
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(path)+"\"")
-	http.ServeFile(w, r, path)
-}
-func fileError(w http.ResponseWriter, status int, err error) {
-	wmhttp.JSON(w, status, map[string]any{"code": "ERR", "message": err.Error()})
 }

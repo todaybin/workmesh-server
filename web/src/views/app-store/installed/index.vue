@@ -158,11 +158,12 @@ import { ElMessageBox } from 'element-plus';
 import { App } from '@/api/interface/app';
 import { jumpToPath } from '@/utils/router';
 import { useRouter } from 'vue-router';
-import { MsgSuccess } from '@/utils/message';
+import { MsgError, MsgSuccess } from '@/utils/message';
 import { getAgentSettingInfo } from '@/api/modules/setting';
 import { routerToFileWithPath, routerToNameWithQuery } from '@/utils/router';
 import { useGlobalStore } from '@/composables/useGlobalStore';
 import { useOperateNodeContext } from '@/composables/useOperateNodeContext';
+import { getAppInstallId, AppInstallId } from '@/utils/app-store';
 
 const { currentNode, isMaster, currentNodeAddr, isIntl } = useGlobalStore();
 useOperateNodeContext(currentNode);
@@ -182,7 +183,7 @@ const paginationConfig = reactive({
 });
 const open = ref(false);
 const operateReq = reactive({
-    installId: 0,
+    installId: '' as AppInstallId,
     operate: '',
     detailId: 0,
     favorite: false,
@@ -252,15 +253,20 @@ const sync = async () => {
 };
 
 const openOperate = (row: any, op: string) => {
-    operateReq.installId = row.id;
+    const installId = getAppInstallId(row.id, row.appInstallId, row.appInstallID, row.installId);
+    if (installId === undefined) {
+        MsgError(i18n.global.t('app.installIdInvalid'));
+        return;
+    }
+    operateReq.installId = installId;
     operateReq.operate = op;
     if (op == 'upgrade') {
         upgradeRef.value.acceptParams(row, op);
     } else if (op == 'delete') {
-        appInstalledDeleteCheck(row.id).then(async (res) => {
+        appInstalledDeleteCheck(installId).then(async (res) => {
             const items = res.data;
             if (res.data && res.data.length > 0) {
-                checkRef.value.acceptParams({ items: items, key: row.appKey, installID: row.id });
+                checkRef.value.acceptParams({ items: items, key: row.appKey, installID: installId });
             } else {
                 deleteRef.value.acceptParams(row);
             }
@@ -271,7 +277,12 @@ const openOperate = (row: any, op: string) => {
 };
 
 const favoriteInstall = (row: App.AppInstalled) => {
-    operateReq.installId = row.id;
+    const installId = getAppInstallId(row.id, (row as any).appInstallId, (row as any).appInstallID);
+    if (installId === undefined) {
+        MsgError(i18n.global.t('app.installIdInvalid'));
+        return;
+    }
+    operateReq.installId = installId;
     operateReq.operate = 'favorite';
     operateReq.favorite = !row.favorite;
     operate();
@@ -282,6 +293,12 @@ const openIgnore = () => {
 };
 
 const operate = async () => {
+    const installId = getAppInstallId(operateReq.installId);
+    if (installId === undefined) {
+        MsgError(i18n.global.t('app.installIdInvalid'));
+        return;
+    }
+    operateReq.installId = installId;
     open.value = false;
     loading.value = true;
     await installedOp(operateReq)

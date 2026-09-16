@@ -469,13 +469,14 @@ const openSSLLog = (row: Website.SSL) => {
     logRef.value.acceptParams({ id: row.id, type: 'ssl', tail: row.status === 'applying' });
 };
 
-const parsePushNodes = (nodes: string) => {
+const parsePushNodes = (nodes?: unknown): string[] => {
+    if (typeof nodes !== 'string' || nodes.trim() === '') {
+        return [];
+    }
     return nodes
-        ? nodes
-              .split(',')
-              .map((item) => item.trim())
-              .filter((item) => item !== '')
-        : [];
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item !== '');
 };
 
 const openPush = (row: Website.SSLDTO) => {

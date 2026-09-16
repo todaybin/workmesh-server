@@ -19,4 +19,6 @@
 - `GET /api/v2/files/share/download?token=...`：仅对有效 token 提供附件下载。
 - `POST /api/v2/files/share/search`、`share/del`：查询或撤销本地分享记录。
 
-压缩、分片上传、回收站、分享和远程 wget 等长耗时能力继续沿用兼容路由，后续迁移时应异步化并增加任务状态查询。
+压缩、解压和移动使用 `taskID` 异步执行，任务状态统一写入任务日志，可通过任务查询接口轮询；对应的
+`compress/stop`、`decompress/stop` 和 `move/stop` 会取消运行中的任务并清理临时输出。
+分片上传、回收站、分享和远程 wget 按各自接口状态执行，其中 wget 支持独立进度查询和取消。

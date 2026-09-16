@@ -1,0 +1,6 @@
+# Runtime-generated Compose files, secrets, backups, and local overrides.
+docker-compose.yml
+docker-compose.yml.bak
+.env
+secrets/
+backups/

@@ -10,13 +10,15 @@ export namespace Runtime {
         env: string;
         params: string;
         type: string;
+        mode?: 'host' | 'docker' | string;
         resource: string;
         version: string;
         status: string;
         message?: string;
         error?: string;
         codeDir: string;
-        port: string;
+        // API 历史记录中既有字符串端口（逗号分隔）也有 SQLite 数字端口。
+        port: string | number;
         appID: number;
         remark: string;
     }
@@ -55,6 +57,7 @@ export namespace Runtime {
         image: string;
         params: object;
         type: string;
+        mode?: 'host' | 'docker' | string;
         resource: string;
         appID?: number;
         version?: string;

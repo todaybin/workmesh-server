@@ -12,17 +12,17 @@
                     <el-button
                         type="primary"
                         v-permission="'app_manage'"
-                        v-if="data.status != 'Running'"
+                        v-if="!isRunning"
                         link
                         @click="onOperate('start')"
-                        :disabled="data.status === 'Installing'"
+                        :disabled="isInstalling"
                     >
                         {{ $t('commons.operate.start') }}
                     </el-button>
                     <el-button
                         type="primary"
                         v-permission="'app_manage'"
-                        v-if="data.status === 'Running'"
+                        v-if="isRunning"
                         link
                         @click="onOperate('stop')"
                     >
@@ -33,7 +33,7 @@
                         type="primary"
                         v-permission="'app_manage'"
                         link
-                        :disabled="data.status === 'Installing'"
+                        :disabled="isInstalling"
                         @click="onOperate('restart')"
                     >
                         {{ $t('commons.operate.restart') }}
@@ -43,24 +43,24 @@
                         type="primary"
                         link
                         v-permission:view="'website_manage'"
-                        v-if="data.app === 'OpenResty'"
+                        v-if="isOpenResty"
                         @click="onOperate('reload')"
-                        :disabled="data.status !== 'Running'"
+                        :disabled="!isRunning"
                     >
                         {{ $t('commons.operate.reload') }}
                     </el-button>
-                    <el-divider v-if="data.app === 'OpenResty'" direction="vertical" />
+                    <el-divider v-if="isOpenResty" direction="vertical" />
                     <el-button
                         v-if="!hideSetting"
                         type="primary"
                         @click="setting"
                         link
-                        :disabled="data.status === 'Installing'"
+                        :disabled="isInstalling"
                     >
                         {{ $t('commons.button.set') }}
                     </el-button>
                 </div>
-                <div class="ml-5" v-if="key === 'openresty' && (httpPort != 80 || httpsPort != 443)">
+                <div class="ml-5" v-if="isOpenResty && (httpPort != 80 || httpsPort != 443)">
                     <el-tooltip
                         effect="dark"
                         :content="$t('website.openrestyHelper', [httpPort, httpsPort])"
@@ -82,11 +82,13 @@
 </template>
 <script lang="ts" setup>
 import { checkAppInstalled, installedOp } from '@/api/modules/app';
-import { onMounted, reactive, ref } from 'vue';
+import { operateNginx } from '@/api/modules/nginx';
+import { computed, onMounted, reactive, ref } from 'vue';
 import Status from '@/components/status/index.vue';
 import { ElMessageBox } from 'element-plus';
 import i18n from '@/lang';
-import { MsgSuccess } from '@/utils/message';
+import { MsgError, MsgSuccess } from '@/utils/message';
+import { AppInstallId, getAppInstallId, isAppActive, isAppPresent, resolveAppOperationTarget } from '@/utils/app-install';
 
 const props = defineProps({
     appKey: {
@@ -110,18 +112,29 @@ let data = ref({
     app: '',
     version: '',
     status: '',
+    isActive: false,
     lastBackupAt: '',
-    appInstallId: 0,
+    appInstallId: undefined as AppInstallId | undefined,
     isExist: false,
     containerName: '',
 });
 let operateReq = reactive({
-    installId: 0,
+    installId: undefined as AppInstallId | undefined,
     operate: '',
 });
 let refresh = ref(1);
 const httpPort = ref(0);
 const httpsPort = ref(0);
+const isOpenResty = computed(() => {
+    return ['openresty', 'nginx'].includes(String(key.value || data.value.app).toLowerCase());
+});
+const normalizedStatus = computed(() => {
+    const status = String(data.value.status || '').trim().toLowerCase();
+    if (status) return status;
+    return isAppActive(data.value.isActive) ? 'running' : '';
+});
+const isRunning = computed(() => normalizedStatus.value === 'running');
+const isInstalling = computed(() => normalizedStatus.value === 'installing');
 
 const em = defineEmits([
     'setting',
@@ -139,23 +152,45 @@ const setting = () => {
 const onCheck = async (key: any, name: any) => {
     await checkAppInstalled(key, name)
         .then((res) => {
-            data.value = res.data;
-            em('isExist', res.data);
-            em('update:maskShow', res.data.status !== 'Running');
-            operateReq.installId = res.data.appInstallId;
-            em('update:appInstallID', res.data.appInstallId);
-            httpPort.value = res.data.httpPort;
-            httpsPort.value = res.data.httpsPort;
+            const responseData = res.data as any;
+            const installId = getAppInstallId(
+                responseData.appInstallId,
+                responseData.appInstallID,
+                responseData.installId,
+                responseData.id,
+            );
+            const isExist = isAppPresent(responseData, installId);
+            data.value = { ...responseData, isExist, appInstallId: installId };
+            em('isExist', data.value);
+            em('update:maskShow', !isRunning.value);
+            operateReq.installId = installId;
+            em('update:appInstallID', installId);
+            httpPort.value = Number(responseData.httpPort) || 0;
+            httpsPort.value = Number(responseData.httpsPort) || 0;
             refresh.value++;
         })
         .catch(() => {
+            data.value = {
+                ...data.value,
+                isExist: false,
+                appInstallId: undefined,
+                status: '',
+                containerName: '',
+            };
+            operateReq.installId = undefined;
+            httpPort.value = 0;
+            httpsPort.value = 0;
             em('isExist', false);
             refresh.value++;
         });
 };
 
 const onOperate = async (operation: string) => {
-    operateReq.operate = operation;
+    const target = resolveAppOperationTarget(key.value, data.value);
+    if (!target) {
+        MsgError(i18n.global.t('app.installIdInvalid'));
+        return;
+    }
     ElMessageBox.confirm(
         i18n.global.t('app.operatorHelper', [i18n.global.t('commons.operate.' + operation)]),
         i18n.global.t('commons.operate.' + operation),
@@ -168,7 +203,9 @@ const onOperate = async (operation: string) => {
         em('update:maskShow', true);
         em('update:loading', true);
         em('before');
-        installedOp(operateReq)
+        (target.kind === 'openresty'
+            ? operateNginx({ operate: operation })
+            : installedOp({ installId: target.installId, operate: operation }))
             .then(() => {
                 em('update:loading', false);
                 MsgSuccess(i18n.global.t('commons.msg.operationSuccess'));

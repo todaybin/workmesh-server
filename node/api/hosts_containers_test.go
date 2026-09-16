@@ -26,6 +26,22 @@ func TestHostDiagnostics(t *testing.T) {
 	}
 }
 
+func TestRuntimeProfileDownload(t *testing.T) {
+	mux := http.NewServeMux()
+	registerHostRoutes(mux)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/hosts/diagnostics/profiles", bytes.NewBufferString(`{"type":"goroutine","duration":1}`)))
+	if res.Code != http.StatusOK {
+		t.Fatalf("profile status=%d body=%s", res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("Content-Type"); got != "application/gzip" {
+		t.Fatalf("content type=%q", got)
+	}
+	if len(res.Body.Bytes()) < 20 || !bytes.HasPrefix(res.Body.Bytes(), []byte{0x1f, 0x8b}) {
+		t.Fatalf("profile is not gzip payload")
+	}
+}
+
 func TestContainerMethodValidation(t *testing.T) {
 	mux := http.NewServeMux()
 	registerContainerRoutes(mux)

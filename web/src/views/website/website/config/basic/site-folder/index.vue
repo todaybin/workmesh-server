@@ -175,6 +175,14 @@ const getConfig = async () => {
         const res = await getDirConfig({ id: props.id });
         dirs.value = res.data.dirs;
         dirConfig.value = res.data;
+        // 目录接口返回的是 index 目录的真实 UID/GID，优先用于回填，
+        // 避免历史网站元数据中的 www 覆盖实际 1000:1000 属主。
+        if (String(res.data.user || '').trim() !== '') {
+            updatePermission.user = String(res.data.user);
+        }
+        if (String(res.data.userGroup || '').trim() !== '') {
+            updatePermission.group = String(res.data.userGroup);
+        }
     } catch (error) {}
 };
 

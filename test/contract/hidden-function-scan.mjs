@@ -13,8 +13,9 @@ for (let i = 2; i < process.argv.length; i += 1) {
   if (process.argv[i].startsWith('--')) args.set(process.argv[i], process.argv[i + 1]);
 }
 
-const legacy = path.resolve(args.get('--legacy') || 'apps/workmesh-node');
-const project = path.resolve(args.get('--project') || 'apps/workmesh-server');
+// 1Panel 是只读业务参考；旧 apps/workmesh-node 已废弃。
+const legacy = path.resolve(args.get('--legacy') || '/www/apps/1Panel');
+const project = path.resolve(args.get('--project') || '/www/apps/workmesh-server');
 const out = args.get('--out') ? path.resolve(args.get('--out')) : null;
 const categories = ['init', 'middleware', 'i18n', 'log', 'cron', 'ws', 'sse', 'command', 'background'];
 
@@ -44,7 +45,7 @@ const sectionHeadings = {
 };
 const report = {
   schema: 1,
-  legacy: path.relative(process.cwd(), legacy).replaceAll('\\', '/'),
+  legacy,
   checklist: path.relative(process.cwd(), checklistPath).replaceAll('\\', '/'),
   categories: {},
   totals: { files: 0, categories: categories.length },

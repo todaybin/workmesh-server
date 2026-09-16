@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,9 +21,15 @@ import (
 func TestScriptSyncUsesConfiguredRemoteAndSQLite(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("WORKMESH_DATA_DIR", dataDir)
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("当前沙箱禁止 loopback 监听: %v", err)
+	}
+	remote := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[{"id":"remote-1","name":"health","script":"echo ok"}]`))
 	}))
+	remote.Listener = listener
+	remote.Start()
 	defer remote.Close()
 	t.Setenv("WORKMESH_SCRIPT_REPO_URL", remote.URL)
 	db, err := sql.Open("sqlite", filepath.Join(dataDir, "workmesh.db"))

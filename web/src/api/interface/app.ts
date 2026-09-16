@@ -228,7 +228,9 @@ export namespace App {
         status: string;
         createdAt: string;
         lastBackupAt: string;
-        appInstallId: number;
+        appInstallId?: number | string;
+        appInstallID?: number | string;
+        id?: number | string;
         containerName: string;
         installPath: string;
         httpPort: number;
@@ -252,7 +254,7 @@ export namespace App {
     }
 
     export interface AppInstalledOp {
-        installId: number;
+        installId: number | string;
         operate: string;
         backupId?: number;
         detailId?: number;

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-export WORKMESH_SERVER_CONFIG="${WORKMESH_SERVER_CONFIG:-/opt/workmesh-server/config/server.json}"
-export WORKMESH_DATA_DIR="${WORKMESH_DATA_DIR:-/opt/workmesh-server/data}"
-if [[ -f /opt/workmesh-server/config/server.env ]]; then
+ROOT_DIR="${WORKMESH_SERVER_ROOT:-/opt/workmesh-server}"
+export WORKMESH_SERVER_CONFIG="${WORKMESH_SERVER_CONFIG:-$ROOT_DIR/config/server.json}"
+export WORKMESH_DATA_DIR="${WORKMESH_DATA_DIR:-$ROOT_DIR/data}"
+if [[ -f "$ROOT_DIR/config/server.env" ]]; then
   set -a
   # shellcheck disable=SC1091
-  . /opt/workmesh-server/config/server.env
+  . "$ROOT_DIR/config/server.env"
   set +a
 fi
 if [[ $# -eq 0 ]]; then
-  exec /opt/workmesh-server/bin/workmesh-server help
+  exec "$ROOT_DIR/bin/workmesh-server" help
 fi
-exec /opt/workmesh-server/bin/workmesh-server "$@"
+exec "$ROOT_DIR/bin/workmesh-server" "$@"

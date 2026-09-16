@@ -1,0 +1,105 @@
+{
+  "schema": 1,
+  "generatedAt": "2026-09-05T16:39:07.742Z",
+  "baseURL": "http://127.0.0.1:9999",
+  "securityEntranceConfigured": false,
+  "status": "pass",
+  "counts": {
+    "pass": 8
+  },
+  "results": [
+    {
+      "name": "健康检查",
+      "method": "GET",
+      "path": "/health",
+      "expectedStatus": 200,
+      "actualStatus": 200,
+      "status": "pass",
+      "responseSummary": "{\"code\":200,\"data\":{\"status\":\"ok\"}}",
+      "contentType": "application/json; charset=utf-8",
+      "startedAt": "2026-09-05T16:39:06.214Z"
+    },
+    {
+      "name": "就绪检查",
+      "method": "GET",
+      "path": "/ready",
+      "expectedStatus": 200,
+      "actualStatus": 200,
+      "status": "pass",
+      "responseSummary": "{\"code\":200,\"data\":{\"status\":\"ready\"}}",
+      "contentType": "application/json; charset=utf-8",
+      "startedAt": "2026-09-05T16:39:06.552Z"
+    },
+    {
+      "name": "v2 健康检查",
+      "method": "GET",
+      "path": "/api/v2/health",
+      "expectedStatus": 200,
+      "actualStatus": 200,
+      "status": "pass",
+      "responseSummary": "{\"code\":200,\"data\":{\"status\":\"ok\"}}",
+      "contentType": "application/json; charset=utf-8",
+      "startedAt": "2026-09-05T16:39:06.716Z"
+    },
+    {
+      "name": "认证设置公开接口",
+      "method": "GET",
+      "path": "/api/v2/core/auth/setting",
+      "expectedStatus": 200,
+      "actualStatus": 200,
+      "status": "pass",
+      "responseSummary": "{\"code\":200,\"data\":{\"mfa\":false,\"passkey\":false}}",
+      "contentType": "application/json; charset=utf-8",
+      "startedAt": "2026-09-05T16:39:06.891Z"
+    },
+    {
+      "name": "未登录当前用户",
+      "method": "GET",
+      "path": "/api/v2/core/auth/current",
+      "expectedStatus": 401,
+      "actualStatus": 401,
+      "status": "pass",
+      "responseSummary": "{\"code\":\"ERR\",\"details\":{\"errCode\":\"LOCAL_AUTH_REQUIRED\"},\"message\":\"用户未登录: 需要有效的本地登录会话\"}",
+      "contentType": "application/json; charset=utf-8",
+      "startedAt": "2026-09-05T16:39:07.051Z"
+    },
+    {
+      "name": "未登录概览接口",
+      "method": "GET",
+      "path": "/api/v2/dashboard/app/launcher",
+      "expectedStatus": 401,
+      "actualStatus": 401,
+      "status": "pass",
+      "responseSummary": "{\"code\":\"ERR\",\"details\":{\"errCode\":\"LOCAL_AUTH_REQUIRED\"},\"message\":\"用户未登录: 需要有效的本地登录会话\"}",
+      "contentType": "application/json; charset=utf-8",
+      "startedAt": "2026-09-05T16:39:07.230Z"
+    },
+    {
+      "name": "错误密码登录",
+      "method": "POST",
+      "path": "/api/v2/core/auth/login",
+      "expectedStatus": 401,
+      "actualStatus": 401,
+      "status": "pass",
+      "responseSummary": "{\"code\":\"ERR\",\"details\":{\"errCode\":\"LOCAL_AUTH_REQUIRED\"},\"message\":\"用户未登录: 用户名或密码错误\"}",
+      "contentType": "application/json; charset=utf-8",
+      "startedAt": "2026-09-05T16:39:07.398Z"
+    },
+    {
+      "name": "默认入口隐藏",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 404,
+      "actualStatus": 404,
+      "status": "pass",
+      "responseSummary": "{\"code\":\"ERR\",\"details\":{\"errCode\":\"SECURITY_ENTRANCE_REQUIRED\"},\"message\":\"此接口禁止 API 调用: 请通过安全入口访问服务\"}",
+      "contentType": "application/json; charset=utf-8",
+      "startedAt": "2026-09-05T16:39:07.567Z"
+    }
+  ],
+  "limitations": [
+    "仅覆盖无需有效管理员密码的公开接口、安全边界和错误密码分支。",
+    "不修改 route-inventory 或 frontend-api-inventory 的 not-run 状态。",
+    "登录后业务、WS 消息、文件流、Docker、ACME 和跨节点任务必须使用独立真实凭据继续验收。"
+  ]
+}

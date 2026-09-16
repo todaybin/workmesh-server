@@ -32,16 +32,29 @@ type streamWebSocket struct {
 	conn        net.Conn
 	read        *bufio.Reader
 	writeMu     sync.Mutex
+	closeOnce   sync.Once
+	closeErr    error
 	idleTimeout time.Duration
 }
 
+// upgradeStreamWebSocket 执行 RFC6455 握手并返回受限的流式 WebSocket 连接。
 func upgradeStreamWebSocket(w http.ResponseWriter, r *http.Request) (*streamWebSocket, error) {
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		return nil, errors.New("WEBSOCKET_UPGRADE_REQUIRED")
 	}
+	if !headerContainsToken(r.Header.Values("Connection"), "upgrade") {
+		return nil, errors.New("WEBSOCKET_CONNECTION_UPGRADE_REQUIRED")
+	}
+	if strings.TrimSpace(r.Header.Get("Sec-WebSocket-Version")) != "13" {
+		return nil, errors.New("WEBSOCKET_VERSION_UNSUPPORTED")
+	}
 	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
 	if key == "" {
 		return nil, errors.New("WEBSOCKET_KEY_REQUIRED")
+	}
+	decodedKey, err := base64.StdEncoding.DecodeString(key)
+	if err != nil || len(decodedKey) != 16 {
+		return nil, errors.New("WEBSOCKET_KEY_INVALID")
 	}
 	if !validStreamOrigin(r) {
 		return nil, errors.New("WEBSOCKET_ORIGIN_DENIED")
@@ -67,6 +80,18 @@ func upgradeStreamWebSocket(w http.ResponseWriter, r *http.Request) (*streamWebS
 	return &streamWebSocket{conn: conn, read: bufio.NewReader(conn), idleTimeout: terminalIdleTimeout}, nil
 }
 
+// headerContainsToken 判断逗号分隔的 HTTP 头是否包含指定令牌。
+func headerContainsToken(values []string, expected string) bool {
+	for _, value := range values {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), expected) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // validStreamOrigin 拒绝浏览器跨站 WebSocket；非浏览器请求允许不携带 Origin。
 func validStreamOrigin(r *http.Request) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
@@ -88,6 +113,7 @@ func validStreamOrigin(r *http.Request) bool {
 	return false
 }
 
+// close 使用正常关闭码结束流式 WebSocket 连接。
 func (s *streamWebSocket) close() error {
 	return s.closeWithCode(1000, "")
 }
@@ -97,40 +123,51 @@ func (s *streamWebSocket) closeWithCode(code uint16, reason string) error {
 	if s == nil || s.conn == nil {
 		return nil
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	payload := make([]byte, 2)
-	binary.BigEndian.PutUint16(payload, code)
-	if reason != "" {
-		// Close 原因必须是有效 UTF-8，且与状态码合计不超过 125 字节。
-		reasonBytes := []byte(strings.ToValidUTF8(reason, ""))
-		if len(reasonBytes) > 123 {
-			reasonBytes = reasonBytes[:123]
-			for len(reasonBytes) > 0 && (reasonBytes[len(reasonBytes)-1]&0xc0) == 0x80 {
-				reasonBytes = reasonBytes[:len(reasonBytes)-1]
+	s.closeOnce.Do(func() {
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+		payload := make([]byte, 2)
+		binary.BigEndian.PutUint16(payload, code)
+		var reasonBytes []byte
+		if reason != "" {
+			// Close 原因必须是有效 UTF-8，且与状态码合计不超过 125 字节。
+			reasonBytes = []byte(strings.ToValidUTF8(reason, ""))
+			if len(reasonBytes) > 123 {
+				reasonBytes = reasonBytes[:123]
+				for len(reasonBytes) > 0 && (reasonBytes[len(reasonBytes)-1]&0xc0) == 0x80 {
+					reasonBytes = reasonBytes[:len(reasonBytes)-1]
+				}
+			}
+			if !utf8.Valid(reasonBytes) {
+				reasonBytes = nil
 			}
 		}
-		if !utf8.Valid(reasonBytes) {
-			reasonBytes = nil
-		}
 		payload = append(payload, reasonBytes...)
-	}
-	_ = writeStreamFrame(s.conn, 0x8, payload)
-	return s.conn.Close()
+		if err := writeStreamFrame(s.conn, 0x8, payload); err != nil {
+			s.closeErr = err
+		}
+		if err := s.conn.Close(); s.closeErr == nil {
+			s.closeErr = err
+		}
+	})
+	return s.closeErr
 }
 
+// writeText 以文本数据帧发送一段流式输出，并串行化并发写入。
 func (s *streamWebSocket) writeText(payload []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	return writeStreamFrame(s.conn, 0x1, payload)
 }
 
+// writeControl 发送 Ping、Pong 或 Close 等控制帧，并串行化并发写入。
 func (s *streamWebSocket) writeControl(opcode byte, payload []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	return writeStreamFrame(s.conn, opcode, payload)
 }
 
+// writeStreamFrame 按 RFC6455 编码服务端数据帧，并限制单帧负载大小。
 func writeStreamFrame(conn net.Conn, opcode byte, payload []byte) error {
 	if len(payload) > maxWebSocketMessage {
 		return errors.New("websocket 消息超过 1MiB 限制")
@@ -214,7 +251,13 @@ func (s *streamWebSocket) readFrame() (byte, []byte, error) {
 	return first & 0x0f, payload, nil
 }
 
+// requireStreamAuth 校验流式接口令牌或本地登录会话，拒绝匿名命令执行。
 func requireStreamAuth(w http.ResponseWriter, r *http.Request, env ...string) bool {
+	// NodeRelay 已完成 HMAC、时间戳、nonce 和 role epoch 校验；节点间透传
+	// 不应再次要求浏览器令牌，否则配置 WORKMESH_STREAM_TOKEN 后远端日志会被 401。
+	if IsForwardedRequestVerified(r) {
+		return true
+	}
 	for _, name := range env {
 		if token := strings.TrimSpace(os.Getenv(name)); token != "" {
 			if r.Header.Get("X-WorkMesh-Token") == token {

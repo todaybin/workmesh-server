@@ -112,6 +112,7 @@ func (s *FileSyncStore) Push(ctx context.Context, cursor SyncCursor, payload []b
 	return SyncCursor{Stream: cursor.Stream, Version: record.version}, nil
 }
 
+// equalBytes 比较两段同步快照内容，供旧游标重试的幂等判断使用。
 func equalBytes(left, right []byte) bool {
 	if len(left) != len(right) {
 		return false
@@ -124,6 +125,7 @@ func equalBytes(left, right []byte) bool {
 	return true
 }
 
+// persistLocked 在持有写锁时以临时文件原子替换同步快照。
 func (s *FileSyncStore) persistLocked() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err

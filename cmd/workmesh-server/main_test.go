@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/todaybin/workmesh-server/config"
 	controlapi "github.com/todaybin/workmesh-server/control/api"
@@ -66,24 +67,10 @@ func TestSignedNodeRelayPassesOuterAndNodeSessionMiddleware(t *testing.T) {
 }
 
 func TestHTTPMuxServesJavaScriptAssetsWithModuleMIME(t *testing.T) {
-	root := t.TempDir()
-	assetDir := filepath.Join(root, "web", "dist", "assets", "js")
-	if err := os.MkdirAll(assetDir, 0o755); err != nil {
-		t.Fatal(err)
+	frontend := fstest.MapFS{
+		"assets/js/module.js": &fstest.MapFile{Data: []byte("export const ready = true;\n")},
 	}
-	if err := os.WriteFile(filepath.Join(assetDir, "module.js"), []byte("export const ready = true;\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(originalDir) })
-
-	mux, _ := httpMux(configForTest())
+	mux, _ := httpMuxWithReadinessAndFrontend(configForTest(), newReadinessState(), frontend)
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/assets/js/module.js", nil))
 
@@ -96,27 +83,16 @@ func TestHTTPMuxServesJavaScriptAssetsWithModuleMIME(t *testing.T) {
 	if !strings.Contains(recorder.Body.String(), "export const ready") {
 		t.Fatalf("静态资源内容错误: %s", recorder.Body.String())
 	}
+	if cache := recorder.Header().Get("Cache-Control"); cache != "private, max-age=2628000, immutable" {
+		t.Fatalf("哈希静态资源缓存头错误: %q", cache)
+	}
 }
 
 func TestHTTPMuxFallsBackToSPAForFrontendRoutes(t *testing.T) {
-	root := t.TempDir()
-	staticRoot := filepath.Join(root, "web", "dist")
-	if err := os.MkdirAll(staticRoot, 0o755); err != nil {
-		t.Fatal(err)
+	frontend := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><div id=app>workmesh</div>")},
 	}
-	if err := os.WriteFile(filepath.Join(staticRoot, "index.html"), []byte("<!doctype html><div id=app>workmesh</div>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(originalDir) })
-
-	mux, _ := httpMux(configForTest())
+	mux, _ := httpMuxWithReadinessAndFrontend(configForTest(), newReadinessState(), frontend)
 	for _, path := range []string{"/login", "/settings/bind"} {
 		recorder := httptest.NewRecorder()
 		mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
@@ -133,24 +109,10 @@ func TestHTTPMuxFallsBackToSPAForFrontendRoutes(t *testing.T) {
 }
 
 func TestHTTPMuxDoesNotFallbackUnknownAPIToHTML(t *testing.T) {
-	root := t.TempDir()
-	staticRoot := filepath.Join(root, "web", "dist")
-	if err := os.MkdirAll(staticRoot, 0o755); err != nil {
-		t.Fatal(err)
+	frontend := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><div id=app>workmesh</div>")},
 	}
-	if err := os.WriteFile(filepath.Join(staticRoot, "index.html"), []byte("<!doctype html><div id=app>workmesh</div>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(originalDir) })
-
-	mux, _ := httpMux(configForTest())
+	mux, _ := httpMuxWithReadinessAndFrontend(configForTest(), newReadinessState(), frontend)
 	recorder := httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v2/unknown", nil))
 	if recorder.Code != http.StatusNotFound {
@@ -158,6 +120,62 @@ func TestHTTPMuxDoesNotFallbackUnknownAPIToHTML(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), "id=app") {
 		t.Fatal("未知 API 不应返回 SPA HTML")
+	}
+}
+
+func TestHTTPMuxServesStaticJSONWithETag(t *testing.T) {
+	frontend := fstest.MapFS{
+		"index.html":        &fstest.MapFile{Data: []byte("<!doctype html><div id=app>workmesh</div>")},
+		"static/china.json": &fstest.MapFile{Data: []byte(`{"name":"china"}`)},
+		"static/world.json": &fstest.MapFile{Data: []byte(`{"name":"world"}`)},
+		"favicon.png":       &fstest.MapFile{Data: []byte("PNG")},
+		"assets/js/main.js": &fstest.MapFile{Data: []byte("export {}")},
+	}
+	mux, _ := httpMuxWithReadinessAndFrontend(configForTest(), newReadinessState(), frontend)
+
+	first := httptest.NewRecorder()
+	mux.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/api/v2/static/china.json", nil))
+	if first.Code != http.StatusOK {
+		t.Fatalf("地图资源状态码 = %d, body = %s", first.Code, first.Body.String())
+	}
+	if contentType := first.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "application/json") {
+		t.Fatalf("地图资源 MIME 类型错误: %q", contentType)
+	}
+	if cache := first.Header().Get("Cache-Control"); cache != "private, max-age=2628000" {
+		t.Fatalf("地图资源缓存头错误: %q", cache)
+	}
+	etag := first.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("地图资源应包含 ETag")
+	}
+
+	second := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v2/static/china.json", nil)
+	request.Header.Set("If-None-Match", etag)
+	mux.ServeHTTP(second, request)
+	if second.Code != http.StatusNotModified {
+		t.Fatalf("相同 ETag 应返回 304，实际为 %d", second.Code)
+	}
+}
+
+func TestHTTPMuxLimitsEmbeddedPublicAssets(t *testing.T) {
+	frontend := fstest.MapFS{
+		"index.html":       &fstest.MapFile{Data: []byte("<!doctype html><div id=app>workmesh</div>")},
+		"favicon.png":      &fstest.MapFile{Data: []byte("PNG")},
+		"assets/secret.js": &fstest.MapFile{Data: []byte("secret")},
+	}
+	mux, _ := httpMuxWithReadinessAndFrontend(configForTest(), newReadinessState(), frontend)
+	for _, path := range []string{
+		"/public/assets/secret.js",
+		"/favicon.ico/assets/secret.js",
+		"/api/v2/images/logo",
+		"/api/v2/static/unknown.json",
+	} {
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s 应拒绝嵌入目录穿透，实际状态码 = %d", path, recorder.Code)
+		}
 	}
 }
 

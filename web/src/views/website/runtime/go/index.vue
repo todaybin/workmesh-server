@@ -1,8 +1,12 @@
 <template>
     <div>
         <RouterMenu />
-        <DockerStatus v-model:isActive="isActive" v-model:isExist="isExist" />
-        <LayoutContent v-loading="loading" v-if="isExist" :class="{ mask: !isActive }">
+        <DockerStatus
+            v-model:isActive="isActive"
+            v-model:isExist="isExist"
+            :is-hide="items.some((item) => item.mode === 'host')"
+        />
+        <LayoutContent v-loading="loading" v-if="isExist || items.some((item) => item.mode === 'host')" :class="{ mask: !isActive && !items.some((item) => item.mode === 'host') }">
             <template #leftToolBar>
                 <el-button v-permission type="primary" @click="openCreate">
                     {{ $t('commons.button.create') }}
@@ -197,7 +201,7 @@ const buttons = [
             openTerminal(row);
         },
         disabled: function (row: Runtime.Runtime) {
-            return disabledButton(row, 'config');
+            return row.mode === 'host' || disabledButton(row, 'config');
         },
     },
     {
@@ -251,8 +255,7 @@ const openDelete = async (row: Runtime.Runtime) => {
 };
 
 const openLog = (row: any) => {
-    if (row.taskID && row.status !== 'Running' && row.status !== 'Stopped') {
-        taskLogRef.value.openWithTaskID(row.taskID, true);
+    if (row.mode === 'host') {
         return;
     }
     composeLogRef.value.acceptParams({

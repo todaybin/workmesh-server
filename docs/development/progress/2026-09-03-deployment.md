@@ -3,6 +3,8 @@
 
 # 2026-09-03 构建与部署验收
 
+> Historical record：本文记录 2026 年 9 月 3 日的阶段性部署。文中的相对参考路径只属于当时环境；当前只读业务参考统一为 `/www/apps/1Panel`。
+
 状态：`[>] 进行中`
 
 ## 已完成
@@ -25,6 +27,9 @@
 
 ## 未完成与阻塞
 
+- 2026-09-04 19:02 CST 已部署本轮 SQLite 运行时任务整改制品：生产二进制 SHA256=`755923aa68b805f313039065587bd70037a8408b97abcda35e4b8cac8db45bdf`，备份目录为 `/opt/workmesh-server/backups/deploy-20260904T190500+0800-sqlite-runtime`；服务重启后 `active/running`，`/health` 与 `/ready` 均返回 HTTP 200，SQLite 已应用 `0012-runtime-task-state`。
+- 2026-09-04 19:24 CST 已部署运行时失败状态与日志抽屉修复：生产二进制 SHA256=`917205e42ed40a3eba1d6a24b04bafe8bc2fdf42591f42a6b915d6386b76a586`，前端 `type-check` 与 `build:pro` 通过，备份目录为 `/opt/workmesh-server/backups/deploy-20260904T-runtime-fix`；服务 `active/running`，`/health` 与 `/ready` 均返回 HTTP 200。使用 `/www/wwwroot/znmp.sopvip.com-gateway/app/gateway/workmesh-runtime-test` 创建 `workmesh-go-port-test`，验证 8080 端口冲突后运行时保持 `Error`、任务保持 `failed`，同步不会覆盖为 `Creating`，任务日志可刷新读取。
+
 - 2026-09-03 20:22 CST 已完成最新运行时日志与 Compose 路径修复制品部署：生产二进制 SHA256=`16eaeff1f862ba393c05b12f1c714c313c9f683841074e12df57a89c7264264c`，备份目录为 `/opt/workmesh-server/backups/deploy-20260903T200000Z-runtime-logs`，服务 `active/running`、`NRestarts=0`，`/health` 和 `/ready` 均返回 HTTP 200。
 - 本次部署脚本为 `.tmp/deploy-runtime-logs-20260903T120000Z.sh`；SQLite 备份使用生产机 Python 标准库 `sqlite3.backup`（生产机无 `sqlite3` CLI）。
 - 站点类型切换、字符串运行时 ID 和 Compose 默认变量修复已于 `2026-09-03 23:39 CST` 部署后端制品：SHA256=`5793f747f9e15666887e2d204b2352340abb88bafe3666bd18143c3abf66c431`，备份目录为 `/opt/workmesh-server/backups/deploy-20260903T233802+0800-site-runtime`；服务重启后 `active/running`，`/health` 与 `/ready` 均返回 HTTP 200。
@@ -42,5 +47,5 @@
 GOWORK=off go test ./...
 GOWORK=off go vet ./...
 npx --yes --package node@20 --call 'npm run type-check && npm run build:pro'
-node test/contract/route-scan.mjs check --legacy ../workmesh-node --project . --manifest test/contract/routes.json
+node test/contract/route-scan.mjs check --legacy ../1Panel --project . --manifest test/contract/routes.json
 ```

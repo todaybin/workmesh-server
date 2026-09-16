@@ -1,0 +1,27 @@
+services:
+  openresty:
+    image: ${WORKMESH_OPENRESTY_WAF_IMAGE:?WORKMESH_OPENRESTY_WAF_IMAGE is required}
+    container_name: ${CONTAINER_NAME:-workmesh-openresty-waf}
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PANEL_APP_PORT_HTTP:-80}:80"
+      - "${PANEL_APP_PORT_HTTPS:-443}:443"
+    volumes:
+      - ./conf/conf.d:/usr/local/openresty/nginx/conf/conf.d
+      - ./conf/stream.d:/usr/local/openresty/nginx/conf/stream.d
+      - ./conf/default:/usr/local/openresty/nginx/conf/default
+      - ./conf/ssl:/usr/local/openresty/nginx/conf/ssl
+      - ./waf:/opt/workmesh/waf
+      - ./logs:/usr/local/openresty/nginx/logs
+      - ${WORKMESH_WEBSITE_ROOT:-${WEBSITE_DIR:-/www/wwwroot}}:/www/wwwroot
+    healthcheck:
+      test: ["CMD", "/usr/local/openresty/nginx/sbin/nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

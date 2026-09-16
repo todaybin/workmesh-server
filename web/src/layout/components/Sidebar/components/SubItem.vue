@@ -1,16 +1,20 @@
 <template>
     <template v-for="subItem in menuList" :key="subItem.name">
-        <el-sub-menu v-if="subItem?.children?.length > 1" :index="subItem.path" popper-class="sidebar-container-popper">
+        <el-sub-menu
+            v-if="visibleChildren(subItem).length > 1"
+            :index="subItem.path"
+            popper-class="sidebar-container-popper"
+        >
             <template #title>
                 <el-icon v-if="subItem.meta?.icon">
                     <SvgIcon :iconName="subItem.meta?.icon as string" />
                 </el-icon>
                 <span>{{ getMenuTitle(subItem) }}</span>
             </template>
-            <SubItem :menuList="subItem.children" :level="level + 1" />
+            <SubItem :menuList="visibleChildren(subItem)" :level="level + 1" />
         </el-sub-menu>
 
-        <el-menu-item v-else-if="subItem?.children?.length === 1" :index="subItem.children[0].path">
+        <el-menu-item v-else-if="visibleChildren(subItem).length === 1" :index="visibleChildren(subItem)[0].path">
             <el-icon v-if="subItem.meta?.icon">
                 <SvgIcon :iconName="subItem.meta?.icon as string" />
             </el-icon>
@@ -59,6 +63,11 @@ const getMenuTitle = (item: RouteRecordRaw): string => {
     }
     return String(item.name || '');
 };
+
+const visibleChildren = (item: RouteRecordRaw): RouteRecordRaw[] =>
+    (item.children || []).filter(
+        (child) => !(child as RouteRecordRaw & { hidden?: boolean }).hidden && !child.meta?.hideInSidebar,
+    );
 
 const goUpage = () => {
     window.open('https://www.lxware.cn/upage', '_blank', 'noopener,noreferrer');

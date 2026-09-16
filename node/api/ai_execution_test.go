@@ -19,19 +19,31 @@ import (
 
 type routeTaskBackend struct{}
 
+// Create 返回测试用沙箱任务标识，验证路由不会绕过任务提供器。
 func (routeTaskBackend) Create(context.Context, taskruntime.TaskSpec) (string, error) {
 	return "sandbox-route", nil
 }
-func (routeTaskBackend) Start(context.Context, string) error   { return nil }
-func (routeTaskBackend) Cancel(context.Context, string) error  { return nil }
+
+// Start 验证启动调用能够到达隔离任务后端。
+func (routeTaskBackend) Start(context.Context, string) error { return nil }
+
+// Cancel 验证取消调用能够到达隔离任务后端。
+func (routeTaskBackend) Cancel(context.Context, string) error { return nil }
+
+// Destroy 验证销毁调用能够到达隔离任务后端。
 func (routeTaskBackend) Destroy(context.Context, string) error { return nil }
+
+// Exec 返回受控输出，供任务执行路由断言结果来源。
 func (routeTaskBackend) Exec(context.Context, string, []string) (taskruntime.TaskExecResult, error) {
 	return taskruntime.TaskExecResult{ExitCode: 0, Stdout: "ok"}, nil
 }
+
+// Collect 返回受控收集结果，验证任务结果查询不读取模拟文件。
 func (routeTaskBackend) Collect(context.Context, string) (taskruntime.TaskExecResult, error) {
 	return taskruntime.TaskExecResult{ExitCode: 0, Stdout: "collected"}, nil
 }
 
+// TestAIProviderAndSandboxStatus 验证 AI 提供商和沙箱状态接口使用统一成功 envelope。
 func TestAIProviderAndSandboxStatus(t *testing.T) {
 	mux := http.NewServeMux()
 	registerAIExecutionRoutes(mux)
@@ -47,6 +59,7 @@ func TestAIProviderAndSandboxStatus(t *testing.T) {
 	}
 }
 
+// TestAIAccountModelsAndValidation 验证 AI 账号、模型新增、重复校验和缺少密钥错误分支。
 func TestAIAccountModelsAndValidation(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -89,6 +102,7 @@ func TestAIAccountModelsAndValidation(t *testing.T) {
 	}
 }
 
+// TestAIErrorUsesRequestLocale 验证错误消息按请求语言返回，而不是固定中文文本。
 func TestAIErrorUsesRequestLocale(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -108,6 +122,7 @@ func TestAIErrorUsesRequestLocale(t *testing.T) {
 	}
 }
 
+// TestAIAccountModelDiscoveryAndSandboxPersistence 验证模型探测和沙箱状态持久化行为。
 func TestAIAccountModelDiscoveryAndSandboxPersistence(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" {
@@ -144,6 +159,7 @@ func TestAIAccountModelDiscoveryAndSandboxPersistence(t *testing.T) {
 	}
 }
 
+// TestTaskExecRequiresToken 验证任务执行接口拒绝缺少节点令牌的请求。
 func TestTaskExecRequiresToken(t *testing.T) {
 	t.Setenv("WORKMESH_TASK_TOKEN", "expected")
 	mux := http.NewServeMux()
@@ -156,6 +172,7 @@ func TestTaskExecRequiresToken(t *testing.T) {
 	}
 }
 
+// TestAIPersistentAccountAndAgentState 验证 AI 账号和 Agent 状态可跨路由实例恢复。
 func TestAIPersistentAccountAndAgentState(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -180,6 +197,7 @@ func TestAIPersistentAccountAndAgentState(t *testing.T) {
 	}
 }
 
+// TestAIMcpAndDomainOperations 验证 MCP 服务操作和域名绑定写入真实状态。
 func TestAIMcpAndDomainOperations(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -201,6 +219,7 @@ func TestAIMcpAndDomainOperations(t *testing.T) {
 	}
 }
 
+// TestMCPConnectionTestPerformsNetworkProbe 验证 MCP 连接测试执行真实网络探测并报告失败。
 func TestMCPConnectionTestPerformsNetworkProbe(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -231,6 +250,7 @@ func TestMCPConnectionTestPerformsNetworkProbe(t *testing.T) {
 	}
 }
 
+// TestMCPSSEConnectionRequiresEventStream 验证 SSE 传输必须返回事件流内容类型。
 func TestMCPSSEConnectionRequiresEventStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -247,6 +267,7 @@ func TestMCPSSEConnectionRequiresEventStream(t *testing.T) {
 	}
 }
 
+// TestMCPSyncStatusPersistsProbeResult 验证 MCP 探测状态同步后可从持久化状态查询。
 func TestMCPSyncStatusPersistsProbeResult(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -273,6 +294,7 @@ func TestMCPSyncStatusPersistsProbeResult(t *testing.T) {
 	}
 }
 
+// TestAgentPairingRequiresRegisteredRuntime 验证 Agent 配对必须关联已登记运行时。
 func TestAgentPairingRequiresRegisteredRuntime(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -294,6 +316,7 @@ func TestAgentPairingRequiresRegisteredRuntime(t *testing.T) {
 	}
 }
 
+// TestAgentPluginAndSkillWritesRequireRuntime 验证插件和技能写入拒绝不存在的运行时。
 func TestAgentPluginAndSkillWritesRequireRuntime(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -307,6 +330,7 @@ func TestAgentPluginAndSkillWritesRequireRuntime(t *testing.T) {
 	}
 }
 
+// TestAIAgentCollectionQueriesUsePersistedState 验证 Agent 集合查询读取 SQLite 持久化状态。
 func TestAIAgentCollectionQueriesUsePersistedState(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -338,6 +362,7 @@ func TestAIAgentCollectionQueriesUsePersistedState(t *testing.T) {
 	}
 }
 
+// TestAgentResourceMutationsAndSessionLifecycle 验证 Agent 资源变更和会话生命周期接口。
 func TestAgentResourceMutationsAndSessionLifecycle(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -397,6 +422,7 @@ func TestAgentResourceMutationsAndSessionLifecycle(t *testing.T) {
 	}
 }
 
+// TestAIResourceOperationsRequireExistingResource 验证 AI 资源操作必须引用已存在资源。
 func TestAIResourceOperationsRequireExistingResource(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -417,6 +443,7 @@ func TestAIResourceOperationsRequireExistingResource(t *testing.T) {
 	}
 }
 
+// TestWorkMeshTaskRoutesUseIsolatedProvider 验证 WorkMesh 任务路由使用隔离任务提供器。
 func TestWorkMeshTaskRoutesUseIsolatedProvider(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	t.Setenv("WORKMESH_TASK_TOKEN", "task-token")

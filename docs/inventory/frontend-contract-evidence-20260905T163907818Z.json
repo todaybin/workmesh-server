@@ -1,0 +1,206 @@
+{
+  "schema": 1,
+  "generatedAt": "2026-09-05T16:39:07.818Z",
+  "baseURL": "http://127.0.0.1:9999",
+  "scope": "boundary",
+  "dryRun": false,
+  "authenticated": false,
+  "credentialSources": {
+    "token": false,
+    "cookie": false
+  },
+  "matrix": {
+    "file": "docs/inventory/frontend-http-ws-contract-matrix.json",
+    "sha256": "97d1a2bc2cb5ff4753251ebf3180f2610f0ba71140188a87ad3129d149af1851",
+    "sourceCaseCount": 389
+  },
+  "counts": {
+    "pass": 7
+  },
+  "results": [
+    {
+      "id": "boundary-health",
+      "protocol": "http",
+      "path": "/health",
+      "sourceStatus": "not-run",
+      "decision": {
+        "action": "run",
+        "reason": "unauthenticated-boundary"
+      },
+      "status": "pass",
+      "actualStatus": 200,
+      "statusText": "OK",
+      "requestPath": "/health",
+      "method": "GET",
+      "contentType": "application/json; charset=utf-8",
+      "responseSummary": "{\"code\":200,\"data\":{\"status\":\"ok\"}}",
+      "durationMs": 243,
+      "request": {
+        "headers": [],
+        "bodyKeys": []
+      },
+      "evidence": {
+        "recordedAt": "2026-09-05T16:39:08.080Z"
+      }
+    },
+    {
+      "id": "boundary-ready",
+      "protocol": "http",
+      "path": "/ready",
+      "sourceStatus": "not-run",
+      "decision": {
+        "action": "run",
+        "reason": "unauthenticated-boundary"
+      },
+      "status": "pass",
+      "actualStatus": 200,
+      "statusText": "OK",
+      "requestPath": "/ready",
+      "method": "GET",
+      "contentType": "application/json; charset=utf-8",
+      "responseSummary": "{\"code\":200,\"data\":{\"status\":\"ready\"}}",
+      "durationMs": 157,
+      "request": {
+        "headers": [],
+        "bodyKeys": []
+      },
+      "evidence": {
+        "recordedAt": "2026-09-05T16:39:08.237Z"
+      }
+    },
+    {
+      "id": "boundary-v2-health",
+      "protocol": "http",
+      "path": "/api/v2/health",
+      "sourceStatus": "not-run",
+      "decision": {
+        "action": "run",
+        "reason": "unauthenticated-boundary"
+      },
+      "status": "pass",
+      "actualStatus": 200,
+      "statusText": "OK",
+      "requestPath": "/api/v2/health",
+      "method": "GET",
+      "contentType": "application/json; charset=utf-8",
+      "responseSummary": "{\"code\":200,\"data\":{\"status\":\"ok\"}}",
+      "durationMs": 164,
+      "request": {
+        "headers": [],
+        "bodyKeys": []
+      },
+      "evidence": {
+        "recordedAt": "2026-09-05T16:39:08.401Z"
+      }
+    },
+    {
+      "id": "boundary-auth-setting",
+      "protocol": "http",
+      "path": "/api/v2/core/auth/setting",
+      "sourceStatus": "not-run",
+      "decision": {
+        "action": "run",
+        "reason": "unauthenticated-boundary"
+      },
+      "status": "pass",
+      "actualStatus": 200,
+      "statusText": "OK",
+      "requestPath": "/api/v2/core/auth/setting",
+      "method": "GET",
+      "contentType": "application/json; charset=utf-8",
+      "responseSummary": "{\"code\":200,\"data\":{\"mfa\":false,\"passkey\":false}}",
+      "durationMs": 163,
+      "request": {
+        "headers": [],
+        "bodyKeys": []
+      },
+      "evidence": {
+        "recordedAt": "2026-09-05T16:39:08.564Z"
+      }
+    },
+    {
+      "id": "boundary-auth-current",
+      "protocol": "http",
+      "path": "/api/v2/core/auth/current",
+      "sourceStatus": "not-run",
+      "decision": {
+        "action": "run",
+        "reason": "unauthenticated-boundary"
+      },
+      "status": "pass",
+      "actualStatus": 401,
+      "statusText": "Unauthorized",
+      "requestPath": "/api/v2/core/auth/current",
+      "method": "GET",
+      "contentType": "application/json; charset=utf-8",
+      "responseSummary": "{\"code\":\"ERR\",\"details\":{\"errCode\":\"LOCAL_AUTH_REQUIRED\"},\"message\":\"用户未登录: 需要有效的本地登录会话\"}",
+      "durationMs": 182,
+      "request": {
+        "headers": [],
+        "bodyKeys": []
+      },
+      "evidence": {
+        "recordedAt": "2026-09-05T16:39:08.746Z"
+      }
+    },
+    {
+      "id": "boundary-dashboard-unauthorized",
+      "protocol": "http",
+      "path": "/api/v2/dashboard/app/launcher",
+      "sourceStatus": "not-run",
+      "decision": {
+        "action": "run",
+        "reason": "unauthenticated-boundary"
+      },
+      "status": "pass",
+      "actualStatus": 401,
+      "statusText": "Unauthorized",
+      "requestPath": "/api/v2/dashboard/app/launcher",
+      "method": "GET",
+      "contentType": "application/json; charset=utf-8",
+      "responseSummary": "{\"code\":\"ERR\",\"details\":{\"errCode\":\"LOCAL_AUTH_REQUIRED\"},\"message\":\"用户未登录: 需要有效的本地登录会话\"}",
+      "durationMs": 158,
+      "request": {
+        "headers": [],
+        "bodyKeys": []
+      },
+      "evidence": {
+        "recordedAt": "2026-09-05T16:39:08.904Z"
+      }
+    },
+    {
+      "id": "boundary-ws-terminal-local",
+      "protocol": "ws",
+      "path": "/api/v2/hosts/terminal/local",
+      "sourceStatus": "not-run",
+      "decision": {
+        "action": "run",
+        "reason": "unauthenticated-boundary"
+      },
+      "status": "pass",
+      "actualStatus": 401,
+      "handshake": "HTTP/1.1 401 Unauthorized",
+      "requestPath": "/api/v2/hosts/terminal/local",
+      "durationMs": 157,
+      "request": {
+        "headers": [
+          "Host",
+          "Upgrade",
+          "Connection",
+          "Sec-WebSocket-*"
+        ]
+      },
+      "evidence": {
+        "recordedAt": "2026-09-05T16:39:09.062Z"
+      }
+    }
+  ],
+  "limitations": [
+    "本证据文件独立于矩阵，不回写 frontend-http-ws-contract-matrix.json。",
+    "无凭据只执行七条健康、认证边界和一个 WS 未授权握手；有凭据默认 WORKMESH_SCOPE=boundary，不会自动执行业务接口。",
+    "WORKMESH_SCOPE=read 需要 Token/Cookie；没有凭据时不会因为设置 read 而绕过 boundary 安全限制。",
+    "WORKMESH_SCOPE=fixtures 只执行有真实 fixture 的案例；需要请求体或动态路径的接口没有 fixture 时保持 blocked。",
+    "WORKMESH_SCOPE=all 除真实 fixture 外还需要 WORKMESH_CONFIRM_DESTRUCTIVE=YES；脚本不构造模拟业务数据。",
+    "WS 只验证 HTTP Upgrade 和关闭释放，不发送业务消息；终端/脚本等消息序列需要专用真实测试。"
+  ]
+}

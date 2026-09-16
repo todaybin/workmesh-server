@@ -5,6 +5,7 @@ package role
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/todaybin/workmesh-server/internal/storage"
 )
 
 const (
@@ -30,9 +34,10 @@ type State struct {
 
 // Manager 在进程内提供角色读取和安全切换的最小抽象。
 type Manager struct {
-	mu        sync.RWMutex
-	state     State
-	statePath string
+	mu         sync.RWMutex
+	state      State
+	statePath  string
+	repository storage.Transactional
 }
 
 // New 创建角色管理器并校验角色值。
@@ -63,6 +68,41 @@ func NewPersistent(nodeID, initialRole, statePath string) (*Manager, error) {
 	return manager, nil
 }
 
+// NewSQLite 创建使用共享 SQLite 保存角色和 fencing epoch 的管理器。
+func NewSQLite(db *sql.DB, nodeID, initialRole string) (*Manager, error) {
+	if db == nil {
+		return nil, errors.New("SQLite 数据库不能为空")
+	}
+	m, err := New(nodeID, initialRole)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS role_state (node_id TEXT PRIMARY KEY, role TEXT NOT NULL, role_epoch INTEGER NOT NULL, updated_at TEXT NOT NULL)`); err != nil {
+		return nil, err
+	}
+	repository, err := storage.NewSQLiteRepository(db)
+	if err != nil {
+		return nil, err
+	}
+	var roleName string
+	var epoch uint64
+	err = repository.QueryRow(`SELECT role,role_epoch FROM role_state WHERE node_id=?`, nodeID).Scan(&roleName, &epoch)
+	if err == nil {
+		if (roleName != Primary && roleName != Secondary) || epoch == 0 {
+			return nil, errors.New("角色 SQLite 状态无效")
+		}
+		m.state.Role, m.state.RoleEpoch = roleName, epoch
+	} else if errors.Is(err, sql.ErrNoRows) {
+		if _, err := repository.Exec(`INSERT INTO role_state(node_id,role,role_epoch,updated_at) VALUES(?,?,?,?)`, nodeID, initialRole, 1, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, err
+	}
+	m.repository = repository
+	return m, nil
+}
+
 // State 返回当前角色快照。
 func (m *Manager) State(context.Context) State { m.mu.RLock(); defer m.mu.RUnlock(); return m.state }
 
@@ -89,6 +129,12 @@ func (m *Manager) Switch(ctx context.Context, expectedEpoch uint64, target strin
 		if err := m.persistLocked(); err != nil {
 			m.state = previous
 			return State{}, fmt.Errorf("保存角色状态失败: %w", err)
+		}
+	}
+	if m.repository != nil {
+		if _, err := m.repository.ExecContext(ctx, `UPDATE role_state SET role=?,role_epoch=?,updated_at=? WHERE node_id=? AND role_epoch=?`, m.state.Role, m.state.RoleEpoch, time.Now().UTC().Format(time.RFC3339Nano), m.state.NodeID, previous.RoleEpoch); err != nil {
+			m.state = previous
+			return State{}, fmt.Errorf("保存角色 SQLite 状态失败: %w", err)
 		}
 	}
 	return m.state, nil

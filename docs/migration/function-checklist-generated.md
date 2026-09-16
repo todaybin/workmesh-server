@@ -3,6 +3,8 @@
 
 # WorkMesh 功能迁移逐路由清单
 
+> Historical artifact：本文件由 2026-08-31 的旧迁移扫描生成，原始基线为已废弃的 `apps/workmesh-node`，仅保留作历史证据，不作为当前接口基线或发布验收依据。当前扫描必须使用只读参考 `/www/apps/1Panel`，并可通过 `implementation-scan.mjs --markdown` 重新生成本文件。
+
 基线来源：旧 `apps/workmesh-node/core` 与 `agent` 全源码，生成时间：2026-08-31T03:01:02.005Z。
 共 871 条接口：implemented 871。
 

@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import crypto from 'node:crypto';
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'Any'];
 // 旧产品文档入口去掉品牌前缀，契约统一映射为无品牌的 /swagger 路径。
@@ -127,10 +128,19 @@ function scanFile(file, area, base = area === 'core' ? '/api/v2/core' : '/api/v2
   return routes;
 }
 
+// readPrivateBase 从实际入口读取私有组前缀，不推测原系统路由版本。
+function readPrivateBase(legacyRoot, area) {
+  const file = path.join(legacyRoot, area, 'init', 'router', 'router.go');
+  const source = fs.readFileSync(file, 'utf8');
+  const match = source.match(/PrivateGroup\s*:=\s*Router\.Group\(\s*"([^"]+)"\s*\)/);
+  if (!match) throw new Error(`无法确认原始路由前缀: ${file}`);
+  return match[1];
+}
+
 function scanLegacy(legacyRoot) {
   const roots = [
-    ['core', path.join(legacyRoot, 'core', 'router'), '/api/v2/core'],
-    ['agent', path.join(legacyRoot, 'agent', 'router'), '/api/v2'],
+    ['core', path.join(legacyRoot, 'core', 'router'), readPrivateBase(legacyRoot, 'core')],
+    ['agent', path.join(legacyRoot, 'agent', 'router'), readPrivateBase(legacyRoot, 'agent')],
     // 健康、静态资源和前端入口在 init/router 中注册，也必须纳入完整基线。
     ['core', path.join(legacyRoot, 'core', 'init', 'router'), '/'],
     ['agent', path.join(legacyRoot, 'agent', 'init', 'router'), '/'],
@@ -154,8 +164,13 @@ function scanLegacy(legacyRoot) {
   }
   const unique = new Map(routes.map((route) => [`${route.method} ${route.path}`, route]));
   return [...unique.values()].map((route) => {
-    if (route.path === `/${legacySwaggerSegment}/swagger/*any`) return { ...route, path: '/swagger/*any' };
-    return route;
+    const originalPath = route.path;
+    const normalized = originalPath === `/${legacySwaggerSegment}/swagger/*any`
+      ? '/swagger/*any' : originalPath.replace(/^\/api\/v1(?=\/|$)/, '/api/v2');
+    const originalVersion = originalPath.match(/^\/api\/(v\d+)(?:\/|$)/)?.[1] ?? null;
+    const sourceSHA256 = crypto.createHash('sha256').update(fs.readFileSync(path.resolve(route.source))).digest('hex');
+    return { ...route, path: normalized, originalPath, originalVersion, sourceSHA256,
+      versionMigration: originalVersion === 'v1' ? 'v1-to-v2' : 'unchanged', status: 'not-run' };
   }).sort((a, b) => `${a.method} ${a.path}`.localeCompare(`${b.method} ${b.path}`));
 }
 
@@ -167,8 +182,8 @@ function scanNew(projectRoot) {
 }
 
 function usage() {
-  console.error('用法: node route-scan.mjs generate --legacy <apps/workmesh-node> --out <routes.json>');
-  console.error('      node route-scan.mjs check --legacy <apps/workmesh-node> --project <apps/workmesh-server> --manifest <routes.json>');
+	console.error('用法: node route-scan.mjs generate --legacy </www/apps/1Panel> --out <route-inventory.json>');
+	console.error('      node route-scan.mjs check --legacy </www/apps/1Panel> --project </www/apps/workmesh-server> --manifest <route-inventory.json>');
 }
 
 const [command, ...args] = process.argv.slice(2);
@@ -182,16 +197,24 @@ if (!['generate', 'check'].includes(command)) {
   process.exit(2);
 }
 
-const legacyRoot = path.resolve(option('--legacy', path.resolve(process.cwd(), '../workmesh-node')));
+// 1Panel 是只读业务参考；旧 apps/workmesh-node 已废弃，不再作为兼容基线。
+const legacyRoot = path.resolve(option('--legacy', '/www/apps/1Panel'));
 if (command === 'generate') {
-  const output = path.resolve(option('--out', path.join(process.cwd(), 'routes.json')));
+	const output = path.resolve(option('--out', path.join(process.cwd(), 'docs/inventory/route-inventory-1panel.json')));
+  // `--legacy` is a read-only reference tree. Never allow a generated
+  // manifest to be written inside it, even when a caller passes an unsafe
+  // relative output path by mistake.
+  const relativeOutput = path.relative(legacyRoot, output);
+  if (relativeOutput === '' || (!relativeOutput.startsWith('..' + path.sep) && relativeOutput !== '..' && !path.isAbsolute(relativeOutput))) {
+    throw new Error(`禁止向只读参考目录写入路由清单: ${output}`);
+  }
   const routes = scanLegacy(legacyRoot);
   if (routes.length === 0) throw new Error(`未发现旧路由: ${legacyRoot}`);
-  fs.writeFileSync(output, `${JSON.stringify({ schema: 1, generatedFrom: 'apps/workmesh-node', routeCount: routes.length, routes }, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(output, `${JSON.stringify({ schema: 1, generatedFrom: legacyRoot, sourceArea: 'core/router,agent/router,core/init/router,agent/init/router', routeCount: routes.length, routes }, null, 2)}\n`, 'utf8');
   console.log(`已生成 ${routes.length} 条路由清单: ${output}`);
 } else {
   const projectRoot = path.resolve(option('--project', process.cwd()));
-  const manifestPath = path.resolve(option('--manifest', path.join(process.cwd(), 'routes.json')));
+	const manifestPath = path.resolve(option('--manifest', path.join(process.cwd(), 'docs/inventory/route-inventory-1panel.json')));
   if (!fs.existsSync(manifestPath)) throw new Error(`清单不存在: ${manifestPath}`);
   const expected = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).routes ?? [];
   const actual = new Set(scanNew(projectRoot).map((route) => `${route.method} ${route.path}`));

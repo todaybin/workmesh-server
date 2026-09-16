@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,11 @@ func SetSharedStore(store *storage.Store) error {
 	db := store.DB()
 	if err := initializeRuntimePersistence(db, os.Getenv("WORKMESH_DATA_DIR")); err != nil {
 		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := storage.ApplyMigrations(ctx, db, []storage.Migration{LogsSchemaMigration()}); err != nil {
+		return fmt.Errorf("初始化日志 SQLite 存储失败: %w", err)
 	}
 	if err := ensureControlTables(db); err != nil {
 		return err
@@ -54,6 +60,18 @@ func sharedDB() *sql.DB {
 	return controlStoreDB
 }
 
+// SharedDatabase 返回进程共享 SQLite 连接，供控制面注册其数据库仓储。
+func SharedDatabase() *sql.DB { return sharedDB() }
+
+// SharedRepository 返回进程共享 SQLite repository，供跨包运行时查询使用。
+func SharedRepository() (storage.Transactional, error) {
+	db := sharedDB()
+	if db == nil {
+		return nil, errors.New("公共数据库连接未初始化")
+	}
+	return storage.NewSQLiteRepository(db)
+}
+
 // resetSharedStoreForTest 清理包级测试注入，避免已关闭连接污染后续用例。
 func resetSharedStoreForTest() {
 	controlStoreMu.Lock()
@@ -76,10 +94,12 @@ func ensureControlTables(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS docker_settings (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS node_hosts (id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL, port INTEGER NOT NULL, user_name TEXT NOT NULL DEFAULT '', group_id INTEGER NOT NULL DEFAULT 0, payload BLOB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS idx_node_hosts_group_name ON node_hosts(group_id, name, id)`,
+		`CREATE TABLE IF NOT EXISTS node_ssh_certs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, encryption_mode TEXT NOT NULL, pass_phrase TEXT NOT NULL DEFAULT '', public_key_path TEXT NOT NULL, private_key_path TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS idx_node_ssh_certs_name ON node_ssh_certs(name)`,
 		`CREATE TABLE IF NOT EXISTS node_quick_commands (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'command', command TEXT NOT NULL, group_id INTEGER NOT NULL DEFAULT 0, group_belong TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', payload BLOB NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS idx_node_quick_commands_type_name ON node_quick_commands(type, name, id)`,
 		`CREATE TABLE IF NOT EXISTS node_settings (setting_key TEXT PRIMARY KEY, payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
-		`CREATE TABLE IF NOT EXISTS databases (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, version TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'local', app_install_id INTEGER NOT NULL DEFAULT 0, address TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL DEFAULT 0, initial_db TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', password TEXT NOT NULL DEFAULT '', ssl INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS databases (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, type TEXT NOT NULL, version TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'local', app_install_id INTEGER NOT NULL DEFAULT 0, container_name TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL DEFAULT 0, initial_db TEXT NOT NULL DEFAULT '', username TEXT NOT NULL DEFAULT '', password TEXT NOT NULL DEFAULT '', ssl INTEGER NOT NULL DEFAULT 0, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_databases_type_name ON databases(type, name)`,
 		`CREATE INDEX IF NOT EXISTS idx_databases_app_install ON databases(app_install_id)`,
 		`CREATE TABLE IF NOT EXISTS database_operations (id TEXT PRIMARY KEY, type TEXT NOT NULL, target TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
@@ -90,20 +110,37 @@ func ensureControlTables(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS database_users (id INTEGER PRIMARY KEY AUTOINCREMENT, database_id INTEGER NOT NULL DEFAULT 0, database_name TEXT NOT NULL, type TEXT NOT NULL DEFAULT '', username TEXT NOT NULL, host TEXT NOT NULL DEFAULT '%', description TEXT NOT NULL DEFAULT '', password_set INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_users_identity ON database_users(database_name,username,host)`,
 		`CREATE INDEX IF NOT EXISTS idx_database_users_database ON database_users(database_name,id)`,
-		`CREATE TABLE IF NOT EXISTS database_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, database_name TEXT NOT NULL, username TEXT NOT NULL, host TEXT NOT NULL DEFAULT '%', privileges BLOB NOT NULL DEFAULT '[]')`,
+		`CREATE TABLE IF NOT EXISTS database_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL DEFAULT '', database_name TEXT NOT NULL, username TEXT NOT NULL, host TEXT NOT NULL DEFAULT '%', privileges BLOB NOT NULL DEFAULT '[]')`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_grants_identity ON database_grants(database_name,username,host)`,
 		`CREATE INDEX IF NOT EXISTS idx_database_grants_database ON database_grants(database_name,id)`,
 		`CREATE TABLE IF NOT EXISTS database_variables (database_name TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(database_name,name))`,
 		`CREATE TABLE IF NOT EXISTS database_configs (database_name TEXT PRIMARY KEY, content BLOB NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS database_runtime_configs (database_name TEXT NOT NULL, config_key TEXT NOT NULL, content BLOB NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(database_name,config_key))`,
 		`CREATE TABLE IF NOT EXISTS script_library (id TEXT PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', approved INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS ai_state (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS file_aux_state (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS file_shares_state (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS functional_domain_state (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS docker_port_guard_state (id INTEGER PRIMARY KEY CHECK(id=1), payload BLOB NOT NULL, updated_at TEXT NOT NULL)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("初始化公共控制面表失败: %w", err)
+		}
+	}
+	if err := service.EnsureDatabaseContainerNameColumn(db); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`ALTER TABLE database_grants ADD COLUMN server_name TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return fmt.Errorf("升级数据库授权表失败: %w", err)
+	}
+	for _, stmt := range []string{
+		`DROP INDEX IF EXISTS idx_database_grants_identity`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_grants_server_identity ON database_grants(server_name,database_name,username,host)`,
+		`CREATE INDEX IF NOT EXISTS idx_database_grants_server_database ON database_grants(server_name,database_name,id)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("初始化数据库授权索引失败: %w", err)
 		}
 	}
 	return nil
@@ -143,38 +180,38 @@ func importLegacyControlState(db *sql.DB) error {
 }
 
 func loadJSONState(table string, target any) bool {
-	db := sharedDB()
-	if db == nil {
+	repository, err := SharedRepository()
+	if err != nil {
 		return false
 	}
 	var payload []byte
-	if err := db.QueryRowContext(context.Background(), "SELECT payload FROM "+table+" WHERE id=1").Scan(&payload); err != nil {
+	if err := repository.QueryRowContext(context.Background(), "SELECT payload FROM "+table+" WHERE id=1").Scan(&payload); err != nil {
 		return false
 	}
 	return json.Unmarshal(payload, target) == nil
 }
 
 func saveJSONState(table string, value any) error {
-	db := sharedDB()
-	if db == nil {
-		return nil
+	repository, err := SharedRepository()
+	if err != nil {
+		return err
 	}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec("INSERT INTO "+table+"(id,payload,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at", payload, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err = repository.ExecContext(context.Background(), "INSERT INTO "+table+"(id,payload,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at", payload, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
 }
 
 // LoadSecuritySettings 从共享功能域状态读取安全策略，供最外层 HTTP 中间件使用。
 func LoadSecuritySettings() map[string]any {
-	db := sharedDB()
-	if db == nil {
+	repository, err := SharedRepository()
+	if err != nil {
 		return nil
 	}
 	var payload []byte
-	if err := db.QueryRow(`SELECT payload FROM functional_domain_state WHERE id=1`).Scan(&payload); err != nil {
+	if err := repository.QueryRow(`SELECT payload FROM functional_domain_state WHERE id=1`).Scan(&payload); err != nil {
 		return nil
 	}
 	var document struct {
@@ -187,88 +224,82 @@ func LoadSecuritySettings() map[string]any {
 }
 
 func loadNodeSetting(key string, target any) bool {
-	db := sharedDB()
-	if db == nil {
+	repository, err := SharedRepository()
+	if err != nil {
 		return false
 	}
 	var payload []byte
-	if err := db.QueryRow("SELECT payload FROM node_settings WHERE setting_key = ?", key).Scan(&payload); err != nil {
+	if err := repository.QueryRow("SELECT payload FROM node_settings WHERE setting_key = ?", key).Scan(&payload); err != nil {
 		return false
 	}
 	return json.Unmarshal(payload, target) == nil
 }
 
 func saveNodeSetting(key string, value any) error {
-	db := sharedDB()
-	if db == nil {
-		return errors.New("公共数据库未初始化")
+	repository, err := SharedRepository()
+	if err != nil {
+		return err
 	}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec("INSERT INTO node_settings(setting_key,payload,updated_at) VALUES(?,?,?) ON CONFLICT(setting_key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at", key, payload, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err = repository.ExecContext(context.Background(), "INSERT INTO node_settings(setting_key,payload,updated_at) VALUES(?,?,?) ON CONFLICT(setting_key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at", key, payload, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
 }
 
 func persistContainerRelational(state containerState) error {
-	db := sharedDB()
-	if db == nil {
+	repository, err := SharedRepository()
+	if err != nil {
 		return nil
 	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.Exec("DELETE FROM container_compose_projects"); err != nil {
-		return err
-	}
-	for _, item := range state.Composes {
-		if _, err = tx.Exec(`INSERT OR REPLACE INTO container_compose_projects(id,name,path,app_install_id,project_name,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, item.ID, item.Name, item.Path, item.AppInstallID, filepath.Base(filepath.Dir(item.Path)), boolInt(item.Pinned), item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	return repository.WithTx(context.Background(), func(tx storage.SQLExecutor) error {
+		if _, err := tx.Exec("DELETE FROM container_compose_projects"); err != nil {
 			return err
 		}
-	}
-	if _, err = tx.Exec("DELETE FROM image_repositories"); err != nil {
-		return err
-	}
-	for _, item := range state.Repositories {
-		if _, err = tx.Exec(`INSERT OR REPLACE INTO image_repositories(id,name,download_url,protocol,username,password,auth,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, item.ID, item.Name, item.DownloadURL, item.Protocol, item.Username, item.Password, boolInt(item.Auth), item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		for _, item := range state.Composes {
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO container_compose_projects(id,name,path,app_install_id,project_name,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, item.ID, item.Name, item.Path, item.AppInstallID, filepath.Base(filepath.Dir(item.Path)), boolInt(item.Pinned), item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec("DELETE FROM image_repositories"); err != nil {
 			return err
 		}
-	}
-	if _, err = tx.Exec("DELETE FROM compose_templates"); err != nil {
-		return err
-	}
-	for _, item := range state.Templates {
-		if _, err = tx.Exec(`INSERT OR REPLACE INTO compose_templates(id,name,description,content,created_at,updated_at) VALUES(?,?,?,?,?,?)`, item.ID, item.Name, item.Description, item.Content, item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		for _, item := range state.Repositories {
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO image_repositories(id,name,download_url,protocol,username,password,auth,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, item.ID, item.Name, item.DownloadURL, item.Protocol, item.Username, item.Password, boolInt(item.Auth), item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec("DELETE FROM compose_templates"); err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		for _, item := range state.Templates {
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO compose_templates(id,name,description,content,created_at,updated_at) VALUES(?,?,?,?,?,?)`, item.ID, item.Name, item.Description, item.Content, item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func persistAppRelational(state appStoreState) error {
-	db := sharedDB()
-	if db == nil {
+	repository, err := SharedRepository()
+	if err != nil {
 		return nil
 	}
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, item := range state.Apps {
-		config, _ := json.Marshal(item.Config)
-		now := item.UpdatedAt.UTC().Format(time.RFC3339Nano)
-		if now == "0001-01-01T00:00:00Z" {
-			now = time.Now().UTC().Format(time.RFC3339Nano)
+	return repository.WithTx(context.Background(), func(tx storage.SQLExecutor) error {
+		for _, item := range state.Apps {
+			config, _ := json.Marshal(item.Config)
+			now := item.UpdatedAt.UTC().Format(time.RFC3339Nano)
+			if now == "0001-01-01T00:00:00Z" {
+				now = time.Now().UTC().Format(time.RFC3339Nano)
+			}
+			if _, err := tx.Exec(`INSERT INTO app_installs(id,app_key,name,version,status,install_path,compose_path,compose_project,container_names,config_json,message,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET app_key=excluded.app_key,name=excluded.name,version=excluded.version,status=excluded.status,install_path=excluded.install_path,compose_path=excluded.compose_path,container_names=excluded.container_names,config_json=excluded.config_json,message=excluded.message,updated_at=excluded.updated_at`, item.ID, item.Key, item.Name, item.Version, item.Status, appInstallPath(item), appComposePath(item), appValue(item.Config, "composeProject", "projectName"), item.ContainerName, config, item.Message, now, now); err != nil {
+				return err
+			}
 		}
-		if _, err = tx.Exec(`INSERT INTO app_installs(id,app_key,name,version,status,install_path,compose_path,compose_project,container_names,config_json,message,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET app_key=excluded.app_key,name=excluded.name,version=excluded.version,status=excluded.status,install_path=excluded.install_path,compose_path=excluded.compose_path,container_names=excluded.container_names,config_json=excluded.config_json,message=excluded.message,updated_at=excluded.updated_at`, item.ID, item.Key, item.Name, item.Version, item.Status, appInstallPath(item), appComposePath(item), appValue(item.Config, "composeProject", "projectName"), item.ContainerName, config, item.Message, now, now); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+		return nil
+	})
 }
 
 func boolInt(value bool) int {

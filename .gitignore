@@ -1,9 +1,12 @@
 # WorkMesh Server 本地忽略规则
 .cache/
 .tmp/
+.build/
 data/
 .workmesh-data/
 *.exe
 *.test
 web/node_modules/
 web/dist/
+internal/webassets/dist/*
+!internal/webassets/dist/.keep

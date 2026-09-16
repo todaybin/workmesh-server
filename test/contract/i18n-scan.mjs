@@ -16,8 +16,9 @@ for (let index = 2; index < process.argv.length; index += 1) {
   if (argument.startsWith('--')) args.set(argument, process.argv[index + 1] ?? true);
 }
 
-const legacyRoot = path.resolve(args.get('--legacy') || 'apps/workmesh-node');
-const projectRoot = path.resolve(args.get('--project') || 'apps/workmesh-server');
+// 1Panel 是只读语言包参考；旧 apps/workmesh-node 已废弃。
+const legacyRoot = path.resolve(args.get('--legacy') || '/www/apps/1Panel');
+const projectRoot = path.resolve(args.get('--project') || '/www/apps/workmesh-server');
 const write = args.has('--write');
 const localeManifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'i18n', 'locales.json'), 'utf8'));
 const locales = localeManifest.locales.map((entry) => entry.code);

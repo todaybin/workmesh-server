@@ -202,21 +202,19 @@ const search = async () => {
     loading.value = true;
     const res = await getAntiLeech({ websiteID: id.value });
     loading.value = false;
-    if (!res.data.enable && !res.data.cache) {
-        return;
-    }
+    if (!res.data) return;
     resData.value = res.data;
-    form.blocked = res.data.blocked;
-    form.cache = res.data.cache;
-    form.enable = res.data.enable;
+    form.blocked = res.data.blocked ?? false;
+    form.cache = res.data.cache ?? false;
+    form.enable = res.data.enable ?? res.data.enabled ?? false;
     if (res.data.cache) {
         form.cacheTime = res.data.cacheTime;
         form.cacheUint = res.data.cacheUint;
     }
-    form.extends = res.data.extends;
-    form.return = res.data.return;
-    form.logEnable = res.data.logEnable;
-    form.noneRef = res.data.noneRef;
+    form.extends = res.data.extends ?? form.extends;
+    form.return = res.data.return ?? form.return;
+    form.logEnable = res.data.logEnable ?? false;
+    form.noneRef = res.data.noneRef ?? true;
 
     const serverNames = res.data.serverNames;
     let serverNameStr = '';

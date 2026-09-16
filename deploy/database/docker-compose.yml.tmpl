@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 WorkMesh contributors
+
+# Copy this template to a private runtime directory before use.
+# Required secret files are documented in deploy/database/README.md.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: workmesh-panel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${WORKMESH_POSTGRES_DB:-workmesh}
+      POSTGRES_USER: ${WORKMESH_POSTGRES_USER:-workmesh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - workmesh-panel-db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  redis:
+    image: redis:8-alpine
+    container_name: workmesh-panel-redis
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        password="$$(cat /run/secrets/redis_password)"
+        exec redis-server --appendonly yes --requirepass "$$password"
+    secrets:
+      - redis_password
+    volumes:
+      - redis_data:/data
+    networks:
+      - workmesh-panel-db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          REDISCLI_AUTH="$$(cat /run/secrets/redis_password)"
+          redis-cli --no-auth-warning ping | grep -q '^PONG$$'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  mariadb:
+    image: mariadb:11
+    container_name: workmesh-panel-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${WORKMESH_MARIADB_DATABASE:-workmesh}
+      MARIADB_USER: ${WORKMESH_MARIADB_USER:-workmesh}
+      MARIADB_PASSWORD_FILE: /run/secrets/mariadb_password
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+    secrets:
+      - mariadb_password
+      - mariadb_root_password
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - workmesh-panel-db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          password="$$(cat /run/secrets/mariadb_root_password)" &&
+          mariadb-admin ping -h 127.0.0.1 -u root
+          --password="$$password" --silent
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+secrets:
+  postgres_password:
+    file: ${WORKMESH_DB_SECRETS_DIR:-./secrets}/postgres_password
+  redis_password:
+    file: ${WORKMESH_DB_SECRETS_DIR:-./secrets}/redis_password
+  mariadb_password:
+    file: ${WORKMESH_DB_SECRETS_DIR:-./secrets}/mariadb_password
+  mariadb_root_password:
+    file: ${WORKMESH_DB_SECRETS_DIR:-./secrets}/mariadb_root_password
+
+volumes:
+  postgres_data:
+    name: workmesh-panel-postgres-data
+  redis_data:
+    name: workmesh-panel-redis-data
+  mariadb_data:
+    name: workmesh-panel-mariadb-data
+
+networks:
+  workmesh-panel-db:
+    name: workmesh-panel-db
+    internal: true

@@ -3,6 +3,8 @@
 
 # 2026-08-30 运行验收批次十
 
+> Historical record：本文记录历史部署批次。旧 `apps/workmesh-node` 命令仅保留作当时的执行证据，不得直接复用；当前路由、实现和隐藏能力扫描统一使用只读参考 `/www/apps/1Panel`。
+
 ## 本地服务
 
 - 启动方式：`WORKMESH_SERVER_ADDR=127.0.0.1:9999 WORKMESH_DATA_DIR=.tmp/local-run go run ./cmd/workmesh-server`

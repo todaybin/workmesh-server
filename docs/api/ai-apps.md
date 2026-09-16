@@ -58,7 +58,7 @@
 
 ```powershell
 node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='off'; Set-Location apps/workmesh-server; go test ./node/api -run 'AI|App'"
-node apps/workmesh-server/test/contract/implementation-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --out apps/workmesh-server/.tmp/implementation-status.json
+node /www/apps/workmesh-server/test/contract/implementation-scan.mjs --legacy /www/apps/1Panel --project /www/apps/workmesh-server --manifest /www/apps/workmesh-server/docs/inventory/route-inventory-1panel.json --out /www/apps/workmesh-server/.tmp/implementation-status.json
 ```
 
 验收必须检查：创建/更新后重新建立路由实例仍能读取状态；敏感字段不回显；应用图标的 Content-Type 为 `image/png`；无 GPU/KVM 主机返回明确降级状态而非 501。

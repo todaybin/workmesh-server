@@ -12,7 +12,12 @@
             </el-tooltip>
         </template>
         <template #content>
-            <ContainerLog :container="config.container" :highlightDiff="highlightDiff" />
+            <ContainerLog
+                v-if="logVisible"
+                :container="config.container"
+                :highlightDiff="highlightDiff"
+                :defaultFollow="true"
+            />
         </template>
         <template #footer>
             <span class="dialog-footer">

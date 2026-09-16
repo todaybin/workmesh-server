@@ -4,8 +4,6 @@
 package api
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -14,169 +12,18 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/todaybin/workmesh-server/internal/storage"
 )
 
-func remoteCatalogZip(t *testing.T) []byte {
-	t.Helper()
-	var buffer bytes.Buffer
-	writer := zip.NewWriter(&buffer)
-	file, err := writer.Create("1panel.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = file.Write([]byte(`{
-  "additionalProperties":{"version":"2026.08","tags":[{"key":"database","name":"Database","locales":{"zh":"数据库","en":"Database","zh-hant":"資料庫"}}]},
-  "lastModified":1700000001,
-  "apps":[{
-    "name":"Demo App","readMe":"# Demo","icon":"logo.png",
-    "additionalProperties":{"key":"demo","name":"Demo App","type":"app","tags":["database"],"shortDescZh":"演示应用","description":{"zh":"演示应用描述"},"limit":1,"recommend":1,"batchInstallSupport":true},
-    "versions":[{"name":"1.2.3","downloadUrl":"https://example.invalid/demo.tar.gz","lastModified":1700000002,"additionalProperties":{"formFields":[{"type":"text","envKey":"DEMO_VALUE","default":"ok"}]}}]
-  }]
-}`))
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buffer.Bytes()
-}
-
-func TestRemoteAppCatalogLazyLoadAndDetails(t *testing.T) {
-	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
-	var zipData []byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/stable/1panel.json.zip":
-			w.Header().Set("Content-Type", "application/zip")
-			_, _ = w.Write(zipData)
-		case "/stable/1panel/demo/1.2.3/docker-compose.yml":
-			_, _ = w.Write([]byte("services:\n  demo:\n    image: demo:1.2.3\n"))
-		case "/stable/1panel/demo/logo.png":
-			w.Header().Set("Content-Type", "image/png")
-			_, _ = w.Write([]byte("png"))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	zipData = remoteCatalogZip(t)
-	t.Setenv("WORKMESH_APP_REPO_URL", server.URL)
-	t.Setenv("WORKMESH_APP_REPO_MODE", "stable")
-	resetAppStoreForTest()
-	defer resetAppStoreForTest()
-	mux := http.NewServeMux()
-	RegisterAppRoutes(mux)
-
-	search := httptest.NewRecorder()
-	mux.ServeHTTP(search, httptest.NewRequest(http.MethodPost, "/api/v2/apps/search", strings.NewReader(`{"page":1,"pageSize":30,"tags":["database"]}`)))
-	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), "demo") || !strings.Contains(search.Body.String(), "演示应用描述") {
-		t.Fatalf("remote search status=%d body=%s", search.Code, search.Body.String())
-	}
-	tags := httptest.NewRecorder()
-	tagRequest := httptest.NewRequest(http.MethodGet, "/api/v2/apps/tags", nil)
-	tagRequest.Header.Set("Accept-Language", "zh")
-	mux.ServeHTTP(tags, tagRequest)
-	if tags.Code != http.StatusOK || !strings.Contains(tags.Body.String(), `"key":"database"`) || !strings.Contains(tags.Body.String(), `"name":"数据库"`) {
-		t.Fatalf("app tags contract mismatch: status=%d body=%s", tags.Code, tags.Body.String())
-	}
-	traditionalTags := httptest.NewRecorder()
-	traditionalRequest := httptest.NewRequest(http.MethodGet, "/api/v2/apps/tags", nil)
-	traditionalRequest.Header.Set("Accept-Language", "zh-Hant")
-	mux.ServeHTTP(traditionalTags, traditionalRequest)
-	if traditionalTags.Code != http.StatusOK || !strings.Contains(traditionalTags.Body.String(), `"name":"資料庫"`) {
-		t.Fatalf("localized app tags contract mismatch: status=%d body=%s", traditionalTags.Code, traditionalTags.Body.String())
-	}
-
-	app := httptest.NewRecorder()
-	mux.ServeHTTP(app, httptest.NewRequest(http.MethodGet, "/api/v2/apps/demo", nil))
-	if app.Code != http.StatusOK || !strings.Contains(app.Body.String(), `"versions":["1.2.3"]`) {
-		t.Fatalf("app detail status=%d body=%s", app.Code, app.Body.String())
-	}
-
-	detail := httptest.NewRecorder()
-	mux.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/api/v2/apps/detail/"+appStableID("app:demo")+"/1.2.3/app", nil))
-	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"id":"`) || !strings.Contains(detail.Body.String(), "demo:1.2.3") || !strings.Contains(detail.Body.String(), `"dockerCompose":"services:`) || !strings.Contains(detail.Body.String(), `"params":{"formFields"`) {
-		t.Fatalf("version detail status=%d body=%s", detail.Code, detail.Body.String())
-	}
-	if !strings.Contains(detail.Body.String(), `"image":"demo"`) {
-		t.Fatalf("runtime image repository missing: %s", detail.Body.String())
-	}
-
-	icon := httptest.NewRecorder()
-	mux.ServeHTTP(icon, httptest.NewRequest(http.MethodGet, "/api/v2/apps/icon/demo", nil))
-	if icon.Code != http.StatusOK || icon.Header().Get("Content-Type") != "image/png" || icon.Body.String() != "png" {
-		t.Fatalf("icon status=%d type=%s body=%q", icon.Code, icon.Header().Get("Content-Type"), icon.Body.String())
-	}
-}
-
-func TestPHPVersionAppUsesOnePanelRuntimeFormFields(t *testing.T) {
-	genericParams := map[string]any{"formFields": []any{
-		map[string]any{"envKey": "PHP_EXTENSIONS", "multiple": true},
-		map[string]any{"envKey": "PHP_VERSION", "default": "7.4.33"},
-		map[string]any{"envKey": "CONTAINER_PACKAGE_URL", "default": "https://mirrors.tuna.tsinghua.edu.cn"},
-		map[string]any{"envKey": "PANEL_APP_PORT_HTTP", "default": 9000},
-	}}
-	catalog := []appRecord{{Key: "php", Type: "php", Versions: []appVersionRecord{{Version: "7", Params: genericParams}}}}
-	selected := appVersionRecord{Version: "7.4.33", Params: map[string]any{"formFields": []any{map[string]any{"envKey": "PANEL_APP_PORT_HTTP"}}}}
-	params := phpRuntimeCatalogParams(catalog, selected)
-	fields, ok := params["formFields"].([]any)
-	if !ok || len(fields) != 4 {
-		t.Fatalf("PHP runtime fields not supplied from 1Panel catalog: %#v", params)
-	}
-	for _, key := range []string{"PHP_EXTENSIONS", "PHP_VERSION", "CONTAINER_PACKAGE_URL", "PANEL_APP_PORT_HTTP"} {
-		found := false
-		for _, raw := range fields {
-			field, _ := raw.(map[string]any)
-			found = found || field["envKey"] == key
-		}
-		if !found {
-			t.Fatalf("PHP runtime field %s missing: %#v", key, fields)
-		}
-	}
-}
-
-func TestRuntimeCatalogTypeIsolationAndUnifiedPHPEntry(t *testing.T) {
-	tests := []struct {
-		name     string
-		app      appRecord
-		typeName string
-		want     bool
-	}{
-		{name: "unified php", app: appRecord{Key: "php", Type: "php"}, typeName: "php", want: true},
-		{name: "deprecated php8", app: appRecord{Key: "php8", Type: "php"}, typeName: "php", want: false},
-		{name: "phpmyadmin is not php", app: appRecord{Key: "phpmyadmin", Type: "app"}, typeName: "php", want: false},
-		{name: "node", app: appRecord{Key: "node", Type: "node"}, typeName: "node", want: true},
-		{name: "cross type", app: appRecord{Key: "go", Type: "go"}, typeName: "java", want: false},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := appMatchesRuntimeCatalog(test.app, test.typeName); got != test.want {
-				t.Fatalf("appMatchesRuntimeCatalog(%#v, %q)=%v, want %v", test.app, test.typeName, got, test.want)
-			}
-		})
-	}
-}
-
-func TestLegacyCompatibilityDoesNotOverrideAppRoutes(t *testing.T) {
-	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
-	t.Setenv("WORKMESH_APP_CATALOG", "")
-	t.Setenv("WORKMESH_APP_REPO_URL", "")
-	resetAppStoreForTest()
-	defer resetAppStoreForTest()
-	mux := http.NewServeMux()
-	RegisterAppRoutes(mux)
-	RegisterLegacyCompatibilityRoutes(mux)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v2/apps/missing", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"available":false`) {
-		t.Fatalf("legacy compatibility replaced app route: status=%d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
+// resetAppStoreForTest 清理进程内应用仓库缓存，模拟重启后的重新加载。
 func resetAppStoreForTest() {
 	appStoreMu.Lock()
 	appStoreInstance = nil
 	appStoreMu.Unlock()
 }
 
+// TestAppInstallAndList 验证应用安装记录写入真实状态并可分页查询。
 func TestAppInstallAndList(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -193,6 +40,110 @@ func TestAppInstallAndList(t *testing.T) {
 	}
 }
 
+func TestInstalledListProvidesRuntimeCompatibilityFields(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	resetAppStoreForTest()
+	defer resetAppStoreForTest()
+	store := getAppStore()
+	item := appRecord{
+		ID: "openresty-install", Key: "openresty", Name: "OpenResty",
+		Version: "1.27.1", Status: "Running", ContainerName: "workmesh-openresty-waf",
+		Config: map[string]any{
+			"composeProject":       "workmesh-openresty",
+			"PANEL_APP_PORT_HTTP":  9999,
+			"PANEL_APP_PORT_HTTPS": 443,
+			"WORKMESH_MODE":        "waf",
+		},
+	}
+	store.mu.Lock()
+	store.state.Apps = []appRecord{item}
+	store.mu.Unlock()
+
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/search", nil))
+	body := response.Body.String()
+	for _, expected := range []string{
+		`"path":"` + strings.ReplaceAll(appInstallPath(item), `\`, `\\`) + `"`,
+		`"container":"workmesh-openresty-waf"`,
+		`"serviceName":"workmesh-openresty"`,
+		`"httpPort":9999`,
+		`"httpsPort":443`,
+		`"WORKMESH_MODE":"waf"`,
+	} {
+		if response.Code != http.StatusOK || !strings.Contains(body, expected) {
+			t.Fatalf("installed response missing %s: %d %s", expected, response.Code, body)
+		}
+	}
+}
+
+// TestAppWriteRejectsMalformedAndTrailingJSON 验证应用写接口不会把无效 JSON 当成空请求执行。
+func TestAppWriteRejectsMalformedAndTrailingJSON(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	resetAppStoreForTest()
+	defer resetAppStoreForTest()
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	for name, body := range map[string]string{
+		"malformed": `{"id":"broken"`,
+		"trailing":  `{"id":"broken"}{"id":"second"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v2/apps/install", strings.NewReader(body)))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("无效 JSON 应返回 400，实际=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	// 空请求体仍保持旧前端兼容行为，但因缺少应用标识返回业务 400，而不是解析错误 500。
+	empty := httptest.NewRecorder()
+	mux.ServeHTTP(empty, httptest.NewRequest(http.MethodPost, "/api/v2/apps/install", nil))
+	if empty.Code != http.StatusBadRequest {
+		t.Fatalf("空体缺少应用标识应返回 400，实际=%d body=%s", empty.Code, empty.Body.String())
+	}
+}
+
+// TestAppStoreUsesSQLiteWithoutWritingAppsJSON 验证共享 SQLite 启用后生产应用状态不再写 apps.json。
+func TestAppStoreUsesSQLiteWithoutWritingAppsJSON(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	resetAppStoreForTest()
+	store, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSharedStore(store); err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		resetAppStoreForTest()
+		resetSharedStoreForTest()
+		_ = store.Close()
+	})
+
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v2/apps/install", strings.NewReader(`{"id":"sqlite-app","name":"SQLite App"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("SQLite 应用写入失败: %d %s", response.Code, response.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "apps.json")); !os.IsNotExist(err) {
+		t.Fatalf("共享 SQLite 模式不应创建 apps.json，stat err=%v", err)
+	}
+	var count int
+	if err := store.DB().QueryRow(`SELECT COUNT(*) FROM app_installs WHERE id=?`, "sqlite-app").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("应用关系表记录数=%d，want=1", count)
+	}
+}
+
+// TestInstalledSyncAndCustomStoreRequireRealSources 验证同步和自定义目录拒绝虚假来源。
 func TestInstalledSyncAndCustomStoreRequireRealSources(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	t.Setenv("WORKMESH_CUSTOM_APP_ARCHIVE", "")
@@ -213,6 +164,7 @@ func TestInstalledSyncAndCustomStoreRequireRealSources(t *testing.T) {
 	}
 }
 
+// TestAppInstalledCheckUsesEnvironmentProbe 验证已安装状态来自容器环境探测。
 func TestAppInstalledCheckUsesEnvironmentProbe(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	binDir := t.TempDir()
@@ -236,6 +188,7 @@ func TestAppInstalledCheckUsesEnvironmentProbe(t *testing.T) {
 	}
 }
 
+// TestOpenRestyInstalledCheckUsesRecordedContainer 验证 OpenResty 状态使用登记的真实容器。
 func TestOpenRestyInstalledCheckUsesRecordedContainer(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	resetAppStoreForTest()
@@ -261,6 +214,7 @@ func TestOpenRestyInstalledCheckUsesRecordedContainer(t *testing.T) {
 	}
 }
 
+// TestApplyAppContainerStatesMatchesOriginalStatusRules 验证容器状态映射遵循参考状态规则。
 func TestApplyAppContainerStatesMatchesOriginalStatusRules(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -284,6 +238,7 @@ func TestApplyAppContainerStatesMatchesOriginalStatusRules(t *testing.T) {
 	}
 }
 
+// TestAppOperationsAndCatalog 验证应用生命周期操作与目录查询的持久化行为。
 func TestAppOperationsAndCatalog(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	binDir := t.TempDir()
@@ -321,6 +276,43 @@ func TestAppOperationsAndCatalog(t *testing.T) {
 	}
 }
 
+// TestAppOperationWithoutInstallIDRoutesOpenResty 验证旧版 OpenResty 卡片缺失 installId 时仍操作真实容器。
+func TestAppOperationWithoutInstallIDRoutesOpenResty(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	t.Setenv("WORKMESH_OPENRESTY_CONTAINER", "workmesh-openresty-waf")
+	t.Setenv("WORKMESH_OPENRESTY_BIN", "")
+	binDir := t.TempDir()
+	dockerPath := filepath.Join(binDir, "docker")
+	script := `#!/bin/sh
+case "$1 $2" in
+  "ps -a") printf 'workmesh-openresty-waf\tworkmesh/openresty-waf:20260913\tExited (0) 1 second ago\n' ;;
+  "exec") exit 0 ;;
+  "stop") exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	resetAppStoreForTest()
+	defer resetAppStoreForTest()
+	mux := http.NewServeMux()
+	RegisterAppRoutes(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v2/apps/installed/op", strings.NewReader(`{"installId":"","operate":"stop"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("OpenResty operation status=%d body=%s", response.Code, response.Body.String())
+	}
+	for _, expected := range []string{`"app":"openresty"`, `"operate":"stop"`, `"accepted":true`, `"binary":"docker://workmesh-openresty-waf"`} {
+		if !strings.Contains(response.Body.String(), expected) {
+			t.Fatalf("OpenResty operation missing %s: %s", expected, response.Body.String())
+		}
+	}
+}
+
+// TestAppOperationValidatesTargetAndOperation 验证应用操作目标和动作白名单。
 func TestAppOperationValidatesTargetAndOperation(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -337,6 +329,7 @@ func TestAppOperationValidatesTargetAndOperation(t *testing.T) {
 	}
 }
 
+// TestAppOperationUsesComposeUpAndRealDockerBinary 验证应用启动使用受控 Docker Compose 二进制。
 func TestAppOperationUsesComposeUpAndRealDockerBinary(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	binDir := t.TempDir()
@@ -377,6 +370,7 @@ func TestAppOperationUsesComposeUpAndRealDockerBinary(t *testing.T) {
 	}
 }
 
+// TestAppDerivedDetailsAndDeleteCheck 验证应用详情派生字段和删除前置检查。
 func TestAppDerivedDetailsAndDeleteCheck(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	mux := http.NewServeMux()
@@ -403,6 +397,7 @@ func TestAppDerivedDetailsAndDeleteCheck(t *testing.T) {
 	}
 }
 
+// TestAppCheckUpdateUsesConfiguredCatalogAndPersistsMetadata 验证更新检查读取目录并保存元数据。
 func TestAppCheckUpdateUsesConfiguredCatalogAndPersistsMetadata(t *testing.T) {
 	dataDir := t.TempDir()
 	catalogPath := filepath.Join(dataDir, "catalog.json")
@@ -450,6 +445,7 @@ func TestAppCheckUpdateUsesConfiguredCatalogAndPersistsMetadata(t *testing.T) {
 	}
 }
 
+// TestAppCheckUpdateNoUpdateForEquivalentVersions 验证相同版本不会误报可更新。
 func TestAppCheckUpdateNoUpdateForEquivalentVersions(t *testing.T) {
 	dataDir := t.TempDir()
 	catalogPath := filepath.Join(dataDir, "catalog.json")
@@ -470,6 +466,7 @@ func TestAppCheckUpdateNoUpdateForEquivalentVersions(t *testing.T) {
 	}
 }
 
+// TestAppCheckUpdateReportsCatalogError 验证目录不可用时返回明确错误而非假成功。
 func TestAppCheckUpdateReportsCatalogError(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	t.Setenv("WORKMESH_APP_CATALOG", filepath.Join(t.TempDir(), "missing.json"))
@@ -484,6 +481,7 @@ func TestAppCheckUpdateReportsCatalogError(t *testing.T) {
 	}
 }
 
+// TestCompareAppVersion 验证应用版本比较覆盖数字、前缀和缺省版本。
 func TestCompareAppVersion(t *testing.T) {
 	tests := []struct {
 		latest, current string

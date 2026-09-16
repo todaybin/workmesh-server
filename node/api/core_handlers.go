@@ -13,11 +13,13 @@ import (
 	"time"
 
 	"github.com/todaybin/workmesh-server/control/service"
+	"github.com/todaybin/workmesh-server/internal/storage"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
 var localCore = service.NewCoreService()
 
+// coreToken 生成兼容认证流程使用的随机临时令牌。
 func coreToken() string {
 	raw := make([]byte, 24)
 	if _, err := rand.Read(raw); err == nil {
@@ -63,6 +65,7 @@ func registerCoreAuthExtras(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v2/core/auth/passkey/register/finish", handleCorePasskeyRegisterFinish)
 }
 
+// handleCorePasskeyList 查询当前会话已注册的 Passkey 列表。
 func handleCorePasskeyList(w http.ResponseWriter, r *http.Request) {
 	if _, err := localCore.Current(coreSessionID(r)); err != nil {
 		writeError(w, http.StatusUnauthorized, err)
@@ -71,6 +74,7 @@ func handleCorePasskeyList(w http.ResponseWriter, r *http.Request) {
 	coreJSON(w, localCore.ListPasskeys())
 }
 
+// handleCorePasskeyBegin 创建 Passkey 注册挑战并返回 WebAuthn 参数。
 func handleCorePasskeyBegin(w http.ResponseWriter, r *http.Request) {
 	authSession := coreSessionID(r)
 	challenge, err := localCore.BeginPasskeyRegistration(authSession)
@@ -81,6 +85,7 @@ func handleCorePasskeyBegin(w http.ResponseWriter, r *http.Request) {
 	coreJSON(w, map[string]any{"sessionId": challenge, "publicKey": map[string]any{"challenge": challenge, "timeout": 300000, "rp": map[string]string{"name": "WorkMesh"}}})
 }
 
+// handleCorePasskeyDelete 删除当前会话指定的 Passkey。
 func handleCorePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.URL.Query().Get("id"))
 	if id == "" {
@@ -102,6 +107,7 @@ func handleCorePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 	coreJSON(w, nil)
 }
 
+// handleCorePasskeyRegisterFinish 校验挑战并保存 Passkey 注册结果。
 func handleCorePasskeyRegisterFinish(w http.ResponseWriter, r *http.Request) {
 	authSession := coreSessionID(r)
 	challengeID := strings.TrimSpace(r.Header.Get("Passkey-Session"))
@@ -131,10 +137,12 @@ func handleCorePasskeyRegisterFinish(w http.ResponseWriter, r *http.Request) {
 	coreJSON(w, item)
 }
 
+// coreJSON 使用控制面统一成功 envelope 写出响应。
 func coreJSON(w http.ResponseWriter, value any) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": value})
 }
 
+// handleCoreLogin 校验本地账号密码并创建会话 Cookie。
 func handleCoreLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name     string `json:"name"`
@@ -150,14 +158,37 @@ func handleCoreLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	user, session, err := localCore.Login(req.Name, req.Password)
 	if err != nil {
-		if db := sharedDB(); db != nil { _,_=db.Exec(`CREATE TABLE IF NOT EXISTS login_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL DEFAULT '', user TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', agent TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`); now:=time.Now().UTC().Format(time.RFC3339Nano); _,_ = db.Exec(`INSERT INTO login_logs(ip,user,agent,status,message,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,r.RemoteAddr,req.Name,r.UserAgent(),"failed",err.Error(),now,now) }
+		recordLoginAttempt(r, req.Name, "Failed", err.Error())
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
-	if db := sharedDB(); db != nil { _,_=db.Exec(`CREATE TABLE IF NOT EXISTS login_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, ip TEXT NOT NULL DEFAULT '', user TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', agent TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`); now:=time.Now().UTC().Format(time.RFC3339Nano); _,_ = db.Exec(`INSERT INTO login_logs(ip,user,agent,status,message,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,r.RemoteAddr,user.Name,r.UserAgent(),"success","登录成功",now,now) }
+	recordLoginAttempt(r, user.Name, "Success", "登录成功")
 	http.SetCookie(w, &http.Cookie{Name: "workmesh_session", Value: session.ID, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	// 同时返回旧前端使用的扁平字段和会话对象，确保新旧客户端均可登录。
 	coreJSON(w, map[string]any{"name": user.Name, "role": user.Role, "token": session.ID, "mfaStatus": "disabled", "mfaSession": "", "user": user, "session": session})
+}
+
+// recordLoginAttempt 将登录结果写入统一 SQLite 审计表，并规范化客户端地址。
+func recordLoginAttempt(r *http.Request, user, status, message string) {
+	if r == nil {
+		return
+	}
+	repository, err := SharedRepository()
+	if err != nil {
+		return
+	}
+	writer, err := storage.NewSQLiteAuditLogWriter(repository)
+	if err != nil {
+		return
+	}
+	_ = writer.RecordLoginAttempt(r.Context(), storage.LoginAuditEntry{
+		IP:        operationClientIP(r.RemoteAddr),
+		User:      strings.TrimSpace(user),
+		Agent:     r.UserAgent(),
+		Status:    normalizeLoginStatus(status),
+		Message:   strings.TrimSpace(message),
+		CreatedAt: time.Now().UTC(),
+	})
 }
 
 func handleCoreLogout(w http.ResponseWriter, r *http.Request) {
@@ -166,6 +197,8 @@ func handleCoreLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	coreJSON(w, nil)
 }
+
+// handleCoreCurrent 返回当前登录用户和 API 访问配置。
 func handleCoreCurrent(w http.ResponseWriter, r *http.Request) {
 	sessionID := coreSessionID(r)
 	if sessionID == "" {
@@ -222,6 +255,7 @@ func AuthorizeControlRequest(r *http.Request) bool {
 	return strings.EqualFold(origin, "http://"+r.Host) || strings.EqualFold(origin, "https://"+r.Host)
 }
 
+// boolString 将布尔配置转换为前端兼容的 enable/disable 字符串。
 func boolString(value bool) string {
 	if value {
 		return "enable"
@@ -229,6 +263,7 @@ func boolString(value bool) string {
 	return "disable"
 }
 
+// handleCoreCurrentUpdate 更新当前用户名称或密码。
 func handleCoreCurrentUpdate(w http.ResponseWriter, r *http.Request) {
 	sessionID := coreSessionID(r)
 	if sessionID == "" {
@@ -252,6 +287,7 @@ func handleCoreCurrentUpdate(w http.ResponseWriter, r *http.Request) {
 	coreJSON(w, user)
 }
 
+// handleCoreAPIGenerate 为当前会话生成 API 密钥。
 func handleCoreAPIGenerate(w http.ResponseWriter, r *http.Request) {
 	sessionID := coreSessionID(r)
 	if sessionID == "" {
@@ -266,6 +302,7 @@ func handleCoreAPIGenerate(w http.ResponseWriter, r *http.Request) {
 	coreJSON(w, key)
 }
 
+// handleCoreAPIUpdate 更新 API 密钥启用状态和访问限制。
 func handleCoreAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	sessionID := coreSessionID(r)
 	if sessionID == "" {
@@ -297,13 +334,19 @@ func handleCoreAPIUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	coreJSON(w, nil)
 }
+
+// handleCoreCaptcha 返回当前关闭状态的验证码配置并清理旧公钥 Cookie。
 func handleCoreCaptcha(w http.ResponseWriter, _ *http.Request) {
 	clearLegacyPasswordKey(w)
 	coreJSON(w, map[string]any{"captchaID": "disabled", "required": false})
 }
+
+// handleCoreWelcome 返回面板初始化完成状态。
 func handleCoreWelcome(w http.ResponseWriter, _ *http.Request) {
 	coreJSON(w, map[string]string{"status": "ready"})
 }
+
+// handleCoreAuthSetting 返回 MFA、Passkey 等认证因子开关状态。
 func handleCoreAuthSetting(w http.ResponseWriter, _ *http.Request) {
 	clearLegacyPasswordKey(w)
 	coreJSON(w, map[string]any{"mfa": false, "passkey": false})
@@ -313,6 +356,8 @@ func handleCoreAuthSetting(w http.ResponseWriter, _ *http.Request) {
 func clearLegacyPasswordKey(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{Name: "panel_public_key", Value: "", Path: "/", MaxAge: -1, Expires: time.Unix(1, 0), HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
+
+// handleCoreGroups 根据路径后缀执行分组查询、创建、更新或删除。
 func handleCoreGroups(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(r.URL.Path, "/search") {
 		coreJSON(w, localCore.Groups())
@@ -328,8 +373,15 @@ func handleCoreGroups(w http.ResponseWriter, r *http.Request) {
 		coreJSON(w, nil)
 		return
 	}
-	coreJSON(w, localCore.UpsertGroup(req.ID, req.Name, req.Type))
+	item, err := localCore.UpsertGroup(req.ID, req.Name, req.Type)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	coreJSON(w, item)
 }
+
+// handleCoreSettings 根据请求方法查询或更新控制面设置。
 func handleCoreSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet || strings.HasSuffix(r.URL.Path, "/search") || strings.HasSuffix(r.URL.Path, "/search/base") {
 		coreJSON(w, localCore.Settings())
@@ -340,6 +392,9 @@ func handleCoreSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	localCore.UpdateSettings(values)
+	if err := localCore.UpdateSettings(values); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	coreJSON(w, localCore.Settings())
 }

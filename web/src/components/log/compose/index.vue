@@ -13,6 +13,7 @@
         </template>
         <template #content>
             <ContainerLog
+                v-if="open"
                 :compose="compose"
                 :resource="resource"
                 :container="container"

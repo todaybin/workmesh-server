@@ -14,6 +14,7 @@ import (
 	"time"
 )
 
+// runtimePackageVersion 处理运行时业务规则，并保持 SQLite 与外部资源一致。
 func runtimePackageVersion(item runtimeRecord) (appVersionRecord, bool) {
 	store := getAppStore()
 	store.mu.RLock()
@@ -73,6 +74,7 @@ func refreshRuntimePackageIfNeeded(current runtimeRecord, updated *runtimeRecord
 	return rollback, nil
 }
 
+// installRuntimeRunScriptFromArchive 执行运行时相关处理并返回可观测错误。
 func installRuntimeRunScriptFromArchive(archivePath, installDir, runtimeType, version string) (func(), error) {
 	stage, err := os.MkdirTemp(filepath.Dir(installDir), ".runtime-script-stage-")
 	if err != nil {

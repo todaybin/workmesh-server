@@ -96,12 +96,11 @@ const rules = {
 
 const get = () => {
     getRealIPConfig(props.id).then((res) => {
-        req.open = res.data.open;
-        if (res.data.open) {
-            req.ipFrom = res.data.ipFrom;
-            req.ipHeader = res.data.ipHeader;
-            req.ipOther = res.data.ipOther;
-        }
+        req.open = res.data.open ?? res.data.enabled ?? false;
+        const trusted = res.data.trusted;
+        req.ipFrom = res.data.ipFrom ?? (Array.isArray(trusted) ? trusted.join('\n') : trusted) ?? '127.0.0.1';
+        req.ipHeader = res.data.ipHeader ?? res.data.header ?? 'X-Real-IP';
+        req.ipOther = res.data.ipOther ?? res.data.other ?? '';
     });
 };
 

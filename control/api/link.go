@@ -20,7 +20,11 @@ func RegisterLinkRoutes(mux *http.ServeMux, nodeID, initialRole string, manager 
 		manager = NewRoleManager(nodeID, initialRole)
 	}
 	var syncStore link.SyncStore
-	if dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR")); dataDir != "" {
+	if db := controlDB; db != nil {
+		if persisted, storeErr := link.NewSQLiteSyncStore(db); storeErr == nil {
+			syncStore = persisted
+		}
+	} else if dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR")); dataDir != "" {
 		if persisted, storeErr := link.NewFileSyncStore(filepath.Join(dataDir, "link-sync.json")); storeErr == nil {
 			syncStore = persisted
 		}

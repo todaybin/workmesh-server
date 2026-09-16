@@ -159,8 +159,8 @@ var applicationDefinitions = map[string]applicationDefinition{
 	"redis":      {binaries: []string{"redis-server"}, versionArg: "--version", port: 6379},
 }
 
-// probeOpenRestyContainer 识别运行中的 OpenResty/Nginx 容器。
-// 只读取 docker ps 的固定输出，不接受请求参数，不执行容器内命令。
+// probeOpenRestyContainer 识别已安装的 OpenResty/Nginx 容器，包括已停止容器。
+// 只读取 docker ps -a 的固定输出，不接受请求参数，不执行容器内命令。
 func probeOpenRestyContainer(ctx context.Context) (ApplicationStatus, bool) {
 	binary := dockerBinary()
 	if binary == "" {
@@ -168,7 +168,7 @@ func probeOpenRestyContainer(ctx context.Context) (ApplicationStatus, bool) {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(probeCtx, binary, "ps", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}").Output()
+	out, err := exec.CommandContext(probeCtx, binary, "ps", "-a", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}").Output()
 	if err != nil {
 		return ApplicationStatus{}, false
 	}
@@ -195,12 +195,23 @@ func parseOpenRestyContainerList(output string) (ApplicationStatus, bool) {
 			continue
 		}
 		version := containerImageVersion(image)
+		containerStatus := strings.TrimSpace(fields[2])
+		active := isRunningContainerStatus(containerStatus)
+		status := "Stopped"
+		if active {
+			status = "Running"
+		}
 		return ApplicationStatus{
-			Name: name, App: "openresty", Version: version, IsExist: true, IsActive: true,
-			Status: "Running", Binary: "docker://" + name,
+			Name: name, App: "openresty", Version: version, IsExist: true, IsActive: active,
+			Status: status, Binary: "docker://" + name,
 		}, true
 	}
 	return ApplicationStatus{}, false
+}
+
+func isRunningContainerStatus(status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return status == "running" || strings.HasPrefix(status, "up ")
 }
 
 func containerImageVersion(image string) string {

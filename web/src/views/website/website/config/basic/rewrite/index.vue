@@ -22,7 +22,7 @@
             </el-select>
         </el-form-item>
         <el-text type="warning">{{ $t('website.rewriteHelper2') }}</el-text>
-        <CodemirrorPro v-model="content" mode="nginx" :heightDiff="500"></CodemirrorPro>
+        <CodemirrorPro v-model="content" mode="nginx" :heightDiff="500" :lineWrapping="true"></CodemirrorPro>
         <div class="mt-2">
             <el-form-item>
                 <el-alert :title="$t('website.rewriteHelper')" type="info" :closable="false" />
@@ -55,7 +55,7 @@ import i18n from '@/lang';
 import CustomRewrite from '@/views/website/website/config/basic/rewrite/custom/index.vue';
 
 const loading = ref(false);
-const content = ref(' ');
+const content = ref('');
 const codeRef = ref();
 const customRef = ref();
 const props = defineProps({
@@ -86,9 +86,7 @@ const getRewrite = async (rewrite: string) => {
     try {
         const res = await getRewriteConfig(req);
         content.value = res.data.content;
-        if (res.data.content == '') {
-            content.value = ' ';
-        }
+        if (res.data.content == '') content.value = '';
         setCursorPosition();
     } catch (error) {
     } finally {

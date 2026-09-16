@@ -30,20 +30,42 @@ type WebsiteSSL struct {
 	Dir           string    `json:"dir,omitempty"`
 	Description   string    `json:"description,omitempty"`
 	PushNode      bool      `json:"pushNode"`
-	Nodes         string    `json:"nodes,omitempty"`
-	SkipDNS       bool      `json:"skipDns"`
-	Nameserver1   string    `json:"nameserver1,omitempty"`
-	Nameserver2   string    `json:"nameserver2,omitempty"`
-	DisableCNAME  bool      `json:"disableCname"`
-	ExecShell     bool      `json:"execShell"`
-	Shell         string    `json:"shell,omitempty"`
-	MasterSSLID   uint      `json:"masterSslId,omitempty"`
-	PushNodeFlag  bool      `json:"pushNodeFlag"`
-	PrivateKeyPath string   `json:"privateKeyPath,omitempty"`
-	CertPath      string    `json:"certPath,omitempty"`
-	IsIP          bool      `json:"isIp"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	// Nodes 始终返回字符串，避免前端编辑证书时因字段缺失触发类型错误。
+	Nodes          string                 `json:"nodes"`
+	SkipDNS        bool                   `json:"skipDns"`
+	Nameserver1    string                 `json:"nameserver1,omitempty"`
+	Nameserver2    string                 `json:"nameserver2,omitempty"`
+	DisableCNAME   bool                   `json:"disableCname"`
+	ExecShell      bool                   `json:"execShell"`
+	Shell          string                 `json:"shell,omitempty"`
+	MasterSSLID    uint                   `json:"masterSslId,omitempty"`
+	PushNodeFlag   bool                   `json:"pushNodeFlag"`
+	PrivateKeyPath string                 `json:"privateKeyPath,omitempty"`
+	CertPath       string                 `json:"certPath,omitempty"`
+	IsIP           bool                   `json:"isIp"`
+	AcmeAccount    *WebsiteSSLACMEAccount `json:"acmeAccount,omitempty"`
+	DnsAccount     *WebsiteSSLDNSAccount  `json:"dnsAccount,omitempty"`
+	Websites       []Website              `json:"websites"`
+	LogPath        string                 `json:"logPath,omitempty"`
+	CreatedAt      time.Time              `json:"createdAt"`
+	UpdatedAt      time.Time              `json:"updatedAt"`
+}
+
+// WebsiteSSLACMEAccount 是证书响应中可公开的 ACME 账户信息。
+type WebsiteSSLACMEAccount struct {
+	ID       uint   `json:"id"`
+	Email    string `json:"email"`
+	URL      string `json:"url"`
+	Type     string `json:"type"`
+	KeyType  string `json:"keyType"`
+	UseProxy bool   `json:"useProxy"`
+}
+
+// WebsiteSSLDNSAccount 是证书响应中不含凭据的 DNS 账户信息。
+type WebsiteSSLDNSAccount struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 // WebsiteSSLCreateRequest 创建证书元数据。
@@ -56,6 +78,21 @@ type WebsiteSSLCreateRequest struct {
 	AutoRenew     bool   `json:"autoRenew"`
 	KeyType       string `json:"keyType"`
 	Description   string `json:"description"`
+	PushDir       bool   `json:"pushDir"`
+	Dir           string `json:"dir"`
+	SkipDNS       bool   `json:"skipDNS"`
+	Nameserver1   string `json:"nameserver1"`
+	Nameserver2   string `json:"nameserver2"`
+	DisableCNAME  bool   `json:"disableCNAME"`
+	ExecShell     bool   `json:"execShell"`
+	Shell         string `json:"shell"`
+	PushNode      bool   `json:"pushNode"`
+	Nodes         string `json:"nodes"`
+	IsIP          bool   `json:"isIp"`
+	Apply         bool   `json:"apply"`
+	ID            uint   `json:"id"`
+	Certificate   string `json:"certificate"`
+	PrivateKey    string `json:"privateKey"`
 }
 
 // WebsiteSSLUploadRequest 上传或导入证书内容。
@@ -75,4 +112,19 @@ type WebsiteSSLUpdateRequest struct {
 	Provider      string `json:"provider"`
 	AutoRenew     bool   `json:"autoRenew"`
 	Description   string `json:"description"`
+	AcmeAccountID uint   `json:"acmeAccountId"`
+	DnsAccountID  uint   `json:"dnsAccountId"`
+	KeyType       string `json:"keyType"`
+	PushDir       bool   `json:"pushDir"`
+	Dir           string `json:"dir"`
+	SkipDNS       bool   `json:"skipDNS"`
+	Nameserver1   string `json:"nameserver1"`
+	Nameserver2   string `json:"nameserver2"`
+	DisableCNAME  bool   `json:"disableCNAME"`
+	ExecShell     bool   `json:"execShell"`
+	Shell         string `json:"shell"`
+	PushNode      bool   `json:"pushNode"`
+	Nodes         string `json:"nodes"`
+	IsIP          bool   `json:"isIp"`
+	Apply         bool   `json:"apply"`
 }

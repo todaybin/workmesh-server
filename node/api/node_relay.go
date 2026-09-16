@@ -8,13 +8,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -23,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 	"github.com/todaybin/workmesh-server/runtime/link"
 )
 
@@ -43,8 +41,14 @@ type RelayOptions struct {
 	Secret  []byte
 	HTTP    *http.Client
 	Timeout time.Duration
+	// MaxRetries 控制可安全重放请求的传输重试次数；每次重试都会重新生成 nonce 和签名。
+	MaxRetries int
+	// RetryBackoff 是连续重试之间的最小等待时间。
+	RetryBackoff time.Duration
 	// RoleEpoch 返回当前 fencing epoch；为空时从 role-state.json 读取。
 	RoleEpoch func(context.Context) (uint64, error)
+	// NodeLookup 从 SQLite 返回节点地址；配置后不再扫描 nodes.json。
+	NodeLookup func(context.Context, string) (string, string, bool)
 }
 
 // NodeRelay 根据 CurrentNode/operateNode 将请求转发至已登记节点。
@@ -91,6 +95,12 @@ func NewNodeRelay(next http.Handler, options RelayOptions) *NodeRelay {
 	}
 	if options.HTTP == nil {
 		options.HTTP = &http.Client{Timeout: options.Timeout}
+	}
+	if options.MaxRetries < 0 {
+		options.MaxRetries = 0
+	}
+	if options.RetryBackoff <= 0 {
+		options.RetryBackoff = 100 * time.Millisecond
 	}
 	return &NodeRelay{next: next, options: options, client: options.HTTP, nonces: make(map[string]time.Time), nodes: make(map[string]relayNode)}
 }
@@ -250,6 +260,55 @@ func (r *NodeRelay) forward(w http.ResponseWriter, req *http.Request, node relay
 	if len(body) > maxRelayBody {
 		return errRelayBodyTooLarge
 	}
+	attempts := 1
+	// SSE 是长连接；连接中断后重放会重复订阅并可能把已经发送的事件重复交给前端。
+	if relayRequestReplaySafe(req) && !relayEventStreamRequest(req) {
+		attempts += r.options.MaxRetries
+	}
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		lastErr = r.forwardAttempt(w, req, base, body)
+		if lastErr == nil {
+			return nil
+		}
+		if attempt+1 >= attempts {
+			break
+		}
+		if err := waitRelayRetry(req.Context(), r.options.RetryBackoff, attempt); err != nil {
+			return err
+		}
+	}
+	return lastErr
+}
+
+// relayRequestReplaySafe 防止远端已接受写请求后连接中断造成副作用重复执行。
+func relayRequestReplaySafe(req *http.Request) bool {
+	if req == nil {
+		return false
+	}
+	switch req.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return strings.TrimSpace(req.Header.Get("Idempotency-Key")) != ""
+	}
+}
+
+func waitRelayRetry(ctx context.Context, delay time.Duration, attempt int) error {
+	if attempt > 0 {
+		delay *= time.Duration(1 << min(attempt, 6))
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (r *NodeRelay) forwardAttempt(w http.ResponseWriter, req *http.Request, base string, body []byte) error {
 	path := req.URL.EscapedPath()
 	if path == "" {
 		path = "/"
@@ -260,7 +319,15 @@ func (r *NodeRelay) forward(w http.ResponseWriter, req *http.Request, node relay
 	if encoded := query.Encode(); encoded != "" {
 		requestURL += "?" + encoded
 	}
-	ctx, cancel := context.WithTimeout(req.Context(), r.options.Timeout)
+	streamRequest := relayEventStreamRequest(req)
+	ctx := req.Context()
+	cancel := func() {}
+	if streamRequest {
+		// 流的生命周期由浏览器请求 context 控制，不能沿用普通 API 的短超时。
+		ctx, cancel = context.WithCancel(ctx)
+	} else {
+		ctx, cancel = context.WithTimeout(ctx, r.options.Timeout)
+	}
 	defer cancel()
 	outgoing, err := http.NewRequestWithContext(ctx, req.Method, requestURL, bytes.NewReader(body))
 	if err != nil {
@@ -281,11 +348,21 @@ func (r *NodeRelay) forward(w http.ResponseWriter, req *http.Request, node relay
 	if len(r.options.Secret) > 0 {
 		outgoing.Header.Set("X-WorkMesh-Signature", link.Sign(r.options.Secret, req.Method, pathWithQuery(path, query), timestamp, nonce, body))
 	}
-	response, err := r.client.Do(outgoing)
+	client := r.client
+	if streamRequest && client.Timeout > 0 {
+		// http.Client.Timeout 会在响应返回后继续中断 response.Body，必须为 SSE 清除。
+		streamClient := *client
+		streamClient.Timeout = 0
+		client = &streamClient
+	}
+	response, err := client.Do(outgoing)
 	if err != nil {
 		return fmt.Errorf("节点透传请求失败: %w", err)
 	}
 	defer response.Body.Close()
+	if streamRequest && strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
+		return relayEventStream(w, response)
+	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxRelayResponse+1))
 	if err != nil {
 		return fmt.Errorf("读取节点透传响应失败: %w", err)
@@ -306,6 +383,52 @@ func (r *NodeRelay) forward(w http.ResponseWriter, req *http.Request, node relay
 	return nil
 }
 
+// relayEventStreamRequest 判断请求是否要求 SSE 响应。
+func relayEventStreamRequest(req *http.Request) bool {
+	return req != nil && strings.Contains(strings.ToLower(req.Header.Get("Accept")), "text/event-stream")
+}
+
+// relayEventStream 将远端 SSE 按块转发并在每块后刷新，避免日志被透传层缓存到连接结束。
+func relayEventStream(w http.ResponseWriter, response *http.Response) error {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return errors.New("当前服务器不支持 SSE 刷新")
+	}
+	setDeadline := http.NewResponseController(w).SetWriteDeadline
+	for key, values := range response.Header {
+		if isHopByHopHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.Header().Del("Content-Length")
+	w.WriteHeader(response.StatusCode)
+	_ = setDeadline(time.Now().Add(30 * time.Second))
+	flusher.Flush()
+	buffer := make([]byte, 32<<10)
+	for {
+		size, readErr := response.Body.Read(buffer)
+		if size > 0 {
+			_ = setDeadline(time.Now().Add(30 * time.Second))
+			if _, writeErr := w.Write(buffer[:size]); writeErr != nil {
+				// 下游断开后不能再追加 JSON 错误响应。
+				return nil
+			}
+			flusher.Flush()
+		}
+		if readErr == io.EOF {
+			return nil
+		}
+		if readErr != nil {
+			// 状态码和已读数据已经发送，避免把错误 envelope 拼接进 SSE。
+			return nil
+		}
+	}
+}
+
+// serveForwarded 校验来自其它节点的签名请求，并将可信标记传给本地处理器。
 func (r *NodeRelay) serveForwarded(w http.ResponseWriter, req *http.Request) {
 	var source io.Reader = http.NoBody
 	if req.Body != nil {
@@ -328,6 +451,7 @@ func (r *NodeRelay) serveForwarded(w http.ResponseWriter, req *http.Request) {
 	r.next.ServeHTTP(w, req)
 }
 
+// authenticateForwarded 校验时间戳、nonce、epoch 和 HMAC，阻止重放或越权透传。
 func (r *NodeRelay) authenticateForwarded(req *http.Request, body []byte) error {
 	if len(r.options.Secret) == 0 {
 		return errors.New("节点透传未配置共享密钥")
@@ -383,6 +507,7 @@ func (r *NodeRelay) authenticateForwarded(req *http.Request, body []byte) error 
 	return nil
 }
 
+// currentEpoch 读取当前角色 fencing epoch，优先使用注入的 SQLite 查询函数。
 func (r *NodeRelay) currentEpoch(ctx context.Context) (uint64, error) {
 	if r.options.RoleEpoch != nil {
 		return r.options.RoleEpoch(ctx)
@@ -404,7 +529,15 @@ func (r *NodeRelay) currentEpoch(ctx context.Context) (uint64, error) {
 	return state.RoleEpoch, nil
 }
 
+// findNode 按节点 ID 查询缓存清单，文件变化时才重新读取以减少请求路径开销。
 func (r *NodeRelay) findNode(nodeID string) (relayNode, bool) {
+	if r.options.NodeLookup != nil {
+		endpoint, addr, ok := r.options.NodeLookup(context.Background(), nodeID)
+		if !ok {
+			return relayNode{}, false
+		}
+		return relayNode{NodeID: nodeID, Endpoint: endpoint, Addr: addr}, true
+	}
 	path := filepath.Join(r.options.DataDir, "nodes.json")
 	info, err := os.Stat(path)
 	if err != nil {
@@ -436,73 +569,4 @@ func (r *NodeRelay) findNode(nodeID string) (relayNode, bool) {
 	result, found := r.nodes[nodeID]
 	r.nodesMu.Unlock()
 	return result, found
-}
-
-func relayTarget(req *http.Request) string {
-	if value := strings.TrimSpace(req.URL.Query().Get("operateNode")); value != "" {
-		if decoded, err := url.QueryUnescape(value); err == nil {
-			return strings.TrimSpace(decoded)
-		}
-	}
-	value := strings.TrimSpace(req.Header.Get("CurrentNode"))
-	if decoded, err := url.QueryUnescape(value); err == nil {
-		value = decoded
-	}
-	return value
-}
-
-func relayBaseURL(node relayNode) (string, error) {
-	value := strings.TrimSpace(node.Endpoint)
-	if value == "" {
-		value = strings.TrimSpace(node.Addr)
-	}
-	parsed, err := url.Parse(strings.TrimRight(value, "/"))
-	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", errors.New("目标节点地址必须是无凭据 HTTP(S) URL")
-	}
-	return strings.TrimRight(parsed.String(), "/"), nil
-}
-
-func pathWithQuery(path string, query url.Values) string {
-	if encoded := query.Encode(); encoded != "" {
-		return path + "?" + encoded
-	}
-	return path
-}
-
-func copyRelayHeaders(dst, src http.Header) {
-	for key, values := range src {
-		lower := strings.ToLower(key)
-		if lower == "host" || strings.HasPrefix(lower, "x-workmesh-") || isHopByHopHeader(key) {
-			continue
-		}
-		for _, value := range values {
-			dst.Add(key, value)
-		}
-	}
-}
-
-func isHopByHopHeader(key string) bool {
-	switch strings.ToLower(key) {
-	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
-		return true
-	default:
-		return false
-	}
-}
-
-func secureRelaySignature(got, expected string) bool {
-	got = strings.TrimSpace(got)
-	if hmac.Equal([]byte(got), []byte(expected)) {
-		return true
-	}
-	return false
-}
-
-func randomRelayNonce() string {
-	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())
-}
-
-func writeRelayError(w http.ResponseWriter, status int, message string) {
-	wmhttp.JSON(w, status, map[string]any{"code": "ERR", "message": message, "details": map[string]any{"errCode": "NODE_RELAY_FAILED"}})
 }

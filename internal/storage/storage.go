@@ -118,6 +118,14 @@ func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
+// Repository 返回共享 SQLite 的稳定 repository 适配器。
+func (s *Store) Repository() (*SQLiteRepository, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("SQLite 存储未打开")
+	}
+	return NewSQLiteRepository(s.db)
+}
+
 // Path 返回 SQLite 文件的绝对路径。
 func (s *Store) Path() string {
 	if s == nil {

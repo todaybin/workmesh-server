@@ -56,7 +56,7 @@ func registerACMERoutes(mux *http.ServeMux, security *service.WebsiteSecuritySer
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		item, err := security.CreateACME(in.Email, in.Type, in.KeyType, in.EabKid, in.EabHmacKey, in.CaDirURL, in.UseProxy, in.UseEAB)
+		item, err := security.CreateACMEContext(r.Context(), in.Email, in.Type, in.KeyType, in.EabKid, in.EabHmacKey, in.CaDirURL, in.UseProxy, in.UseEAB)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return

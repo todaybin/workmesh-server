@@ -14,6 +14,7 @@ import (
 	"github.com/todaybin/workmesh-server/internal/storage"
 )
 
+// TestRuntimePersistenceLegacyImportAndRestart 验证运行时相关功能、失败边界和持久化结果。
 func TestRuntimePersistenceLegacyImportAndRestart(t *testing.T) {
 	dataDir := t.TempDir()
 	legacy := runtimeState{
@@ -70,9 +71,43 @@ func TestRuntimePersistenceLegacyImportAndRestart(t *testing.T) {
 	}
 }
 
+// TestRuntimePersistenceRequiresSQLite 验证运行时相关功能、失败边界和持久化结果。
 func TestRuntimePersistenceRequiresSQLite(t *testing.T) {
 	s := &runtimeStore{repository: runtimeRepository{}, state: runtimeState{Settings: map[string]any{}}}
 	if err := s.saveLocked(); err == nil {
 		t.Fatal("未初始化 SQLite 时保存应失败")
+	}
+}
+
+func TestRuntimeInstallPathPersistenceFailureRollsBackState(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := storage.NewSQLiteRepository(store.DB())
+	if err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	s := &runtimeStore{
+		repository: runtimeRepository{repository: repository},
+		state: runtimeState{
+			Runtimes: []runtimeRecord{{ID: "go-1", Name: "go-1", Type: "go"}},
+			Settings: map[string]any{},
+		},
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := persistRuntimeInstallPath(s, "go-1", filepath.Join(dataDir, "runtimes", "go", "go-1")); err == nil {
+		t.Fatal("SQLite 关闭后保存运行时路径应失败")
+	}
+	if got := s.state.Runtimes[0].InstallPath; got != "" {
+		t.Fatalf("保存失败后不应保留内存路径: %q", got)
+	}
+	if got := s.state.Runtimes[0].ComposePath; got != "" {
+		t.Fatalf("保存失败后不应保留 Compose 路径: %q", got)
 	}
 }

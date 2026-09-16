@@ -4,9 +4,7 @@
 package api
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,6 +32,7 @@ type failingExtensionExecutor struct {
 	failFragment string
 }
 
+// Execute 执行运行时相关处理并返回可观测错误。
 func (r *failingExtensionExecutor) Execute(ctx context.Context, request model.CommandRequest) (model.CommandResult, error) {
 	result, err := r.recordingRuntimeExecutor.Execute(ctx, request)
 	if strings.Contains(strings.Join(request.Args, " "), r.failFragment) {
@@ -42,6 +41,7 @@ func (r *failingExtensionExecutor) Execute(ctx context.Context, request model.Co
 	return result, err
 }
 
+// Execute 执行运行时相关处理并返回可观测错误。
 func (r *recordingRuntimeExecutor) Execute(_ context.Context, request model.CommandRequest) (model.CommandResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -52,6 +52,7 @@ func (r *recordingRuntimeExecutor) Execute(_ context.Context, request model.Comm
 	return model.CommandResult{}, nil
 }
 
+// commandLines 执行运行时相关处理并返回可观测错误。
 func (r *recordingRuntimeExecutor) commandLines() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -62,6 +63,7 @@ func (r *recordingRuntimeExecutor) commandLines() []string {
 	return lines
 }
 
+// TestOperateRuntimeContainerProvidesComposeDefaults 验证运行时相关功能、失败边界和持久化结果。
 func TestOperateRuntimeContainerProvidesComposeDefaults(t *testing.T) {
 	dir := t.TempDir()
 	compose := filepath.Join(dir, "docker-compose.yml")
@@ -85,6 +87,23 @@ func TestOperateRuntimeContainerProvidesComposeDefaults(t *testing.T) {
 	}
 }
 
+// TestRuntimeContainerStatusRequiresRunning 验证运行时相关功能、失败边界和持久化结果。
+func TestRuntimeContainerStatusRequiresRunning(t *testing.T) {
+	executor := &recordingRuntimeExecutor{inspect: "running\n"}
+	item := runtimeRecord{Container: "runtime-test"}
+	status, err := runtimeContainerStatus(executor, item)
+	if err != nil || status != "running" {
+		t.Fatalf("running container status=%q err=%v", status, err)
+	}
+
+	executor.inspect = "exited\n"
+	status, err = runtimeContainerStatus(executor, item)
+	if err != nil || status != "exited" {
+		t.Fatalf("exited container status=%q err=%v", status, err)
+	}
+}
+
+// TestNodeRuntimePackageAndModules 验证运行时相关功能、失败边界和持久化结果。
 func TestNodeRuntimePackageAndModules(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("WORKMESH_DATA_DIR", dataDir)
@@ -134,6 +153,7 @@ func TestNodeRuntimePackageAndModules(t *testing.T) {
 	}
 }
 
+// TestRuntimeAndSSHRoutes 验证运行时相关功能、失败边界和持久化结果。
 func TestRuntimeAndSSHRoutes(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("WORKMESH_DATA_DIR", dataDir)
@@ -192,6 +212,213 @@ func TestRuntimeAndSSHRoutes(t *testing.T) {
 	}
 }
 
+func TestNodeModuleQueuePersistenceFailureDoesNotAcceptTask(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := storage.NewSQLiteRepository(store.DB())
+	if err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	runtimeStore := &runtimeStore{
+		repository: runtimeRepository{repository: repository},
+		state: runtimeState{
+			Runtimes: []runtimeRecord{{ID: "node-1", Type: "node", Version: "20", Container: "node-container"}},
+			Settings: map[string]any{},
+		},
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	res := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/runtimes/node/modules/operate", strings.NewReader(`{"id":"node-1","operate":"install","pkgManager":"npm","module":"express"}`))
+	nodeModuleOperationHandler(runtimeStore)(res, req)
+	if res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when queue persistence fails, got=%d body=%s", res.Code, res.Body.String())
+	}
+	if _, exists := runtimeStore.state.Settings["node-task:"]; exists {
+		t.Fatal("task should not be accepted after persistence failure")
+	}
+	for key := range runtimeStore.state.Settings {
+		if strings.HasPrefix(key, "node-task:") {
+			t.Fatalf("task snapshot should be rolled back, found %q", key)
+		}
+	}
+}
+
+func TestNodeModuleTaskPersistenceFailureStopsExternalCommand(t *testing.T) {
+	dataDir := t.TempDir()
+	store, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := storage.NewSQLiteRepository(store.DB())
+	if err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	runtimeStore := &runtimeStore{
+		repository: runtimeRepository{repository: repository},
+		state: runtimeState{
+			Settings: map[string]any{
+				"node-task:task-1": map[string]any{
+					"id":     "task-1",
+					"status": "queued",
+				},
+			},
+		},
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	executor := &recordingRuntimeExecutor{}
+	runNodeModuleTask(runtimeStore, "task-1", executor, runtimeRecord{ID: "node-1", Container: "node-container"}, "npm", "install", "express")
+
+	if commands := executor.commandLines(); len(commands) != 0 {
+		t.Fatalf("任务状态无法持久化时不应执行 Docker 命令: %v", commands)
+	}
+	value, ok := runtimeStore.state.Settings["node-task:task-1"].(map[string]any)
+	if !ok || value["status"] != "queued" {
+		t.Fatalf("任务状态未回滚到 queued: %#v", runtimeStore.state.Settings["node-task:task-1"])
+	}
+}
+
+// TestRuntimeLifecycleRoutes 验证原前端 ID/operate 契约及 SQLite 生命周期持久化。
+func TestRuntimeLifecycleRoutes(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	store, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSharedStore(store); err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		runtimeStoreMu.Lock()
+		runtimeStoreInstance = nil
+		runtimeStoreMu.Unlock()
+		resetSharedStoreForTest()
+		_ = store.Close()
+	})
+	executor := &recordingRuntimeExecutor{}
+	s := &runtimeStore{
+		path:       filepath.Join(dataDir, "workmesh.db"),
+		repository: runtimeRepository{db: store.DB()},
+		commands:   executor,
+		state:      runtimeState{Runtimes: []runtimeRecord{}, Settings: map[string]any{}},
+	}
+	mux := http.NewServeMux()
+	registerRuntimeRoutes(mux, s)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, req)
+		return res
+	}
+	created := call(http.MethodPost, "/api/v2/runtimes", `{"id":"lifecycle-go","name":"lifecycle-go","type":"go","version":"1.24","container":"lifecycle-go","port":28090}`)
+	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), `"status":"Running"`) {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	for _, operation := range []string{"down", "up", "restart"} {
+		res := call(http.MethodPost, "/api/v2/runtimes/operate", `{"ID":"lifecycle-go","operate":"`+operation+`"}`)
+		if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"message":"success"`) {
+			t.Fatalf("%s status=%d body=%s", operation, res.Code, res.Body.String())
+		}
+	}
+	detail := call(http.MethodGet, "/api/v2/runtimes/lifecycle-go", "")
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"port":28090`) {
+		t.Fatalf("detail status=%d body=%s", detail.Code, detail.Body.String())
+	}
+	reloaded, err := s.repository.load(context.Background())
+	if err != nil || len(reloaded.Runtimes) != 1 || reloaded.Runtimes[0].ID != "lifecycle-go" {
+		t.Fatalf("runtime not persisted: err=%v state=%#v", err, reloaded)
+	}
+	deleted := call(http.MethodPost, "/api/v2/runtimes/del", `{"id":"lifecycle-go","forceDelete":true}`)
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body.String())
+	}
+	if state, loadErr := s.repository.load(context.Background()); loadErr != nil || len(state.Runtimes) != 0 {
+		t.Fatalf("runtime delete not persisted: err=%v state=%#v", loadErr, state)
+	}
+	missing := call(http.MethodGet, "/api/v2/runtimes/lifecycle-go", "")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("deleted runtime status=%d body=%s", missing.Code, missing.Body.String())
+	}
+	joined := strings.Join(executor.commandLines(), "\n")
+	for _, fragment := range []string{"docker stop lifecycle-go", "docker start lifecycle-go", "docker restart lifecycle-go"} {
+		if !strings.Contains(joined, fragment) {
+			t.Fatalf("missing lifecycle command %q in:\n%s", fragment, joined)
+		}
+	}
+}
+
+// TestRuntimeConcurrentDeleteAndOperate 验证同一运行时的操作和删除不会使用旧切片下标。
+// 两个请求共享真实临时 SQLite；Docker 命令使用记录执行器，仅验证锁与状态提交顺序。
+func TestRuntimeConcurrentDeleteAndOperate(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	store, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSharedStore(store); err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		runtimeStoreMu.Lock()
+		runtimeStoreInstance = nil
+		runtimeStoreMu.Unlock()
+		resetSharedStoreForTest()
+		_ = store.Close()
+	})
+	executor := &recordingRuntimeExecutor{}
+	s := &runtimeStore{
+		path:       filepath.Join(dataDir, "workmesh.db"),
+		repository: runtimeRepository{db: store.DB()},
+		commands:   executor,
+		state:      runtimeState{Runtimes: []runtimeRecord{{ID: "race-runtime", Name: "race-runtime", Type: "go", Status: "Running", Container: "race-runtime", UpdatedAt: time.Now().UTC()}}, Settings: map[string]any{}},
+	}
+	if err := s.saveLocked(); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	registerRuntimeRoutes(mux, s)
+	call := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, req)
+		return res
+	}
+	results := make(chan int, 2)
+	go func() { results <- call("/api/v2/runtimes/operate", `{"ID":"race-runtime","operate":"restart"}`).Code }()
+	go func() { results <- call("/api/v2/runtimes/del", `{"ID":"race-runtime","forceDelete":true}`).Code }()
+	for range 2 {
+		status := <-results
+		if status != http.StatusOK && status != http.StatusConflict && status != http.StatusNotFound {
+			t.Fatalf("unexpected concurrent status: %d", status)
+		}
+	}
+	results = make(chan int, 2)
+	go func() { results <- call("/api/v2/runtimes/del", `{"ID":"race-runtime","forceDelete":true}`).Code }()
+	go func() { results <- call("/api/v2/runtimes/del", `{"ID":"race-runtime","forceDelete":true}`).Code }()
+	for range 2 {
+		if status := <-results; status != http.StatusOK && status != http.StatusNotFound {
+			t.Fatalf("double delete status=%d", status)
+		}
+	}
+}
+
+// TestPHPExtensionTemplatesPersistAndRuntimeParamsNormalize 验证运行时相关功能、失败边界和持久化结果。
 func TestPHPExtensionTemplatesPersistAndRuntimeParamsNormalize(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("WORKMESH_DATA_DIR", dataDir)
@@ -258,6 +485,7 @@ func TestPHPExtensionTemplatesPersistAndRuntimeParamsNormalize(t *testing.T) {
 	}
 }
 
+// TestToolboxGetDataUsesHostState 验证运行时相关功能、失败边界和持久化结果。
 func TestToolboxGetDataUsesHostState(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	s := getRuntimeStore()
@@ -275,6 +503,7 @@ func TestToolboxGetDataUsesHostState(t *testing.T) {
 	}
 }
 
+// TestToolboxDeviceDNSAndFTPState 验证运行时相关功能、失败边界和持久化结果。
 func TestToolboxDeviceDNSAndFTPState(t *testing.T) {
 	root := filepath.Join(".tmp", "toolbox-device-test")
 	_ = os.RemoveAll(root)
@@ -325,291 +554,7 @@ func TestToolboxDeviceDNSAndFTPState(t *testing.T) {
 	}
 }
 
-func TestRuntimeInstallCommandOrder(t *testing.T) {
-	tests := []struct {
-		name string
-		item runtimeRecord
-		want []string
-	}{
-		{
-			name: "go pull then up",
-			item: runtimeRecord{Type: "go", ComposePath: filepath.Join(t.TempDir(), "docker-compose.yml")},
-			want: []string{"compose -f", " pull", "compose -f", " up -d"},
-		},
-		{
-			name: "php build install commit recreate without pull",
-			item: runtimeRecord{Type: "php", Container: "php85", Image: "1panel-php-fpm:8.5.10", ComposePath: filepath.Join(t.TempDir(), "docker-compose.yml"), Params: map[string]any{"PHP_EXTENSIONS": "redis,curl"}},
-			want: []string{" build", " up -d", "exec -i php85 install-ext redis,curl", "commit php85 1panel-php-fpm:8.5.10", " down", " up -d"},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if err := os.WriteFile(test.item.ComposePath, []byte("services: {}\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			executor := &recordingRuntimeExecutor{}
-			if err := executeRuntimeInstall(executor, test.item, func(string, string) {}); err != nil {
-				t.Fatal(err)
-			}
-			joined := strings.Join(executor.commandLines(), "\n")
-			position := 0
-			for _, fragment := range test.want {
-				next := strings.Index(joined[position:], fragment)
-				if next < 0 {
-					t.Fatalf("missing ordered command %q in:\n%s", fragment, joined)
-				}
-				position += next + len(fragment)
-			}
-			if test.item.Type == "php" && strings.Contains(joined, " pull") {
-				t.Fatalf("PHP target image must not be pulled:\n%s", joined)
-			}
-		})
-	}
-}
-
-func TestPHPExtensionCatalogAndDirectOperations(t *testing.T) {
-	if len(phpExtensionCatalog) != 63 {
-		t.Fatalf("PHP 扩展目录数量=%d, want=63", len(phpExtensionCatalog))
-	}
-	ionCube := phpExtensionDefinitionForName("ioncube")
-	if ionCube.Check != "ionCube Loader" || ionCube.File != "ioncube_loader.so" {
-		t.Fatalf("ionCube 映射错误: %#v", ionCube)
-	}
-	if !phpExtensionNamePattern.MatchString("ionCube") {
-		t.Fatal("PHP 扩展名称应兼容 1Panel 的大小写名称")
-	}
-
-	root := t.TempDir()
-	composePath := filepath.Join(root, "docker-compose.yml")
-	if err := os.WriteFile(composePath, []byte("services: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	item := runtimeRecord{Type: "php", Container: "php85", Image: "1panel-php-fpm:8.5.10", ComposePath: composePath}
-	executor := &recordingRuntimeExecutor{}
-	if err := installPHPExtension(executor, item, "redis"); err != nil {
-		t.Fatal(err)
-	}
-	joined := strings.Join(executor.commandLines(), "\n")
-	for _, command := range []string{"exec -i php85 install-ext redis", "commit php85 1panel-php-fpm:8.5.10", "compose -f " + composePath + " down", "compose -f " + composePath + " up -d"} {
-		if !strings.Contains(joined, command) {
-			t.Fatalf("缺少 PHP 扩展安装命令 %q:\n%s", command, joined)
-		}
-	}
-	if strings.Contains(joined, " build") {
-		t.Fatalf("单扩展安装不应重建 PHP 镜像:\n%s", joined)
-	}
-}
-
-func TestUninstallPHPExtensionRollsBackWhenRestartFails(t *testing.T) {
-	root := t.TempDir()
-	extensionDir := filepath.Join(root, "extensions", "no-debug-non-zts-20250925")
-	if err := os.MkdirAll(extensionDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "conf", "conf.d"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	files := map[string]string{
-		filepath.Join(root, "docker-compose.yml"):                           "services: {}\n",
-		filepath.Join(root, ".env"):                                         "PHP_EXTENSIONS=redis,ionCube\n",
-		filepath.Join(root, "conf", "php.ini"):                              `zend_extension="ioncube_loader.so"` + "\n",
-		filepath.Join(root, "conf", "conf.d", "docker-php-ext-ionCube.ini"): `zend_extension="ioncube_loader.so"` + "\n",
-		filepath.Join(extensionDir, "ioncube_loader.so"):                    "module",
-	}
-	for path, content := range files {
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	current := runtimeRecord{
-		ID: "php85", Type: "php", Container: "php85", InstallPath: root,
-		ComposePath: filepath.Join(root, "docker-compose.yml"), Extensions: []string{"redis", "ionCube"}, Params: map[string]any{},
-	}
-	updated := current
-	updated.Extensions = []string{"redis"}
-	executor := &failingExtensionExecutor{failFragment: "up"}
-	err := uninstallPHPExtension(executor, current, updated, phpExtensionDefinitionForName("ioncube"))
-	if err == nil || !strings.Contains(err.Error(), "已恢复旧文件") {
-		t.Fatalf("重启失败应返回已回滚错误: %v", err)
-	}
-	for _, path := range []string{
-		filepath.Join(extensionDir, "ioncube_loader.so"),
-		filepath.Join(root, "conf", "conf.d", "docker-php-ext-ionCube.ini"),
-	} {
-		if _, statErr := os.Stat(path); statErr != nil {
-			t.Fatalf("重启失败未恢复 %s: %v", path, statErr)
-		}
-	}
-	env, _ := os.ReadFile(filepath.Join(root, ".env"))
-	if !strings.Contains(string(env), "PHP_EXTENSIONS=redis,ionCube") {
-		t.Fatalf("重启失败未恢复 .env: %s", env)
-	}
-}
-
-func TestDeployRuntimeArchiveUsesVersionDirectoryAndPreservesPrevious(t *testing.T) {
-	root := t.TempDir()
-	archivePath := filepath.Join(root, "go-1.26.tar.gz")
-	file, err := os.Create(archivePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gzipWriter := gzip.NewWriter(file)
-	tarWriter := tar.NewWriter(gzipWriter)
-	entries := map[string]string{
-		"go/1.26/docker-compose.yml": "services:\n  golang: {}\n",
-		"go/1.26/run.sh":             "#!/bin/bash\necho ok\n",
-	}
-	for name, content := range entries {
-		if err := tarWriter.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(content)), Typeflag: tar.TypeReg}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tarWriter.Write([]byte(content)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tarWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	installDir := filepath.Join(root, "runtimes", "go", "demo")
-	if err := os.MkdirAll(installDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(installDir, "old.txt"), []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := deployRuntimeArchive(archivePath, installDir, "go", "1.26"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(installDir, "run.sh")); err != nil {
-		t.Fatalf("run.sh not deployed at runtime root: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(installDir, "go", "1.26", "run.sh")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("archive wrapper directory leaked into runtime root: %v", err)
-	}
-	backups, err := filepath.Glob(installDir + ".previous-*")
-	if err != nil || len(backups) != 1 {
-		t.Fatalf("previous runtime backup missing: %v %#v", err, backups)
-	}
-}
-
-func TestInstallRuntimeRunScriptPreservesBackupAndRollsBack(t *testing.T) {
-	root := t.TempDir()
-	archivePath := filepath.Join(root, "node-25.9.0.tar.gz")
-	file, err := os.Create(archivePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gzipWriter := gzip.NewWriter(file)
-	tarWriter := tar.NewWriter(gzipWriter)
-	newScript := "#!/bin/sh\necho new\n"
-	if err := tarWriter.WriteHeader(&tar.Header{Name: "node/25.9.0/run.sh", Mode: 0o750, Size: int64(len(newScript)), Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tarWriter.Write([]byte(newScript)); err != nil {
-		t.Fatal(err)
-	}
-	if err := tarWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	installDir := filepath.Join(root, "runtimes", "node", "node25")
-	if err := os.MkdirAll(installDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	oldScript := "#!/bin/sh\necho old\n"
-	if err := os.WriteFile(filepath.Join(installDir, "run.sh"), []byte(oldScript), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	rollback, err := installRuntimeRunScriptFromArchive(archivePath, installDir, "node", "25.9.0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, _ := os.ReadFile(filepath.Join(installDir, "run.sh"))
-	backup, _ := os.ReadFile(filepath.Join(installDir, "run.sh.bak"))
-	if string(current) != newScript || string(backup) != oldScript {
-		t.Fatalf("unexpected scripts current=%q backup=%q", current, backup)
-	}
-	rollback()
-	restored, err := os.ReadFile(filepath.Join(installDir, "run.sh"))
-	if err != nil || string(restored) != oldScript {
-		t.Fatalf("run.sh rollback failed: err=%v content=%q", err, restored)
-	}
-}
-
-func TestRuntimeValidationAndStatusSync(t *testing.T) {
-	dataDir := t.TempDir()
-	t.Setenv("WORKMESH_DATA_DIR", dataDir)
-	php, err := runtimeRecordFromRequest(map[string]any{"id": "php74", "name": "php74", "type": "php", "version": "7", "params": map[string]any{"PHP_VERSION": "7.4.33"}})
-	if err != nil {
-		t.Fatalf("PHP 运行时参数解析失败: %v", err)
-	}
-	wantPath := filepath.Join(dataDir, "runtimes", "php", "php74")
-	if php.InstallPath != wantPath || php.ComposePath != filepath.Join(wantPath, "docker-compose.yml") {
-		t.Fatalf("PHP 运行时路径未按 1Panel 规则补全: path=%q compose=%q", php.InstallPath, php.ComposePath)
-	}
-	if err := validateRuntimeCodeDirectory(runtimeRecord{Type: "php"}); err != nil {
-		t.Fatalf("PHP 运行时不应强制要求代码目录: %v", err)
-	}
-	if _, err := runtimeRecordFromRequest(map[string]any{"name": "bad", "type": "go", "exposedPorts": []any{map[string]any{"hostPort": 8080, "containerPort": 8080, "protocol": "sctp"}}}); err == nil {
-		t.Fatal("unsupported port protocol must fail")
-	}
-	if _, err := validateAppArchiveURL("file:///etc/passwd"); err == nil {
-		t.Fatal("file archive URL must fail")
-	}
-	executor := &recordingRuntimeExecutor{inspect: "running\n"}
-	s := &runtimeStore{commands: executor, state: runtimeState{Runtimes: []runtimeRecord{{ID: "go-1", Container: "go-1", Status: "Creating"}}, Settings: map[string]any{}}}
-	syncRuntimeContainerStatus(s)
-	if got := s.state.Runtimes[0].Status; got != "Running" {
-		t.Fatalf("synced status=%q, want Running", got)
-	}
-}
-
-func TestRuntimePortDefaultsAcrossLanguageRuntimes(t *testing.T) {
-	for _, runtimeType := range []string{"go", "java", "dotnet", "python", "node"} {
-		t.Run(runtimeType, func(t *testing.T) {
-			item, err := runtimeRecordFromRequest(map[string]any{
-				"name": "runtime-" + runtimeType, "type": runtimeType, "version": "1", "install": true,
-				"port": 8080, "params": map[string]any{"HOST_IP": "0.0.0.0"},
-			})
-			if err != nil {
-				t.Fatalf("port default failed: %v", err)
-			}
-			if item.Port != 8080 || item.Params["APP_PORT"] != 8080 {
-				t.Fatalf("unexpected normalized ports: host=%d params=%#v", item.Port, item.Params)
-			}
-		})
-	}
-	item, err := runtimeRecordFromRequest(map[string]any{
-		"name": "runtime-exposed", "type": "node", "version": "1", "install": true,
-		"exposedPorts": []any{map[string]any{"hostPort": 9000, "containerPort": 3000, "protocol": "tcp"}},
-	})
-	if err != nil || item.Port != 9000 || item.Params["APP_PORT"] != 3000 {
-		t.Fatalf("exposed port default failed: item=%#v err=%v", item, err)
-	}
-	item, err = runtimeRecordFromRequest(map[string]any{
-		"name": "runtime-param", "type": "java", "version": "1", "install": true,
-		"port": 8080, "params": map[string]any{"APP_PORT": "9090"},
-	})
-	if err != nil || item.Port != 8080 || item.Params["APP_PORT"] != 9090 {
-		t.Fatalf("APP_PORT precedence failed: item=%#v err=%v", item, err)
-	}
-	if _, err := runtimeRecordFromRequest(map[string]any{"name": "runtime-missing", "type": "python", "version": "1", "install": true}); err == nil {
-		t.Fatal("missing runtime port must fail")
-	}
-}
-
-func TestPHPConfigurationRoutesReadUpdateAndRollbackBoundary(t *testing.T) {
+func TestTerminalAISettingsDefaultsValidationAndPersistence(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("WORKMESH_DATA_DIR", dataDir)
 	store, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
@@ -617,74 +562,113 @@ func TestPHPConfigurationRoutesReadUpdateAndRollbackBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := SetSharedStore(store); err != nil {
+		_ = store.Close()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		runtimeStoreMu.Lock()
-		runtimeStoreInstance = nil
-		runtimeStoreMu.Unlock()
 		resetSharedStoreForTest()
 		_ = store.Close()
 	})
-	installDir := filepath.Join(dataDir, "runtimes", "php", "php85")
-	if err := os.MkdirAll(filepath.Join(installDir, "conf"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	phpINI := "[PHP]\nupload_max_filesize = 2M\nmax_execution_time = 30\ndisable_functions = exec\n"
-	if err := os.WriteFile(filepath.Join(installDir, "conf", "php.ini"), []byte(phpINI), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(installDir, "conf", "php-fpm.conf"), []byte("[www]\npm = dynamic\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	composePath := filepath.Join(installDir, "docker-compose.yml")
-	if err := os.WriteFile(composePath, []byte("services: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	executor := &recordingRuntimeExecutor{}
-	s := getRuntimeStore()
-	s.commands = executor
-	s.mu.Lock()
-	s.state.Runtimes = append(s.state.Runtimes, runtimeRecord{ID: "php85", Name: "php85", Type: "php", Container: "php85", InstallPath: installDir, ComposePath: composePath, Status: "Running", Params: map[string]any{"PHP_VERSION": "8.5.10"}, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
-	if err := s.saveLocked(); err != nil {
-		s.mu.Unlock()
-		t.Fatal(err)
-	}
-	s.mu.Unlock()
+
 	mux := http.NewServeMux()
-	registerRuntimeRoutes(mux, s)
-	get := httptest.NewRecorder()
-	mux.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/v2/runtimes/php/config/php85", nil))
-	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"uploadMaxSize":"2M"`) {
-		t.Fatalf("PHP config read failed: %d %s", get.Code, get.Body.String())
+	RegisterRuntimeToolboxRoutes(mux)
+	search := func(router *http.ServeMux) *httptest.ResponseRecorder {
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/settings/terminal/ai/search", nil))
+		return res
 	}
-	update := httptest.NewRecorder()
-	mux.ServeHTTP(update, httptest.NewRequest(http.MethodPost, "/api/v2/runtimes/php/config", strings.NewReader(`{"id":"php85","uploadMaxSize":"64M","maxExecutionTime":"120","disableFunctions":["exec","system"]}`)))
-	if update.Code != http.StatusOK {
-		t.Fatalf("PHP config update failed: %d %s", update.Code, update.Body.String())
+	update := func(router *http.ServeMux, body string) *httptest.ResponseRecorder {
+		res := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/settings/terminal/ai/update", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(res, req)
+		return res
 	}
-	updated, err := os.ReadFile(filepath.Join(installDir, "conf", "php.ini"))
-	if err != nil || !strings.Contains(string(updated), "upload_max_filesize = 64M") || !strings.Contains(string(updated), "disable_functions = exec,system") {
-		t.Fatalf("PHP config not persisted: err=%v content=%s", err, updated)
+
+	defaults := search(mux)
+	var defaultEnvelope struct {
+		Data map[string]any `json:"data"`
 	}
-	logPath := filepath.Join(installDir, "build.log")
-	if err := os.WriteFile(logPath, []byte("line-1\nline-2\n"), 0o600); err != nil {
+	if err := json.Unmarshal(defaults.Body.Bytes(), &defaultEnvelope); err != nil {
+		t.Fatalf("终端 AI 默认响应不是 JSON: %v", err)
+	}
+	if defaultEnvelope.Data["aiStatus"] != "Disable" ||
+		defaultEnvelope.Data["aiPrefix"] != "@ai" ||
+		defaultEnvelope.Data["aiRiskCommands"] != "[]" {
+		t.Fatalf("终端 AI 默认字段错误: %s", defaults.Body.String())
+	}
+	defaultRisk, ok := defaultEnvelope.Data["aiRiskCommandsDefault"].(string)
+	if !ok || !strings.HasPrefix(defaultRisk, `["rm","mkfs"`) {
+		t.Fatalf("终端 AI 默认风险命令错误: %s", defaults.Body.String())
+	}
+
+	updated := update(mux, `{"aiStatus":"enable","aiAccountId":"account-1","aiPrefix":"#ai","aiRiskCommands":" [\" rm \",\"rm\",\" reboot \",\"\"] "}`)
+	if updated.Code != http.StatusOK ||
+		!strings.Contains(updated.Body.String(), `"aiStatus":"Enable"`) ||
+		!strings.Contains(updated.Body.String(), `"aiRiskCommands":"[\"rm\",\"reboot\"]"`) {
+		t.Fatalf("终端 AI 更新失败: %d %s", updated.Code, updated.Body.String())
+	}
+
+	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(installDir, "log"), 0o750); err != nil {
+	failed := update(mux, `{"aiStatus":"Disable","aiPrefix":"!ai","aiRiskCommands":"[\"shutdown\"]"}`)
+	if failed.Code != http.StatusInternalServerError {
+		t.Fatalf("数据库关闭后更新应失败: %d %s", failed.Code, failed.Body.String())
+	}
+
+	resetSharedStoreForTest()
+	restartedStore, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(installDir, "log", "fpm.slow.log"), []byte("slow-request\n"), 0o600); err != nil {
+	if err := SetSharedStore(restartedStore); err != nil {
+		_ = restartedStore.Close()
 		t.Fatal(err)
 	}
-	logResponse := httptest.NewRecorder()
-	fileAdvancedHandler(logResponse, httptest.NewRequest(http.MethodPost, "/api/v2/files/read/php", strings.NewReader(`{"id":"php85","page":1,"pageSize":1,"path":"/etc/passwd"}`)))
-	if logResponse.Code != http.StatusOK || !strings.Contains(logResponse.Body.String(), `"line-1"`) || strings.Contains(logResponse.Body.String(), "passwd") {
-		t.Fatalf("PHP build log read contract failed: %d %s", logResponse.Code, logResponse.Body.String())
+	defer func() {
+		resetSharedStoreForTest()
+		_ = restartedStore.Close()
+	}()
+	restartedMux := http.NewServeMux()
+	RegisterRuntimeToolboxRoutes(restartedMux)
+	restarted := search(restartedMux)
+	if restarted.Code != http.StatusOK ||
+		!strings.Contains(restarted.Body.String(), `"aiStatus":"Enable"`) ||
+		!strings.Contains(restarted.Body.String(), `"aiAccountId":"account-1"`) ||
+		!strings.Contains(restarted.Body.String(), `"aiPrefix":"#ai"`) ||
+		!strings.Contains(restarted.Body.String(), `"aiRiskCommands":"[\"rm\",\"reboot\"]"`) {
+		t.Fatalf("终端 AI 重启恢复失败: %d %s", restarted.Code, restarted.Body.String())
 	}
-	slowLogResponse := httptest.NewRecorder()
-	fileAdvancedHandler(slowLogResponse, httptest.NewRequest(http.MethodPost, "/api/v2/files/read/php-fpm-slow-logs", strings.NewReader(`{"id":"php85","page":1,"pageSize":10,"path":"/etc/passwd"}`)))
-	if slowLogResponse.Code != http.StatusOK || !strings.Contains(slowLogResponse.Body.String(), `"slow-request"`) || strings.Contains(slowLogResponse.Body.String(), "passwd") {
-		t.Fatalf("PHP slow log read contract failed: %d %s", slowLogResponse.Code, slowLogResponse.Body.String())
+}
+
+func TestTerminalAISettingsRejectInvalidParameters(t *testing.T) {
+	store, err := storage.Open(filepath.Join(t.TempDir(), "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSharedStore(store); err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		resetSharedStoreForTest()
+		_ = store.Close()
+	})
+
+	mux := http.NewServeMux()
+	RegisterRuntimeToolboxRoutes(mux)
+	for _, body := range []string{
+		"{\"aiStatus\":\"Enable\",\"aiAccountId\":\"\",\"aiPrefix\":\"@ai\",\"aiRiskCommands\":\"[]\"}",
+		"{\"aiStatus\":\"Disable\",\"aiPrefix\":\"bad prefix\",\"aiRiskCommands\":\"[]\"}",
+		"{\"aiStatus\":\"Disable\",\"aiPrefix\":\"中文\",\"aiRiskCommands\":\"[]\"}",
+		"{\"aiStatus\":\"Disable\",\"aiPrefix\":\"@ai\",\"aiRiskCommands\":\"not-json\"}",
+		"{\"aiStatus\":\"unknown\",\"aiPrefix\":\"@ai\",\"aiRiskCommands\":\"[]\"}",
+	} {
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/settings/terminal/ai/update", strings.NewReader(body)))
+		if res.Code != http.StatusBadRequest {
+			t.Fatalf("非法终端 AI 参数应被拒绝: body=%s status=%d response=%s", body, res.Code, res.Body.String())
+		}
 	}
 }

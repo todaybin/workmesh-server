@@ -4,9 +4,8 @@
 package api
 
 import (
-	"bufio"
+	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/todaybin/workmesh-server/internal/logsource"
+	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -45,6 +46,7 @@ func registerAnalyticsRoutes(mux *http.ServeMux) {
 	}
 }
 
+// isAnalyticsRoute 判断路径是否属于站点监控统计兼容接口。
 func isAnalyticsRoute(pattern string) bool {
 	for _, path := range []string{"/api/v2/status", "/api/v2/attack/stat", "/api/v2/block/search", "/api/v2/config/site", "/api/v2/config/site/update", "/api/v2/global", "/api/v2/qps", "/api/v2/rank", "/api/v2/relation/stat", "/api/v2/stat", "/api/v2/test", "/api/v2/trend", "/api/v2/visitors", "/api/v2/visitors/loc"} {
 		if pattern == "GET "+path || pattern == "POST "+path {
@@ -118,6 +120,7 @@ func successAnalytics(w http.ResponseWriter, data any) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": data})
 }
 
+// analyticsWebsiteID 从多种前端字段形式解析网站 ID。
 func analyticsWebsiteID(query map[string]any) uint {
 	for _, key := range []string{"websiteID", "websiteId", "id"} {
 		switch value := query[key].(type) {
@@ -135,10 +138,12 @@ func analyticsWebsiteID(query map[string]any) uint {
 	return 0
 }
 
+// analyticsDefaultConfig 返回指定网站的默认监控配置。
 func analyticsDefaultConfig(websiteID uint) map[string]any {
 	return map[string]any{"websiteID": websiteID, "enabled": true, "storeDays": 30, "storeSize": int64(1073741824), "excludeStatus": "", "excludeExt": "", "excludeURI": "", "excludeIP": "", "excludeUA": "", "cdnType": "", "realIPHeader": ""}
 }
 
+// analyticsData 根据统计路径聚合真实访问日志事件。
 func analyticsData(path string, query map[string]any) (any, error) {
 	events, source, err := loadAnalyticsEvents(query)
 	if err != nil {
@@ -178,34 +183,40 @@ func loadAnalyticsEvents(query map[string]any) ([]analyticsEvent, string, error)
 		if dataDir == "" {
 			dataDir = "./data"
 		}
-		paths = append(paths, filepath.Join(dataDir, "logs", "access.log"), "/var/log/nginx/access.log", "/var/log/openresty/access.log")
-	}
-	var file *os.File
-	var source string
-	for _, candidate := range paths {
-		if strings.ContainsAny(candidate, "\x00\r\n") {
-			continue
-		}
-		opened, err := os.Open(filepath.Clean(candidate))
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
+		// 传入 websiteID 时，站点自己的 access.log 是唯一正确的数据源。
+		// 只有未指定站点时才读取节点级日志，避免一个站点的统计混入其他站点流量。
+		if websiteID := analyticsWebsiteID(query); websiteID > 0 {
+			svc := service.NewWebsiteService("")
+			if site, err := svc.Get(websiteID); err == nil {
+				paths = append(paths, filepath.Join(svc.SitePath(site, "logs"), "access.log"))
 			}
-			return nil, candidate, fmt.Errorf("打开访问日志 %q 失败: %w", candidate, err)
+			// 旧版本站点可能仍使用 data/websites/<id>/logs，保留只读兼容路径。
+			paths = append(paths, filepath.Join(dataDir, "websites", strconv.FormatUint(uint64(websiteID), 10), "logs", "access.log"))
+		} else {
+			paths = append(paths, filepath.Join(dataDir, "logs", "access.log"), "/var/log/nginx/access.log", "/var/log/openresty/access.log")
 		}
-		file, source = opened, candidate
-		break
 	}
-	if file == nil {
+	result, err := (logsource.FileSource{}).Read(context.Background(), logsource.Request{
+		Paths: paths, MaxBytesPerFile: analyticsLogReadLimit, MaxLines: analyticsEventLimit, FirstAvailable: true,
+	})
+	if err != nil {
+		source := ""
+		if len(result.UsedPaths) > 0 {
+			source = result.UsedPaths[0]
+		}
+		return nil, source, fmt.Errorf("读取访问日志失败: %w", err)
+	}
+	source := ""
+	if len(result.UsedPaths) > 0 {
+		source = result.UsedPaths[0]
+	}
+	if len(result.Lines) == 0 && source == "" {
 		return []analyticsEvent{}, "", nil
 	}
-	defer file.Close()
 	start, end := analyticsTimeRange(query)
-	reader := bufio.NewScanner(io.LimitReader(file, analyticsLogReadLimit))
-	reader.Buffer(make([]byte, 4096), 1<<20)
 	events := make([]analyticsEvent, 0)
-	for reader.Scan() {
-		event, ok := parseAnalyticsEvent(reader.Text())
+	for _, line := range result.Lines {
+		event, ok := parseAnalyticsEvent(line.Text)
 		if !ok || event.Occurred.Before(start) || event.Occurred.After(end) {
 			continue
 		}
@@ -214,12 +225,10 @@ func loadAnalyticsEvents(query map[string]any) ([]analyticsEvent, string, error)
 			break
 		}
 	}
-	if err := reader.Err(); err != nil {
-		return nil, source, fmt.Errorf("读取访问日志 %q 失败: %w", source, err)
-	}
 	return events, source, nil
 }
 
+// analyticsTimeRange 解析统计查询的起止时间并校正反向范围。
 func analyticsTimeRange(query map[string]any) (time.Time, time.Time) {
 	end := time.Now().UTC()
 	start := end.Add(-24 * time.Hour)
@@ -241,6 +250,7 @@ func analyticsTimeRange(query map[string]any) (time.Time, time.Time) {
 	return start, end
 }
 
+// parseAnalyticsTime 解析时间戳、RFC3339 和常见日期字符串。
 func parseAnalyticsTime(value any) time.Time {
 	text := strings.TrimSpace(fmt.Sprint(value))
 	if text == "" || text == "<nil>" {
@@ -257,6 +267,7 @@ func parseAnalyticsTime(value any) time.Time {
 	return time.Time{}
 }
 
+// parseAnalyticsEvent 将 Nginx combined 格式日志行转换为统计事件。
 func parseAnalyticsEvent(line string) (analyticsEvent, bool) {
 	match := analyticsAccessLogPattern.FindStringSubmatch(strings.TrimSpace(line))
 	if len(match) != 9 {
@@ -277,6 +288,7 @@ func parseAnalyticsEvent(line string) (analyticsEvent, bool) {
 	return analyticsEvent{IP: match[1], Method: match[3], URI: match[4], Status: status, Bytes: bytes, Referer: match[7], UserAgent: match[8], Occurred: when.UTC()}, true
 }
 
+// analyticsDaily 按日期汇总访问次数、流量和独立访客。
 func analyticsDaily(events []analyticsEvent) []map[string]any {
 	type daily struct {
 		item map[string]any
@@ -316,8 +328,10 @@ func analyticsDaily(events []analyticsEvent) []map[string]any {
 	return result
 }
 
+// analyticsVisitors 返回按日期统计的访客趋势。
 func analyticsVisitors(events []analyticsEvent) []map[string]any { return analyticsDaily(events) }
 
+// analyticsVisitorLocations 汇总访问来源 IP 的地域占位信息。
 func analyticsVisitorLocations(events []analyticsEvent) []map[string]any {
 	counts := map[string]int64{}
 	for _, event := range events {
@@ -340,6 +354,7 @@ func analyticsVisitorLocations(events []analyticsEvent) []map[string]any {
 	return result
 }
 
+// analyticsRank 按 URI、IP 或状态码生成访问排行。
 func analyticsRank(events []analyticsEvent, rankType string) []map[string]any {
 	counts := map[string]int64{}
 	for _, event := range events {
@@ -379,6 +394,7 @@ func analyticsRank(events []analyticsEvent, rankType string) []map[string]any {
 	return result
 }
 
+// analyticsStatusSummary 生成攻击、拦截和关联统计的真实摘要。
 func analyticsStatusSummary(events []analyticsEvent, path string, now time.Time) map[string]any {
 	counts := map[string]int64{}
 	for _, event := range events {
@@ -398,6 +414,7 @@ func analyticsStatusSummary(events []analyticsEvent, path string, now time.Time)
 	return map[string]any{"total": int64(len(items)), "items": items, "updatedAt": now}
 }
 
+// analyticsSpider 判断 User-Agent 是否来自常见搜索或抓取机器人。
 func analyticsSpider(ua string) bool {
 	ua = strings.ToLower(ua)
 	for _, token := range []string{"bot", "spider", "crawler", "slurp", "bingpreview"} {
@@ -408,6 +425,7 @@ func analyticsSpider(ua string) bool {
 	return false
 }
 
+// analyticsBrowser 从 User-Agent 识别浏览器类型。
 func analyticsBrowser(ua string) string {
 	ua = strings.ToLower(ua)
 	for _, browser := range []string{"edge", "chrome", "firefox", "safari", "opera"} {
@@ -418,6 +436,7 @@ func analyticsBrowser(ua string) string {
 	return "Other"
 }
 
+// analyticsOS 从 User-Agent 识别客户端操作系统。
 func analyticsOS(ua string) string {
 	ua = strings.ToLower(ua)
 	for _, osName := range []string{"windows", "android", "iphone", "mac os", "linux"} {
@@ -428,6 +447,7 @@ func analyticsOS(ua string) string {
 	return "Other"
 }
 
+// analyticsDevice 根据 User-Agent 区分移动端和桌面端。
 func analyticsDevice(ua string) string {
 	ua = strings.ToLower(ua)
 	if strings.Contains(ua, "mobile") || strings.Contains(ua, "iphone") || strings.Contains(ua, "android") {

@@ -5,6 +5,7 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -144,6 +145,15 @@ func TestStreamAuthAndOrigin(t *testing.T) {
 	request.Header.Set("Origin", "http://node.example")
 	if !validStreamOrigin(request) {
 		t.Fatal("同源 Origin 应被允许")
+	}
+}
+
+func TestStreamAuthAllowsVerifiedNodeRelay(t *testing.T) {
+	t.Setenv("WORKMESH_STREAM_TOKEN", "stream-secret")
+	request := httptest.NewRequest("GET", "http://node.example/api/v2/containers/search/log", nil)
+	request = request.WithContext(context.WithValue(request.Context(), forwardedVerifiedKey{}, true))
+	if !requireStreamAuth(httptest.NewRecorder(), request, "WORKMESH_STREAM_TOKEN") {
+		t.Fatal("已完成节点透传验签的流式请求不应再次要求浏览器令牌")
 	}
 }
 

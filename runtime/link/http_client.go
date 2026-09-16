@@ -114,10 +114,11 @@ func (c *HTTPClient) Pull(ctx context.Context, cursor SyncCursor) ([]byte, SyncC
 // Push 将一批控制面数据写入远端同步流，并返回远端最新游标。
 func (c *HTTPClient) Push(ctx context.Context, cursor SyncCursor, payload []byte) (SyncCursor, error) {
 	request := struct {
-		Stream  string `json:"stream"`
-		Version uint64 `json:"version"`
-		Payload []byte `json:"payload"`
-	}{Stream: cursor.Stream, Version: cursor.Version, Payload: payload}
+		Stream    string `json:"stream"`
+		Version   uint64 `json:"version"`
+		RoleEpoch uint64 `json:"roleEpoch,omitempty"`
+		Payload   []byte `json:"payload"`
+	}{Stream: cursor.Stream, Version: cursor.Version, RoleEpoch: cursor.RoleEpoch, Payload: payload}
 	var response struct {
 		Cursor SyncCursor `json:"cursor"`
 	}
@@ -139,6 +140,7 @@ func Sign(secret []byte, method, path, timestamp, nonce string, body []byte) str
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// doJSON 编码请求、执行带重试的链路调用，并解包统一响应 envelope。
 func (c *HTTPClient) doJSON(ctx context.Context, method, endpoint string, input, output any) error {
 	if c.BaseURL == "" {
 		return errors.New("节点地址未配置")
@@ -178,6 +180,7 @@ func (c *HTTPClient) doJSON(ctx context.Context, method, endpoint string, input,
 	return lastErr
 }
 
+// doAttempt 为一次链路请求生成新 nonce，发送请求并限制响应体大小。
 func (c *HTTPClient) doAttempt(ctx context.Context, method, endpoint string, body []byte) ([]byte, int, error) {
 	requestCtx := ctx
 	if c.Timeout > 0 {
@@ -226,6 +229,7 @@ func (c *HTTPClient) doAttempt(ctx context.Context, method, endpoint string, bod
 	return data, response.StatusCode, nil
 }
 
+// decodeEnvelope 解析 WorkMesh envelope，并兼容直接返回业务对象的响应。
 func decodeEnvelope(data []byte, output any) error {
 	var envelope struct {
 		Code    json.RawMessage `json:"code"`
@@ -244,6 +248,7 @@ func decodeEnvelope(data []byte, output any) error {
 	return json.Unmarshal(data, output)
 }
 
+// retryable 判断网络错误及临时 HTTP 状态是否允许继续重试。
 func retryable(ctx context.Context, status int, err error) bool {
 	if ctx.Err() != nil {
 		return false
@@ -254,6 +259,7 @@ func retryable(ctx context.Context, status int, err error) bool {
 	return status == http.StatusRequestTimeout || status == http.StatusTooEarly || status == http.StatusTooManyRequests || status >= 500
 }
 
+// waitRetry 按尝试次数执行指数退避，并响应调用方取消信号。
 func waitRetry(ctx context.Context, delay time.Duration, attempt int) error {
 	if attempt > 0 {
 		delay *= time.Duration(1 << min(attempt, 6))
@@ -268,6 +274,7 @@ func waitRetry(ctx context.Context, delay time.Duration, attempt int) error {
 	}
 }
 
+// randomNonce 使用加密随机源生成链路请求 nonce。
 func randomNonce() (string, error) {
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -276,6 +283,7 @@ func randomNonce() (string, error) {
 	return hex.EncodeToString(raw[:]), nil
 }
 
+// min 返回两个整数中的较小值，用于限制退避指数。
 func min(left, right int) int {
 	if left < right {
 		return left

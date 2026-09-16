@@ -4,56 +4,56 @@
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [x] | 所有功能域共享同一运行数据根目录 | `apps/workmesh-node/core/init`、`agent/init` 及各 service 初始化 | `config/config.go` 与认证、网关、主机、容器、数据库、文件、任务、网站模块统一读取 `WORKMESH_DATA_DIR`，默认 `./data` | 源码无其他回退目录；模块重载测试和全量测试通过 |
-| [x] | 仪表盘系统信息可随主机路由组独立挂载 | `apps/workmesh-node/agent/router/ro_dashboard.go` | `node/api/host_container_cron.go:RegisterHostContainerCronRoutes` 注册 `GET /api/v2/dashboard/base/os`，总路由不重复注册 | 模块级路由测试返回 200，统一服务启动无重复路由 panic |
+| [x] | 所有功能域共享同一运行数据根目录 | `/www/apps/1Panel/core/init`、`agent/init` 及各 service 初始化 | `config/config.go` 与认证、网关、主机、容器、数据库、文件、任务、网站模块统一读取 `WORKMESH_DATA_DIR`，默认 `./data` | 源码无其他回退目录；模块重载测试和全量测试通过 |
+| [x] | 仪表盘系统信息可随主机路由组独立挂载 | `/www/apps/1Panel/agent/router/ro_dashboard.go` | `node/api/host_container_cron.go:RegisterHostContainerCronRoutes` 注册 `GET /api/v2/dashboard/base/os`，总路由不重复注册 | 模块级路由测试返回 200，统一服务启动无重复路由 panic |
 
 ## 2026-08-31 别名与文件系统隐藏能力
 
 | 隐藏能力 | 发现位置 | 实现位置 | 状态 | 说明 |
 |---|---|---|---|---|
-| xpack 监控/WAF 别名方法路由 | `apps/workmesh-node/agent/router/ro_website.go` | `node/api/website.go` | implemented | 修复 ServeMux 方法模式拼接，别名进入真实 analytics/WAF 处理器 |
-| 网站资源与负载均衡查询 | `apps/workmesh-node/agent/app/service/website.go` | `node/api/website.go`、`website_extensions.go` | implemented | 读取网站配置、域名并返回资源列表 |
-| 文件 owner、挂载点、用户组查询 | `apps/workmesh-node/agent/app/api/v2/file.go` | `node/api/files_routes.go` | implemented | Linux 使用 os/user 与 Chown，Windows 返回明确不支持 |
-| 媒体文件转换任务 | `apps/workmesh-node/agent/app/service/file.go:Convert` | `node/api/files_routes.go` | implemented | 通过受控 `WORKMESH_MEDIA_CONVERTER` 执行并设置 5 分钟超时；输出原子替换，日志持久化并支持分页筛选 |
+| xpack 监控/WAF 别名方法路由 | `/www/apps/1Panel/agent/router/ro_website.go` | `node/api/website.go` | implemented | 修复 ServeMux 方法模式拼接，别名进入真实 analytics/WAF 处理器 |
+| 网站资源与负载均衡查询 | `/www/apps/1Panel/agent/app/service/website.go` | `node/api/website.go`、`website_extensions.go` | implemented | 读取网站配置、域名并返回资源列表 |
+| 文件 owner、挂载点、用户组查询 | `/www/apps/1Panel/agent/app/api/v2/file.go` | `node/api/files_routes.go` | implemented | Linux 使用 os/user 与 Chown，Windows 返回明确不支持 |
+| 媒体文件转换任务 | `/www/apps/1Panel/agent/app/service/file.go:Convert` | `node/api/files_routes.go` | implemented | 通过受控 `WORKMESH_MEDIA_CONVERTER` 执行并设置 5 分钟超时；输出原子替换，日志持久化并支持分页筛选 |
 <!-- Copyright (c) 2026 WorkMesh contributors -->
 
 ## 2026-08-31 首页配置状态持久化
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [x] | 快速跳转数组与应用启动器显示状态持久化 | `apps/workmesh-node/agent/app/service/dashboard.go:ChangeQuick`、`ChangeShow`、`ListLauncherOption` | `node/api/dashboard.go:handleDashboardMutation` 将配置写入 `domains.json`，`dashboardQuickJumps` 在请求和重启后恢复，启动器选项保留隐藏项并返回 `isShow` | 至少一个快速入口可见、最多四个可见；非法 key/status/JSON 拒绝；持久化重载测试通过 |
+| [x] | 快速跳转数组与应用启动器显示状态持久化 | `/www/apps/1Panel/agent/app/service/dashboard.go:ChangeQuick`、`ChangeShow`、`ListLauncherOption` | `node/api/dashboard.go:handleDashboardMutation` 将配置写入 `domains.json`，`dashboardQuickJumps` 在请求和重启后恢复，启动器选项保留隐藏项并返回 `isShow` | 至少一个快速入口可见、最多四个可见；非法 key/status/JSON 拒绝；持久化重载测试通过 |
 
 ## 2026-08-31 网站监控访问日志采集
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [x] | Nginx/OpenResty combined access.log 增量统计 | `apps/workmesh-node/agent/app/service/website_monitor.go:collectWebsiteLog`、`Stat`、`QPS`、`Rank` | `node/api/analytics.go:loadAnalyticsEvents`、`analyticsDaily`、`analyticsRank`；路径可配置且单次限制 8 MiB/50000 条 | 无日志返回真实空结果；请求时间范围、状态码、流量、UV、排行均由日志计算；样例日志测试通过 |
+| [x] | Nginx/OpenResty combined access.log 增量统计 | `/www/apps/1Panel/agent/app/service/website_monitor.go:collectWebsiteLog`、`Stat`、`QPS`、`Rank` | `node/api/analytics.go:loadAnalyticsEvents`、`analyticsDaily`、`analyticsRank`；路径可配置且单次限制 8 MiB/50000 条 | 无日志返回真实空结果；请求时间范围、状态码、流量、UV、排行均由日志计算；样例日志测试通过 |
 
 ## 2026-08-30 核心认证与执行入口
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [x] | Passkey 注册挑战、凭据列表与删除 | `apps/workmesh-node/core/app/service/auth.go` | `control/service/core.go`、`node/api/core_handlers.go`，挑战 5 分钟过期并持久化元数据 | 需要会话鉴权、重复凭据拒绝和重启后加载 |
-| [x] | 脚本库运行入口 | `apps/workmesh-node/core/app/api/v2/script_library.go:RunScript` | `node/api/core_resources.go:handleScriptRun`，仅接受已登记 `script_id` 且有令牌 | 未配置令牌或脚本时明确错误，禁止任意命令 |
-| [x] | 进程 PID 详情采集 | `apps/workmesh-node/agent/app/service/process.go` | `node/api/process.go:readProcessDetails`，读取 procfs 内存和用户 | PID 校验、资源不存在 404、平台降级 |
+| [x] | Passkey 注册挑战、凭据列表与删除 | `/www/apps/1Panel/core/app/service/auth.go` | `control/service/core.go`、`node/api/core_handlers.go`，挑战 5 分钟过期并持久化元数据 | 需要会话鉴权、重复凭据拒绝和重启后加载 |
+| [x] | 脚本库运行入口 | `/www/apps/1Panel/core/app/api/v2/script_library.go:RunScript` | `node/api/core_resources.go:handleScriptRun`，仅接受已登记 `script_id` 且有令牌 | 未配置令牌或脚本时明确错误，禁止任意命令 |
+| [x] | 进程 PID 详情采集 | `/www/apps/1Panel/agent/app/service/process.go` | `node/api/process.go:readProcessDetails`，读取 procfs 内存和用户 | PID 校验、资源不存在 404、平台降级 |
 
 ## 2026-08-30 命令执行入口审计
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [x] | 命令模板和脚本库受控执行 | `apps/workmesh-node/core/app/api/v2/script_library.go`、`agent/app/service/command.go` | `node/api/core_resources.go`、`node/service/taskruntime`；脚本 ID 白名单、令牌校验、超时和输出上限 | 禁止任意命令，外部进程失败可观测，长任务可查询 |
+| [x] | 命令模板和脚本库受控执行 | `/www/apps/1Panel/core/app/api/v2/script_library.go`、`agent/app/service/command.go` | `node/api/core_resources.go`、`node/service/taskruntime`；脚本 ID 白名单、令牌校验、超时和输出上限 | 禁止任意命令，外部进程失败可观测，长任务可查询 |
 
 ## 2026-08-30 日志后台能力
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [x] | system 日志文件枚举与服务探测 | `apps/workmesh-node/agent/app/service/logs.go` | `node/api/functional_domains.go:listSystemLogFiles/listRunningSystemServices`，外部命令 5 秒超时 | 日志目录和 systemctl/tasklist 均有明确降级 |
-| [x] | 任务日志分页与路径安全 | `apps/workmesh-node/agent/app/service/task.go:ReadByLine` | `node/api/functional_domains.go:readTaskLog`，路径白名单、单页 500 行 | 正常读取、分页、越权 403 测试通过 |
-| [x] | 执行中任务计数 | `apps/workmesh-node/agent/app/service/task.go:CountExecutingTask` | `node/api/functional_domains.go:registerLogRoutes`，从持久化日志状态统计 | 写入 running/executing 后计数准确 |
+| [x] | system 日志文件枚举与服务探测 | `/www/apps/1Panel/agent/app/service/logs.go` | `node/api/functional_domains.go:listSystemLogFiles/listRunningSystemServices`，外部命令 5 秒超时 | 日志目录和 systemctl/tasklist 均有明确降级 |
+| [x] | 任务日志分页与路径安全 | `/www/apps/1Panel/agent/app/service/task.go:ReadByLine` | `node/api/functional_domains.go:readTaskLog`，路径白名单、单页 500 行 | 正常读取、分页、越权 403 测试通过 |
+| [x] | 执行中任务计数 | `/www/apps/1Panel/agent/app/service/task.go:CountExecutingTask` | `node/api/functional_domains.go:registerLogRoutes`，从持久化日志状态统计 | 写入 running/executing 后计数准确 |
 
 ## 2026-08-30 运行时详情能力
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [x] | PHP 运行时扩展、配置及 FPM 状态查询 | `apps/workmesh-node/agent/app/service/runtime.go` | `node/api/runtime_toolbox.go:registerRuntimeSubroutes` 从 runtime.json 返回记录 | 创建运行时后详情可查询，未知 ID 返回 404 |
-| [x] | Supervisor 进程配置查询 | `apps/workmesh-node/agent/app/service/runtime.go` | `node/api/runtime_toolbox.go:registerRuntimeSubroutes` 读取 supervisor 配置 | 未配置进程返回 not_configured，不伪造运行状态 |
+| [x] | PHP 运行时扩展、配置及 FPM 状态查询 | `/www/apps/1Panel/agent/app/service/runtime.go` | `node/api/runtime_toolbox.go:registerRuntimeSubroutes` 从 runtime.json 返回记录 | 创建运行时后详情可查询，未知 ID 返回 404 |
+| [x] | Supervisor 进程配置查询 | `/www/apps/1Panel/agent/app/service/runtime.go` | `node/api/runtime_toolbox.go:registerRuntimeSubroutes` 读取 supervisor 配置 | 未配置进程返回 not_configured，不伪造运行状态 |
 
 # 隐藏功能迁移清单
 
@@ -61,11 +61,11 @@
 
 | 功能名称 | 旧源码入口 | 新源码入口 | 数据来源 | 测试 | 状态 | 剩余缺口 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 主机网络与挂载点采集 | `apps/workmesh-node/agent/api/v2/dashboard.go` | `node/api/dashboard.go:dashboardNetwork`、`dashboardDisks` | `/proc/net/dev`、`/proc/mounts` | `node/api/dashboard_test.go` | implemented | 非 Linux 环境无内核接口时返回 supported=false；硬件加速器需驱动适配 |
-| CPU、内存、交换区与块设备 I/O 采集 | `apps/workmesh-node/agent/api/v2/dashboard.go`、`agent/app/service/system.go` | `node/api/dashboard.go:dashboardCPUInfo`、`dashboardIO`、`dashboardCurrent` | `/proc/stat`、`/proc/meminfo`、`/proc/diskstats` | `node/api/dashboard_test.go` | implemented | Linux 提供累计 CPU/内存/I/O 指标；无 procfs 平台返回稳定零值和非空数组，避免前端 NaN |
-| 挂载点容量与系统识别信息 | `apps/workmesh-node/agent/app/service/system.go` | `node/api/dashboard.go:handleDashboardOS`、`handleDashboardBase` | `node/api/dashboard_disk_unix.go`、`dashboard_disk_windows.go`、`/etc/os-release`、`net.Interfaces` | `node/api/dashboard_test.go` | implemented | Unix 使用 statfs，Windows 明确标记容量 unavailable；硬件加速器待驱动适配 |
+| 主机网络与挂载点采集 | `/www/apps/1Panel/agent/api/v2/dashboard.go` | `node/api/dashboard.go:dashboardNetwork`、`dashboardDisks` | `/proc/net/dev`、`/proc/mounts` | `node/api/dashboard_test.go` | implemented | 非 Linux 环境无内核接口时返回 supported=false；硬件加速器需驱动适配 |
+| CPU、内存、交换区与块设备 I/O 采集 | `/www/apps/1Panel/agent/api/v2/dashboard.go`、`agent/app/service/system.go` | `node/api/dashboard.go:dashboardCPUInfo`、`dashboardIO`、`dashboardCurrent` | `/proc/stat`、`/proc/meminfo`、`/proc/diskstats` | `node/api/dashboard_test.go` | implemented | Linux 提供累计 CPU/内存/I/O 指标；无 procfs 平台返回稳定零值和非空数组，避免前端 NaN |
+| 挂载点容量与系统识别信息 | `/www/apps/1Panel/agent/app/service/system.go` | `node/api/dashboard.go:handleDashboardOS`、`handleDashboardBase` | `node/api/dashboard_disk_unix.go`、`dashboard_disk_windows.go`、`/etc/os-release`、`net.Interfaces` | `node/api/dashboard_test.go` | implemented | Unix 使用 statfs，Windows 明确标记容量 unavailable；硬件加速器待驱动适配 |
 
-本清单覆盖旧 `apps/workmesh-node/core` 与 `agent` 中不一定表现为 HTTP 路由的能力。当前路由清单为 871 条（包含 helper 注册、公共备份账号空路径和去品牌化静态入口）；本文件用于防止初始化钩子、后台作业、中间件和协议升级能力在迁移时遗漏。
+本清单覆盖只读参考 `apps/1Panel/core` 与 `agent` 中不一定表现为 HTTP 路由的能力。当前正式路由清单为 759 条（包含 helper 注册、公共备份账号空路径和去品牌化静态入口）；历史条目中的 `/www/apps/1Panel` 仅表示过渡期证据，不再作为现行来源。本文件用于防止初始化钩子、后台作业、中间件和协议升级能力在迁移时遗漏。
 
 状态定义：
 
@@ -79,9 +79,9 @@
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [x] | wget 下载任务上下文、超时和取消 | `apps/workmesh-node/agent/app/service/file.go:Wget`、`StopWget` | `node/api/files_routes.go:handleFileWget` 使用 30 分钟 context、临时文件和原子 rename | process/keys 可查询，stop 可取消，失败状态可见 |
-| [x] | AI 文件内容搜索扫描限制 | `apps/workmesh-node/agent/app/service/file.go:AISearch`、`utils/files/ai_content_search.go` | `node/api/files_routes.go:handleFileAISearch` 限制 500 文件、500 命中、8 MiB 单文件 | 参数错误、目录不存在、正则错误均返回结构化错误 |
-| [x] | 批量文件操作路径校验 | `apps/workmesh-node/agent/app/service/file.go:BatchDelete/BatchCheckFiles/BatchChangeModeAndOwner` | `node/api/files_routes.go:fileAdvancedHandler` 每路径 clean/stat，数量和 mode 有上限 | 非法路径不执行，部分失败逐项返回 |
+| [x] | wget 下载任务上下文、超时和取消 | `/www/apps/1Panel/agent/app/service/file.go:Wget`、`StopWget` | `node/api/files_routes.go:handleFileWget` 使用 30 分钟 context、临时文件和原子 rename | process/keys 可查询，stop 可取消，失败状态可见 |
+| [x] | AI 文件内容搜索扫描限制 | `/www/apps/1Panel/agent/app/service/file.go:AISearch`、`utils/files/ai_content_search.go` | `node/api/files_routes.go:handleFileAISearch` 限制 500 文件、500 命中、8 MiB 单文件 | 参数错误、目录不存在、正则错误均返回结构化错误 |
+| [x] | 批量文件操作路径校验 | `/www/apps/1Panel/agent/app/service/file.go:BatchDelete/BatchCheckFiles/BatchChangeModeAndOwner` | `node/api/files_routes.go:fileAdvancedHandler` 每路径 clean/stat，数量和 mode 有上限 | 非法路径不执行，部分失败逐项返回 |
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
@@ -106,8 +106,8 @@
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [x] | Core 与 Agent 语言键集合合并 | `apps/workmesh-node/core/i18n/lang/*.yaml`、`apps/workmesh-node/agent/i18n/lang/*.yaml` | `i18n/lang/*.yaml` 每种语言 1037 个键；`i18n/i18n.go` 启动一次解析并缓存 | 12 种语言键集合一致，模板占位符一致，未知语言回退中文 |
-| [x] | 前端语言选择入口 | `apps/workmesh-node/frontend/src/lang`、登录/设置/分享入口 | `web/src/lang`、`App.vue`、登录页两个菜单、设置页、分享页 | 12 种语言模块键结构一致且可从每个入口选择 |
+| [x] | Core 与 Agent 语言键集合合并 | `/www/apps/1Panel/core/i18n/lang/*.yaml`、`/www/apps/1Panel/agent/i18n/lang/*.yaml` | `i18n/lang/*.yaml` 每种语言 1037 个键；`i18n/i18n.go` 启动一次解析并缓存 | 12 种语言键集合一致，模板占位符一致，未知语言回退中文 |
+| [x] | 前端语言选择入口 | `/www/apps/1Panel/frontend/src/lang`、登录/设置/分享入口 | `web/src/lang`、`App.vue`、登录页两个菜单、设置页、分享页 | 12 种语言模块键结构一致且可从每个入口选择 |
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现/证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
@@ -122,7 +122,7 @@
 | [~] | 通用错误 envelope 与稳定错误码 | `core/buserr/*.go`、`core/middleware/*.go` | `i18n.ErrorCode/LocalizeError`、`runtime/http.JSON` 自动补充 `details.errCode`；控制面和节点面 `writeError` 已接入 | 基础安全错误已覆盖；业务域仍需逐项迁移专用语言键和多错误聚合 |
 | [x] | Session/Bearer/API Key/CSRF/域名/密码过期拒绝文案 | `core/middleware/session.go`、`csrf_protect.go`、`bind_domain.go`、`password_expired.go` | `control/api/security_middleware.go` 统一执行，错误按 Accept-Language 本地化；英文未授权、CSRF、域名和过期测试通过 | 未授权请求不得伪造成功，Cookie 会话写请求仍需 CSRF 双提交 |
 | [x] | 异步任务、取消、重试、超时和日志 | `core/app/task/task.go`、`agent/global/global.go` | `node/service/cronjob.go`、任务 API；Go 单测 | 取消请求可终止执行，重启后记录可恢复 |
-| [x] | 任务隔离 Provider 生命周期与 CLI 白名单 | `apps/workmesh-node/agent/app/api/v2/workmesh_task.go`、`agent/utils/cubesandbox/task.go`、`forgevm_task_backend.go` | `node/service/taskruntime/taskruntime.go`、`node/api/ai_execution.go:taskHandler`；固定 sha256 CLI、argv 校验、状态转换和 30 分钟超时 | 未配置真实 CLI 时返回明确 503；配置摘要后 create/start/exec/collect/cancel/destroy 均调用受控 Provider，禁止宿主 Shell |
+| [x] | 任务隔离 Provider 生命周期与 CLI 白名单 | `/www/apps/1Panel/agent/app/api/v2/workmesh_task.go`、`agent/utils/cubesandbox/task.go`、`forgevm_task_backend.go` | `node/service/taskruntime/taskruntime.go`、`node/api/ai_execution.go:taskHandler`；固定 sha256 CLI、argv 校验、状态转换和 30 分钟超时 | 未配置真实 CLI 时返回明确 503；配置摘要后 create/start/exec/collect/cancel/destroy 均调用受控 Provider，禁止宿主 Shell |
 | [x] | 任务日志滚动与清理 | `core/log`、`agent/log` | `runtime/log/logger.go`、`runtime/log/logger_test.go` | 按大小轮转并保留 5 个历史文件，写入线程安全，关闭时刷新 |
 
 ## 后台作业与数据维护
@@ -149,11 +149,11 @@
 
 | 状态 | 隐藏注册 | 旧源码证据 | 当前风险与完成条件 |
 | --- | --- | --- | --- |
-| [~] | `xpack/monitor` 监控别名 15 条：`GET /api/v2/xpack/monitor/status`、`POST /api/v2/xpack/monitor/{stat,visitors,visitors/loc,qps,rank,trend,logs/search,logs/stat,logs/detail,logs/clear,websites,config/global,config/site,config/site/update}` | `apps/workmesh-node/agent/router/ro_website.go:130-154`；新 `node/api/website.go` 已显式注册 | 当前由兼容处理器防止 404；应与 `/api/v2/websites/monitor/*` 使用同一真实监控服务并增加 E2E。 |
-| [~] | `xpack/waf` WAF 别名 15 条：`GET /api/v2/xpack/waf/{status,standard-rules,sites,sites/:id/rules,access-lists}`、`POST /api/v2/xpack/waf/{test,global,sites,rules,rules/delete,attack/stat,log/search,block/search,relation/stat,access-lists}` | `apps/workmesh-node/agent/router/ro_website.go:131,157-172`；新 `node/api/website.go` 已显式注册 | 当前由兼容处理器防止 404；应绑定 `WebsiteService` 的 WAF 存储并覆盖读写测试。 |
-| [~] | Swagger 文档 `GET /swagger/*any` | `apps/workmesh-node/core/init/router/router.go:77-79`；新服务 `/swagger/{any...}` | 已提供 `/swagger/*any` JSON 入口；尚未接入文档文件和 SessionAuth，生产发布前必须补齐鉴权。 |
-| [~] | 静态文件 `GET/HEAD /public/*filepath`、`GET/HEAD /favicon.ico/*filepath`、`GET/HEAD /assets/*filepath` | `apps/workmesh-node/core/init/router/router.go:25-39` | 新服务仅显式托管 `/assets/{filepath...}`、`/api/v2/images/*`、`/api/v2/static/*`；需验证 favicon/public 和 HEAD 响应的 MIME、缓存及路径穿越策略。 |
-| [~] | 动态安全入口 `GET /{securityEntrance}` 与根页面安全检查 | `apps/workmesh-node/core/init/router/router.go:43-63` | 新服务根 Handler 对任意路径直接提供 SPA，未复刻 security entrance、Cookie 设置和安全检查；需在认证 E2E 中验证未授权访问行为。 |
+| [~] | `xpack/monitor` 监控别名 15 条：`GET /api/v2/xpack/monitor/status`、`POST /api/v2/xpack/monitor/{stat,visitors,visitors/loc,qps,rank,trend,logs/search,logs/stat,logs/detail,logs/clear,websites,config/global,config/site,config/site/update}` | `/www/apps/1Panel/agent/router/ro_website.go:130-154`；新 `node/api/website.go` 已显式注册 | 当前由兼容处理器防止 404；应与 `/api/v2/websites/monitor/*` 使用同一真实监控服务并增加 E2E。 |
+| [~] | `xpack/waf` WAF 别名 15 条：`GET /api/v2/xpack/waf/{status,standard-rules,sites,sites/:id/rules,access-lists}`、`POST /api/v2/xpack/waf/{test,global,sites,rules,rules/delete,attack/stat,log/search,block/search,relation/stat,access-lists}` | `/www/apps/1Panel/agent/router/ro_website.go:131,157-172`；新 `node/api/website.go` 已显式注册 | 当前由兼容处理器防止 404；应绑定 `WebsiteService` 的 WAF 存储并覆盖读写测试。 |
+| [~] | Swagger 文档 `GET /swagger/*any` | `/www/apps/1Panel/core/init/router/router.go:77-79`；新服务 `/swagger/{any...}` | 已提供 `/swagger/*any` JSON 入口；尚未接入文档文件和 SessionAuth，生产发布前必须补齐鉴权。 |
+| [~] | 静态文件 `GET/HEAD /public/*filepath`、`GET/HEAD /favicon.ico/*filepath`、`GET/HEAD /assets/*filepath` | `/www/apps/1Panel/core/init/router/router.go:25-39` | 新服务仅显式托管 `/assets/{filepath...}`、`/api/v2/images/*`、`/api/v2/static/*`；需验证 favicon/public 和 HEAD 响应的 MIME、缓存及路径穿越策略。 |
+| [~] | 动态安全入口 `GET /{securityEntrance}` 与根页面安全检查 | `/www/apps/1Panel/core/init/router/router.go:43-63` | 新服务根 Handler 对任意路径直接提供 SPA，未复刻 security entrance、Cookie 设置和安全检查；需在认证 E2E 中验证未授权访问行为。 |
 
 实现状态扫描结果见逐路由清单，当前基线为 870 条路径；不能替代本节隐藏注册验收。特别关注以下固定/降级响应：`POST /api/v2/ai/agents/agent/list`、`POST /api/v2/ai/agents/agent/channels`、`POST /api/v2/ai/agents/overview`、GPU 无硬件时的空设备列表、`GET /api/v2/process/:pid`、文件回收站/收藏/上传查询、PHP/Node 运行时详情和工具箱配置。这些路径虽有处理器，仍需真实副作用或明确的能力不可用契约后才能将 `[~]` 改为 `[x]`。
 
@@ -170,7 +170,7 @@
 | [x] | 本地文件上传、恢复和上传后恢复 | `handleBackupUpload`、`handleBackupRecover` | `TestBackupUploadAndConnectionChecks`、`TestBackupAccountAndRecordLifecycle` |
 | [x] | 备份连接检查和本地 Bucket 查询 | `handleBackupConnCheck`、`handleBackupBuckets` | 本地目录真实读取；未配置云端时返回 `BACKUP_PROVIDER_UNAVAILABLE`，不伪造空列表 |
 | [x] | 云端 OAuth token 刷新和远端 Bucket 操作 | `handleBackupRefreshTokenV2`、`handleBackupBucketsV2`、`node/service/backup_provider.go` | 显式端点执行 OAuth refresh_token、Bucket 查询、multipart 上传和 JSON 删除；Bearer/API Key 脱敏、15 秒/30 分钟超时、3 次有限重试；账号 Vars 原子持久化 | `node/service/backup_provider_test.go`、`node/api/functional_domains_test.go:TestBackupCloudUploadAndDeleteUseProvider`；未配置端点返回明确 503 |
-| [x] | SSL 自动续期失败重试与状态报告 | `apps/workmesh-node/agent/cron/job/website.go`、`ssl.go` | `node/service/website_security.go:RenewDueCertificates` 对到期 self-signed 证书执行最多 3 次指数退避，记录 `Retries` 和失败上下文；无 ACME 凭据不伪造成功 | `node/service/ssl_test.go:TestWebsiteSecurityRenewRetriesAndReportsFailure` |
+| [x] | SSL 自动续期失败重试与状态报告 | `/www/apps/1Panel/agent/cron/job/website.go`、`ssl.go` | `node/service/website_security.go:RenewDueCertificates` 对到期 self-signed 证书执行最多 3 次指数退避，记录 `Retries` 和失败上下文；无 ACME 凭据不伪造成功 | `node/service/ssl_test.go:TestWebsiteSecurityRenewRetriesAndReportsFailure` |
 
 ### 2026-08-30 隐藏路由批次
 
@@ -192,8 +192,8 @@
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 完成条件 |
 |---|---|---|---|---|
-| [x] | 应用安装、版本和运行状态探测 | `apps/workmesh-node/agent/app/api/v2/app_install.go:CheckAppInstalled`、`agent/app/service/nginx.go`、`database*.go` | `node/service/environment.go:ProbeApplication`、`node/api/apps.go:handleAppPost`；OpenResty/MySQL/PostgreSQL/Redis/Docker 使用受限探针，3-10 秒超时，返回 `isExist/isActive/status/version/error` | 已安装与未安装明确区分；daemon 不可用返回 stopped；无固定空数据；模拟二进制与 API 契约测试通过 |
-| [x] | 云端备份 Bucket 标准接口 | `apps/workmesh-node/agent/cron/job/backup.go`、备份提供商适配器 | `node/api/functional_domains.go:handleBackupBuckets`、`normalizeBuckets`；从账号 Vars 读取显式 HTTPS 端点，Bearer 鉴权、15 秒超时、2 MiB 响应和 500 项上限 | 配置端点返回真实 Bucket 列表；错误、未配置和非法 URL 明确失败；不返回固定空列表；`TestBackupBucketsUsesConfiguredProviderEndpoint` 通过 |
+| [x] | 应用安装、版本和运行状态探测 | `/www/apps/1Panel/agent/app/api/v2/app_install.go:CheckAppInstalled`、`agent/app/service/nginx.go`、`database*.go` | `node/service/environment.go:ProbeApplication`、`node/api/apps.go:handleAppPost`；OpenResty/MySQL/PostgreSQL/Redis/Docker 使用受限探针，3-10 秒超时，返回 `isExist/isActive/status/version/error` | 已安装与未安装明确区分；daemon 不可用返回 stopped；无固定空数据；模拟二进制与 API 契约测试通过 |
+| [x] | 云端备份 Bucket 标准接口 | `/www/apps/1Panel/agent/cron/job/backup.go`、备份提供商适配器 | `node/api/functional_domains.go:handleBackupBuckets`、`normalizeBuckets`；从账号 Vars 读取显式 HTTPS 端点，Bearer 鉴权、15 秒超时、2 MiB 响应和 500 项上限 | 配置端点返回真实 Bucket 列表；错误、未配置和非法 URL 明确失败；不返回固定空列表；`TestBackupBucketsUsesConfiguredProviderEndpoint` 通过 |
 
 1. 每勾选一项，必须在本表“新实现/证据”列写入代码路径、测试命令或部署记录。
 2. `[~]` 和 `[ ]` 项不得在发布说明中描述为“完整迁移”；必须关联缺口任务和责任人。
@@ -203,18 +203,18 @@
 ```powershell
 node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='off'; Set-Location apps/workmesh-server; go test ./..."
 node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='off'; Set-Location apps/workmesh-server; go vet ./..."
-node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/route-scan.mjs check --legacy apps/workmesh-node --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json
-node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/implementation-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --out .tmp/implementation-status.json
+node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/route-scan.mjs check --legacy apps/1Panel --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json
+node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/implementation-scan.mjs --legacy apps/1Panel --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json --out .tmp/implementation-status.json
 ```
 
 5. 发现旧源码中新增 `init`、`cron/job`、`middleware`、`i18n`、`log`、`ws`、`sse` 或命令入口时，先补充本清单，再实现代码。
 
 ## 2026-08-30 实现扫描器可信度审计
 
-扫描器已修正为：忽略未被主路由调用的 `registerUnmigratedRoutes`，过滤函数中的路径常量不再作为实现证据；只有直接 `HandleFunc`、明确注册辅助函数或实际注册循环才计入。当前报告（基于 `test/contract/routes.json` 共 871 条）为 `implemented 871`、`partial 0`、`pending 0`。该报告不把兼容占位当作完成，重新生成命令为：
+扫描器已修正为：忽略未被主路由调用的 `registerUnmigratedRoutes`，过滤函数中的路径常量不再作为实现证据；只有直接 `HandleFunc`、明确注册辅助函数或实际注册循环才计入。当前报告（基于只读 `/www/apps/1Panel` 生成的 `test/contract/routes.json` 共 759 条）为 `implemented 759`、`partial 0`、`pending 0`。该报告不把兼容占位当作完成，重新生成命令为：
 
 ```powershell
-node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/implementation-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json --out .tmp/implementation-status.json --markdown apps/workmesh-server/docs/migration/function-checklist-generated.md
+node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/implementation-scan.mjs --legacy apps/1Panel --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json --out .tmp/implementation-status.json --markdown apps/workmesh-server/docs/migration/function-checklist-generated.md
 ```
 
 | 状态 | 路由 | 当前证据 | 剩余缺口 |
@@ -230,12 +230,12 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 
 | 状态 | 功能 | 旧源码证据 | 新项目证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [ ] | Agent/Core 启动初始化钩子 | `apps/workmesh-node/agent/init/hook/hook.go`、`agent/init/business/business.go` | `cmd/workmesh-server/main.go` 当前仅初始化 Store、Cache、Role、Scheduler、Gateway | 逐项接入全局数据、计划任务状态、运行时/SSL/Task 恢复、ACME 默认账户、Docker Compose 探测，并有重启测试 |
-| [x] | Cobra/等价 CLI 管理入口 | `apps/workmesh-node/core/cmd/server/cmd/*.go` | `cmd/workmesh-server/cli.go`、`cli_test.go` | 已实现 `version`、`user-list`、`user-info`、`reset`、`listen-ip`、`app init`、签名制品 `restore/update`；Ed25519、SHA-256、目标路径限制和原子替换均有测试 |
-| [~] | 全局 Session/CSRF/域名绑定/密码过期中间件 | `apps/workmesh-node/core/middleware/*.go`、`agent/middleware/certificate.go` | 新服务主要由 handler 自行校验 Token | 统一挂载 HTTP middleware，覆盖 Cookie/Bearer、CSRF、节点证书、Allow IP、Demo 只读和操作日志 |
-| [x] | 日志文件输出、滚动和保留 | `apps/workmesh-node/core/log/*.go`、`agent/log/*` | `runtime/log/logger.go`、`cmd/workmesh-server/main.go` | 默认写入 `WORKMESH_DATA_DIR/logs/server.log`，按大小轮转并保留历史文件，支持显式路径 |
-| [~] | 本地/SSH/容器终端双向 WebSocket | `apps/workmesh-node/agent/app/api/v2/hosts.go`、`core/app/api/v2/process.go` | `node/api/terminal_stream.go`、`websocket_stream.go` 已有流式实现草案 | 完成 PTY/SSH/容器会话、输入输出帧、鉴权、关闭码、超时和断线资源回收验收 |
-| [x] | 容器日志 SSE | `apps/workmesh-node/agent/app/api/v2/container.go:935-966` | `node/api/container_log_stream.go` | 完成 `since/follow/tail/timestamp`、容器/Compose 过滤、心跳、断开取消和背压测试；日志使用默认 `message` 事件 |
+| [ ] | Agent/Core 启动初始化钩子 | `/www/apps/1Panel/agent/init/hook/hook.go`、`agent/init/business/business.go` | `cmd/workmesh-server/main.go` 当前仅初始化 Store、Cache、Role、Scheduler、Gateway | 逐项接入全局数据、计划任务状态、运行时/SSL/Task 恢复、ACME 默认账户、Docker Compose 探测，并有重启测试 |
+| [x] | Cobra/等价 CLI 管理入口 | `/www/apps/1Panel/core/cmd/server/cmd/*.go` | `cmd/workmesh-server/cli.go`、`cli_test.go` | 已实现 `version`、`user-list`、`user-info`、`reset`、`listen-ip`、`app init`、签名制品 `restore/update`；Ed25519、SHA-256、目标路径限制和原子替换均有测试 |
+| [~] | 全局 Session/CSRF/域名绑定/密码过期中间件 | `/www/apps/1Panel/core/middleware/*.go`、`agent/middleware/certificate.go` | 新服务主要由 handler 自行校验 Token | 统一挂载 HTTP middleware，覆盖 Cookie/Bearer、CSRF、节点证书、Allow IP、Demo 只读和操作日志 |
+| [x] | 日志文件输出、滚动和保留 | `/www/apps/1Panel/core/log/*.go`、`agent/log/*` | `runtime/log/logger.go`、`cmd/workmesh-server/main.go` | 默认写入 `WORKMESH_DATA_DIR/logs/server.log`，按大小轮转并保留历史文件，支持显式路径 |
+| [~] | 本地/SSH/容器终端双向 WebSocket | `/www/apps/1Panel/agent/app/api/v2/hosts.go`、`core/app/api/v2/process.go` | `node/api/terminal_stream.go`、`websocket_stream.go` 已有流式实现草案 | 完成 PTY/SSH/容器会话、输入输出帧、鉴权、关闭码、超时和断线资源回收验收 |
+| [x] | 容器日志 SSE | `/www/apps/1Panel/agent/app/api/v2/container.go:935-966` | `node/api/container_log_stream.go` | 完成 `since/follow/tail/timestamp`、容器/Compose 过滤、心跳、断开取消和背压测试；日志使用默认 `message` 事件 |
 ### 2026-08-30 网站高级操作
 
 - [x] 站点运行状态切换和可用性检查：`POST /api/v2/websites/operate`、`POST /api/v2/websites/check`，状态写入 `websites.json` 并拒绝未知操作。
@@ -270,9 +270,9 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现证据 | 测试与剩余缺口 |
 |---|---|---|---|---|
-| [x] | 单进程启动时初始化数据目录与运行子目录 | `apps/workmesh-node/core/init`、`agent/init` | `cmd/workmesh-server/main.go` 调用 `initializeDataDir`；`apps/backups/logs/releases/runtime/uploads` 目录使用 0750 创建 | `cmd/workmesh-server/cli_test.go:TestInitializeDataDirCreatesRuntimeLayout`；生产目录权限需部署验收 |
-| [x] | CLI restore/update 签名制品校验 | `apps/workmesh-node/core/cmd/server/cmd/restore.go`、`update.go` | `cmd/workmesh-server/cli.go:installSignedArtifact`；Ed25519 公钥、SHA-256 摘要、签名文件和大小上限校验，无签名材料明确报错 | `TestCLIUpdateVerifiesSignatureAndAtomicallyInstalls`、`TestCLIRestoreRejectsTamperedArtifactAndUnsafeTarget`；云端发布服务仍需真实凭据 |
-| [x] | CLI 制品原子替换与回滚备份 | `apps/workmesh-node/core/cmd/server/cmd/restore.go` | `cmd/workmesh-server/cli.go:atomicInstall/saveArtifactResult`；同目录临时文件、Sync、rename，旧版本保存为 `.previous.<timestamp>`；`node/api/deployment_runtime.go:RecoverDeploymentState` 启动时校验并恢复活动制品 | `cmd/workmesh-server/node/api/deployment_runtime_test.go`；跨文件系统目标被拒绝并返回上下文错误 |
+| [x] | 单进程启动时初始化数据目录与运行子目录 | `/www/apps/1Panel/core/init`、`agent/init` | `cmd/workmesh-server/main.go` 调用 `initializeDataDir`；`apps/backups/logs/releases/runtime/uploads` 目录使用 0750 创建 | `cmd/workmesh-server/cli_test.go:TestInitializeDataDirCreatesRuntimeLayout`；生产目录权限需部署验收 |
+| [x] | CLI restore/update 签名制品校验 | `/www/apps/1Panel/core/cmd/server/cmd/restore.go`、`update.go` | `cmd/workmesh-server/cli.go:installSignedArtifact`；Ed25519 公钥、SHA-256 摘要、签名文件和大小上限校验，无签名材料明确报错 | `TestCLIUpdateVerifiesSignatureAndAtomicallyInstalls`、`TestCLIRestoreRejectsTamperedArtifactAndUnsafeTarget`；云端发布服务仍需真实凭据 |
+| [x] | CLI 制品原子替换与回滚备份 | `/www/apps/1Panel/core/cmd/server/cmd/restore.go` | `cmd/workmesh-server/cli.go:atomicInstall/saveArtifactResult`；同目录临时文件、Sync、rename，旧版本保存为 `.previous.<timestamp>`；`node/api/deployment_runtime.go:RecoverDeploymentState` 启动时校验并恢复活动制品 | `cmd/workmesh-server/node/api/deployment_runtime_test.go`；跨文件系统目标被拒绝并返回上下文错误 |
 ## 数据库后台能力（2026-08-31）
 
 | 能力 | 入口 | 新实现 | 状态 | 说明 |
@@ -291,41 +291,41 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 | 任务失败重试 | agent service/cronjob_helper.go | node/service/cronjob.go | implemented | RetryTimes 与 Timeout 生效 |
 | 脚本库持久化 | core script library | node/api/core_resources.go | implemented | scripts.json 原子写入，审核后执行 |
 | 任务记录上限 | agent cronjobRepo | node/service/cronjob.go | implemented | 每任务最多保留 1000 条 |
-| MCP 连接协议探测 | `apps/workmesh-node/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 实际执行 Streamable HTTP initialize 或 SSE Content-Type 校验，失败不返回成功 |
-| Agent 渠道配对命令 | `apps/workmesh-node/agent/app/service/agents_channels.go:ApproveChannelPairing` | `node/api/ai_execution.go:handleAgentPairingApprove` | implemented | 仅对已登记容器执行固定 Docker 参数，容器缺失返回不可用 |
+| MCP 连接协议探测 | `/www/apps/1Panel/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 实际执行 Streamable HTTP initialize 或 SSE Content-Type 校验，失败不返回成功 |
+| Agent 渠道配对命令 | `/www/apps/1Panel/agent/app/service/agents_channels.go:ApproveChannelPairing` | `node/api/ai_execution.go:handleAgentPairingApprove` | implemented | 仅对已登记容器执行固定 Docker 参数，容器缺失返回不可用 |
 
-| 文件分片上传状态 | `apps/workmesh-node/agent/app/api/v2/file.go:UploadChunkFiles` | `node/api/files_routes.go:handleChunkUpload` | implemented | 分片目录受 `WORKMESH_DATA_DIR` 控制，偏移和总大小校验，完成后原子提交 |
-| 文件历史版本快照 | `apps/workmesh-node/agent/app/service/file_history.go` | `node/api/files.go:handleFilesSave`、`files_routes.go:history/*` | implemented | 保存前记录最多 200 条快照，支持恢复和删除 |
-| 日志分页与类型清理 | `apps/workmesh-node/agent/app/api/v2/task.go`、`core/app/api/v2/logs.go` | `node/api/functional_domains.go:registerLogRoutes` | implemented | 日志检索支持关键字/类型/级别和分页，清理按类型过滤 |
-| 压缩包安全解压 | `apps/workmesh-node/agent/app/service/file.go` | `node/api/files_routes.go:unzipPath` | implemented | 拒绝路径穿越与符号链接，条目临时文件原子替换 |
-| 媒体转换后台任务 | `apps/workmesh-node/agent/app/service/file.go:Convert` | `node/api/files_routes.go:runMediaConversion` | implemented | 每个输入文件独立执行、5 分钟超时、输出文件校验并写入持久化日志 |
-| 媒体转换 JSON 日志 | `apps/workmesh-node/agent/utils/convert/convert.go:appendJSONLog` | `node/api/files_routes.go:appendConvertLog`、`convert/log` | implemented | ConvertLogs 上限 2000，支持 taskID/status/type 过滤和分页 |
+| 文件分片上传状态 | `/www/apps/1Panel/agent/app/api/v2/file.go:UploadChunkFiles` | `node/api/files_routes.go:handleChunkUpload` | implemented | 分片目录受 `WORKMESH_DATA_DIR` 控制，偏移和总大小校验，完成后原子提交 |
+| 文件历史版本快照 | `/www/apps/1Panel/agent/app/service/file_history.go` | `node/api/files.go:handleFilesSave`、`files_routes.go:history/*` | implemented | 保存前记录最多 200 条快照，支持恢复和删除 |
+| 日志分页与类型清理 | `/www/apps/1Panel/agent/app/api/v2/task.go`、`core/app/api/v2/logs.go` | `node/api/functional_domains.go:registerLogRoutes` | implemented | 日志检索支持关键字/类型/级别和分页，清理按类型过滤 |
+| 压缩包安全解压 | `/www/apps/1Panel/agent/app/service/file.go` | `node/api/files_routes.go:unzipPath` | implemented | 拒绝路径穿越与符号链接，条目临时文件原子替换 |
+| 媒体转换后台任务 | `/www/apps/1Panel/agent/app/service/file.go:Convert` | `node/api/files_routes.go:runMediaConversion` | implemented | 每个输入文件独立执行、5 分钟超时、输出文件校验并写入持久化日志 |
+| 媒体转换 JSON 日志 | `/www/apps/1Panel/agent/utils/convert/convert.go:appendJSONLog` | `node/api/files_routes.go:appendConvertLog`、`convert/log` | implemented | ConvertLogs 上限 2000，支持 taskID/status/type 过滤和分页 |
 
 ## 2026-08-31 AI 流式与 MCP 隐藏能力
 
 | 隐藏能力 | 发现位置 | 实现位置 | 状态 | 说明 |
 |---|---|---|---|---|
-| MCP Streamable HTTP initialize 探测 | `apps/workmesh-node/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 发送 JSON-RPC initialize，10 秒超时，网络失败返回明确错误 |
-| MCP SSE 响应类型校验 | `apps/workmesh-node/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 要求 `text/event-stream`，拒绝伪造成功 |
+| MCP Streamable HTTP initialize 探测 | `/www/apps/1Panel/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 发送 JSON-RPC initialize，10 秒超时，网络失败返回明确错误 |
+| MCP SSE 响应类型校验 | `/www/apps/1Panel/agent/app/service/mcp_server.go:TestConnection` | `node/api/ai_execution.go:testMCPConnection` | implemented | 要求 `text/event-stream`，拒绝伪造成功 |
 
 ## 2026-08-31 容器管理隐藏能力
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新项目证据 | 完成条件 |
 | --- | --- | --- | --- | --- |
-| [x] | 镜像仓库配置持久化与密码脱敏 | `apps/workmesh-node/agent/app/service/image_repo.go` | `node/api/containers.go:containerStore`、`registerContainerRepositoryRoutes`；`containers.json` 原子写入 | CRUD、搜索、删除、状态接口测试通过 |
-| [x] | Compose 模板持久化与批量导入 | `apps/workmesh-node/agent/app/service/compose_template.go` | `node/api/containers.go:registerContainerTemplateRoutes`；正文 4 MiB 上限 | 新增/更新/批量/删除/搜索和重启复读测试通过 |
-| [x] | Compose 文件创建、更新、置顶及 `.env` 读取 | `apps/workmesh-node/agent/app/api/v2/container.go` | `node/api/containers.go:handleComposeCreate/Update/Pin/Env`；临时文件原子 rename | 路径穿越拒绝、文件内容和环境变量测试通过 |
-| [x] | 容器用户及尺寸查询 | `apps/workmesh-node/agent/app/api/v2/container.go` | `node/api/containers.go:handleContainerPost`；固定 Docker argv 调用 `exec /etc/passwd`、`inspect --size` | 参数校验和 Docker 不可用错误可观测 |
-| [x] | 镜像归档导入导出路径安全 | `apps/workmesh-node/agent/app/api/v2/container.go` | `node/api/containers.go:handleImageOperation`；`docker load -i`、`save -o`，拒绝 `..` | 无路径/穿越参数测试通过 |
+| [x] | 镜像仓库配置持久化与密码脱敏 | `/www/apps/1Panel/agent/app/service/image_repo.go` | `node/api/containers.go:containerStore`、`registerContainerRepositoryRoutes`；`containers.json` 原子写入 | CRUD、搜索、删除、状态接口测试通过 |
+| [x] | Compose 模板持久化与批量导入 | `/www/apps/1Panel/agent/app/service/compose_template.go` | `node/api/containers.go:registerContainerTemplateRoutes`；正文 4 MiB 上限 | 新增/更新/批量/删除/搜索和重启复读测试通过 |
+| [x] | Compose 文件创建、更新、置顶及 `.env` 读取 | `/www/apps/1Panel/agent/app/api/v2/container.go` | `node/api/containers.go:handleComposeCreate/Update/Pin/Env`；临时文件原子 rename | 路径穿越拒绝、文件内容和环境变量测试通过 |
+| [x] | 容器用户及尺寸查询 | `/www/apps/1Panel/agent/app/api/v2/container.go` | `node/api/containers.go:handleContainerPost`；固定 Docker argv 调用 `exec /etc/passwd`、`inspect --size` | 参数校验和 Docker 不可用错误可观测 |
+| [x] | 镜像归档导入导出路径安全 | `/www/apps/1Panel/agent/app/api/v2/container.go` | `node/api/containers.go:handleImageOperation`；`docker load -i`、`save -o`，拒绝 `..` | 无路径/穿越参数测试通过 |
 
 ## 2026-08-31 Agent 资源语义核对
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新项目证据 | 完成条件 |
 |---|---|---|---|---|
-| [x] | Agent 资源级备注、令牌重置和网站绑定 | `apps/workmesh-node/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleAgentRoute`；随机令牌、目标资源归属校验、原子保存和脱敏 | `node/api/ai_execution_test.go:TestAgentResourceMutationsAndSessionLifecycle` |
-| [x] | Agent 角色嵌套 CRUD 与频道聚合 | `apps/workmesh-node/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleAgentRoute`；roles 持久化、重复冲突、父 Agent 校验 | 同上 |
-| [x] | Hermes 会话生命周期 | `apps/workmesh-node/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleSessionMutation`；重命名/删除位于通用删除分支之前，不存在返回 404 | 同上 |
-| [x] | Ollama/MCP 资源状态操作不伪造记录 | `apps/workmesh-node/agent/app/api/v2/ai.go`、`mcp_server.go` | `node/api/ai_execution.go:handleAIResourceOperation`；资源 ID/名称必填，不存在返回 404，状态原子写入 | `node/api/ai_execution_test.go:TestAIResourceOperationsRequireExistingResource` |
+| [x] | Agent 资源级备注、令牌重置和网站绑定 | `/www/apps/1Panel/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleAgentRoute`；随机令牌、目标资源归属校验、原子保存和脱敏 | `node/api/ai_execution_test.go:TestAgentResourceMutationsAndSessionLifecycle` |
+| [x] | Agent 角色嵌套 CRUD 与频道聚合 | `/www/apps/1Panel/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleAgentRoute`；roles 持久化、重复冲突、父 Agent 校验 | 同上 |
+| [x] | Hermes 会话生命周期 | `/www/apps/1Panel/agent/app/api/v2/agents.go` | `node/api/ai_execution.go:handleSessionMutation`；重命名/删除位于通用删除分支之前，不存在返回 404 | 同上 |
+| [x] | Ollama/MCP 资源状态操作不伪造记录 | `/www/apps/1Panel/agent/app/api/v2/ai.go`、`mcp_server.go` | `node/api/ai_execution.go:handleAIResourceOperation`；资源 ID/名称必填，不存在返回 404，状态原子写入 | `node/api/ai_execution_test.go:TestAIResourceOperationsRequireExistingResource` |
 
 | [x] | Docker CLI/daemon 状态 DTO 探测 | node/service/docker.go、node/api/host_container_cron.go | GET /api/v2/containers/docker/status 返回 isExist/isActive/version/error，10 秒超时并区分未安装与 daemon 不可用 | node/api/hosts_containers_test.go:TestDockerStatusContract |
 
@@ -333,39 +333,39 @@ node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/impleme
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新项目证据 | 完成条件 |
 |---|---|---|---|---|
-| [x] | AI 错误按请求语言本地化 | `apps/workmesh-node/core/i18n`、`agent/app/api/v2/ai.go` | `node/api/errors.go:localizeErrorMessage` 与 `aiHandler` 的 Accept-Language 包装；稳定错误码映射到 12 个服务端语言包 | `TestAIErrorUsesRequestLocale` 验证英文请求不返回固定中文，未知语言回退中文 |
-| [x] | SSE 事件编号与断线续传游标 | `apps/workmesh-node/agent/app/api/v2/container.go:ContainerStreamLogs` | `node/api/container_log_stream.go:containerSSEWriter` 输出 `id`，解析 `Last-Event-ID` 并延续序号，保留心跳与取消 | `TestContainerSSELastEventIDContinuesSequence`、容器日志流回归测试 |
-| [x] | WebSocket 控制帧和正常关闭握手 | `apps/workmesh-node/agent/app/api/v2/terminal.go`、`core/app/api/v2/process.go` | `node/api/websocket_stream.go:closeWithCode/readFrame` 校验控制帧上限、掩码、关闭码；终端回送 Close/Pong | `TestWebSocketRejectsInvalidControlFrames`、`TestWebSocketCloseFrameIncludesCode` |
+| [x] | AI 错误按请求语言本地化 | `/www/apps/1Panel/core/i18n`、`agent/app/api/v2/ai.go` | `node/api/errors.go:localizeErrorMessage` 与 `aiHandler` 的 Accept-Language 包装；稳定错误码映射到 12 个服务端语言包 | `TestAIErrorUsesRequestLocale` 验证英文请求不返回固定中文，未知语言回退中文 |
+| [x] | SSE 事件编号与断线续传游标 | `/www/apps/1Panel/agent/app/api/v2/container.go:ContainerStreamLogs` | `node/api/container_log_stream.go:containerSSEWriter` 输出 `id`，解析 `Last-Event-ID` 并延续序号，保留心跳与取消 | `TestContainerSSELastEventIDContinuesSequence`、容器日志流回归测试 |
+| [x] | WebSocket 控制帧和正常关闭握手 | `/www/apps/1Panel/agent/app/api/v2/terminal.go`、`core/app/api/v2/process.go` | `node/api/websocket_stream.go:closeWithCode/readFrame` 校验控制帧上限、掩码、关闭码；终端回送 Close/Pong | `TestWebSocketRejectsInvalidControlFrames`、`TestWebSocketCloseFrameIncludesCode` |
 
 ## 2026-08-31 节点透传安全隐藏能力
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新项目证据 | 完成条件 |
 |---|---|---|---|---|
-| [x] | 透传请求绕过目标本地 Session 的受信上下文 | `apps/workmesh-node/core/init/router/proxy.go`、`agent/utils/nodeclient/client.go` | `node/api/node_relay.go:IsForwardedRequestVerified` 注入进程内上下文；`cmd/workmesh-server/main.go:authenticateNodeAPI` 仅信任该上下文；外层 `control/api/security_middleware.go` 将透传交由 NodeRelay 验签 | `node/api/node_relay_test.go:TestNodeRelayForwardsSignedOperateNodeRequest`、`control/api/security_middleware_test.go:TestSecurityMiddlewareAllowsSignedRelayToReachNodeRelay` |
-| [x] | 空请求体透传防御与大小限制 | `apps/workmesh-node/agent/utils/nodeclient/client.go` | `node/api/node_relay.go:forward/serveForwarded` 对 nil Body 使用 `http.NoBody`，请求/响应均限制 8 MiB | 节点透传测试覆盖请求体读取和超限错误 |
+| [x] | 透传请求绕过目标本地 Session 的受信上下文 | `/www/apps/1Panel/core/init/router/proxy.go`、`agent/utils/nodeclient/client.go` | `node/api/node_relay.go:IsForwardedRequestVerified` 注入进程内上下文；`cmd/workmesh-server/main.go:authenticateNodeAPI` 仅信任该上下文；外层 `control/api/security_middleware.go` 将透传交由 NodeRelay 验签 | `node/api/node_relay_test.go:TestNodeRelayForwardsSignedOperateNodeRequest`、`control/api/security_middleware_test.go:TestSecurityMiddlewareAllowsSignedRelayToReachNodeRelay` |
+| [x] | 空请求体透传防御与大小限制 | `/www/apps/1Panel/agent/utils/nodeclient/client.go` | `node/api/node_relay.go:forward/serveForwarded` 对 nil Body 使用 `http.NoBody`，请求/响应均限制 8 MiB | 节点透传测试覆盖请求体读取和超限错误 |
 ## 2026-08-31 终端 PTY 与 SSE 流式补齐
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现 | 验收说明 |
 |---|---|---|---|---|
-| [x] | Unix 本地终端真实 PTY、输入输出和 resize | `apps/workmesh-node/core/utils/terminal/local_cmd.go`、`ws_local_session.go` | `node/api/terminal_pty.go`、`terminal_stream.go` | 使用 `creack/pty.StartWithSize` 与 `pty.Setsize`，尺寸 1-500，断开杀进程并释放 PTY；`stream_protocol_test.go` 覆盖边界和回调 |
-| [~] | 容器 `docker exec -it` 终端 | `apps/workmesh-node/agent/app/api/v2/terminal.go:WsContainerTerminal` | `node/api/terminal_stream.go` | 真实 PTY、输入输出、关闭码和闲置超时；需生产 Docker daemon/容器冒烟及信号联调 |
-| [~] | SSH `-tt` 终端与远端窗口调整 | `apps/workmesh-node/agent/app/api/v2/terminal.go:WsHostSSH`、`utils/terminal/ws_session.go` | `node/api/terminal_stream.go` | 使用 BatchMode 与 10 秒连接超时，凭据仅来自 SSH 配置/Agent；远端 WindowChange 需 SSH 库或代理，未伪造成功 |
-| [~] | SSE 断线重放、背压和写入超时 | `apps/workmesh-node/agent/app/api/v2/container.go:ContainerStreamLogs` | `node/api/container_log_stream.go` | `Last-Event-ID` 后重放最多 256 事件，缓存最多 128 流；积压上限 128 KiB，写入超时 10 秒；生产反向代理断线和跨重启行为待 E2E |
-| [x] | OpenResty combined access log 监控聚合 | `apps/workmesh-node/agent/app/service/website.go`、`app/api/v2/website.go` | `node/api/analytics.go:loadAnalyticsEvents` 受限读取并解析访问日志，按日期、状态码、IP、UA 聚合 | `analytics_test.go` 覆盖时间过滤、流量、PV/UV、4xx 和爬虫统计；缺少 GeoIP 时明确返回原始 IP |
-| [x] | 进程监听输出跨 ss/netstat 格式解析 | `apps/workmesh-node/agent/app/service/process.go:GetListeningProcess` | `node/api/process.go:parseListeningOutput` 识别前两个地址字段并限制 1024 条，保留进程元数据 | `process_test.go` 覆盖字段解析和上限；外部命令缺失返回明确 503 |
+| [x] | Unix 本地终端真实 PTY、输入输出和 resize | `/www/apps/1Panel/core/utils/terminal/local_cmd.go`、`ws_local_session.go` | `node/api/terminal_pty.go`、`terminal_stream.go` | 使用 `creack/pty.StartWithSize` 与 `pty.Setsize`，尺寸 1-500，断开杀进程并释放 PTY；`stream_protocol_test.go` 覆盖边界和回调 |
+| [~] | 容器 `docker exec -it` 终端 | `/www/apps/1Panel/agent/app/api/v2/terminal.go:WsContainerTerminal` | `node/api/terminal_stream.go` | 真实 PTY、输入输出、关闭码和闲置超时；需生产 Docker daemon/容器冒烟及信号联调 |
+| [~] | SSH `-tt` 终端与远端窗口调整 | `/www/apps/1Panel/agent/app/api/v2/terminal.go:WsHostSSH`、`utils/terminal/ws_session.go` | `node/api/terminal_stream.go` | 使用 BatchMode 与 10 秒连接超时，凭据仅来自 SSH 配置/Agent；远端 WindowChange 需 SSH 库或代理，未伪造成功 |
+| [~] | SSE 断线重放、背压和写入超时 | `/www/apps/1Panel/agent/app/api/v2/container.go:ContainerStreamLogs` | `node/api/container_log_stream.go` | `Last-Event-ID` 后重放最多 256 事件，缓存最多 128 流；积压上限 128 KiB，写入超时 10 秒；生产反向代理断线和跨重启行为待 E2E |
+| [x] | OpenResty combined access log 监控聚合 | `/www/apps/1Panel/agent/app/service/website.go`、`app/api/v2/website.go` | `node/api/analytics.go:loadAnalyticsEvents` 受限读取并解析访问日志，按日期、状态码、IP、UA 聚合 | `analytics_test.go` 覆盖时间过滤、流量、PV/UV、4xx 和爬虫统计；缺少 GeoIP 时明确返回原始 IP |
+| [x] | 进程监听输出跨 ss/netstat 格式解析 | `/www/apps/1Panel/agent/app/service/process.go:GetListeningProcess` | `node/api/process.go:parseListeningOutput` 识别前两个地址字段并限制 1024 条，保留进程元数据 | `process_test.go` 覆盖字段解析和上限；外部命令缺失返回明确 503 |
 
 ## 2026-08-31 主机运维与容器镜像隐藏能力
 
 | 状态 | 隐藏能力 | 旧源码证据 | 新实现 | 完成条件 |
 |---|---|---|---|---|
-| [x] | 主机监控网络/IO 选项和受限实时指标 | `apps/workmesh-node/agent/router/ro_host.go`、`agent/app/service/monitor.go` | `node/api/host_container_cron.go:registerHostOperationalRoutes` 读取网络接口、loadavg、meminfo 和 runtime 指标，响应有界 | `host_container_cron_operational_test.go:TestHostOperationalRoutesExposeLocalState` |
-| [x] | 主机监控设置持久化与清理 | `apps/workmesh-node/agent/app/api/v2/host.go` | `host-operational.json` 原子写入；间隔 1-3600 秒校验，清理记录时间戳 | `host_container_cron_operational_test.go:TestHostMonitorSettingsPersistAndValidate` |
-| [x] | 防火墙和主机工具能力探测 | `apps/workmesh-node/agent/app/api/v2/host_tool.go` | `exec.LookPath` 探测 ufw/firewall-cmd/iptables 及请求指定工具，不伪造规则或安装状态 | `host_container_cron_operational_test.go:TestHostOperationalRoutesExposeLocalState` |
-| [x] | Docker 镜像归档安全导入 | `apps/workmesh-node/agent/router/ro_container.go`、`agent/app/api/v2/container.go` | `POST /api/v2/containers/image/load` 使用固定 argv `docker load -i`，限制绝对路径并拒绝穿越 | `host_container_cron_operational_test.go:TestContainerImageLoadRejectsUnsafeArchivePath` |
+| [x] | 主机监控网络/IO 选项和受限实时指标 | `/www/apps/1Panel/agent/router/ro_host.go`、`agent/app/service/monitor.go` | `node/api/host_container_cron.go:registerHostOperationalRoutes` 读取网络接口、loadavg、meminfo 和 runtime 指标，响应有界 | `host_container_cron_operational_test.go:TestHostOperationalRoutesExposeLocalState` |
+| [x] | 主机监控设置持久化与清理 | `/www/apps/1Panel/agent/app/api/v2/host.go` | `host-operational.json` 原子写入；间隔 1-3600 秒校验，清理记录时间戳 | `host_container_cron_operational_test.go:TestHostMonitorSettingsPersistAndValidate` |
+| [x] | 防火墙和主机工具能力探测 | `/www/apps/1Panel/agent/app/api/v2/host_tool.go` | `exec.LookPath` 探测 ufw/firewall-cmd/iptables 及请求指定工具，不伪造规则或安装状态 | `host_container_cron_operational_test.go:TestHostOperationalRoutesExposeLocalState` |
+| [x] | Docker 镜像归档安全导入 | `/www/apps/1Panel/agent/router/ro_container.go`、`agent/app/api/v2/container.go` | `POST /api/v2/containers/image/load` 使用固定 argv `docker load -i`，限制绝对路径并拒绝穿越 | `host_container_cron_operational_test.go:TestContainerImageLoadRejectsUnsafeArchivePath` |
 # 2026-08-31 隐藏能力补充
 
 | 功能名称 | 发现入口 | 新实现位置 | 验证 | 当前状态 | 剩余缺口 |
 |---|---|---|---|---|---|
-| 主机连接测试入口在通用 POST 分支之前处理 | `apps/workmesh-node/agent/router/ro_host.go`、`agent/app/api/v2/host.go` | `node/api/hosts.go:hostRequest` | `node/api/hosts_connection_test.go` | implemented | 生产环境需配置受控 SSH 适配器以完成认证级测试 |
+| 主机连接测试入口在通用 POST 分支之前处理 | `/www/apps/1Panel/agent/router/ro_host.go`、`agent/app/api/v2/host.go` | `node/api/hosts.go:hostRequest` | `node/api/hosts_connection_test.go` | implemented | 生产环境需配置受控 SSH 适配器以完成认证级测试 |
 
-| [x] | 容器化 OpenResty 运行时识别 | `apps/workmesh-node/agent/app/service/nginx.go`、`app/api/v2/app_install.go` | `node/service/environment.go:probeOpenRestyContainer`、`node/service/website.go:ProbeOpenResty`；固定参数读取 Docker 运行容器并解析镜像版本和容器名 | 主节点 `WorkMesh-openresty-0WEK` 已验证 `isExist=true`、`status=Running`；未运行容器明确返回未安装/停止 |
+| [x] | 容器化 OpenResty 运行时识别 | `/www/apps/1Panel/agent/app/service/nginx.go`、`app/api/v2/app_install.go` | `node/service/environment.go:probeOpenRestyContainer`、`node/service/website.go:ProbeOpenResty`；固定参数读取 Docker 运行容器并解析镜像版本和容器名 | 主节点 `WorkMesh-openresty-0WEK` 已验证 `isExist=true`、`status=Running`；未运行容器明确返回未安装/停止 |

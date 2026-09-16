@@ -41,6 +41,20 @@ func TestOpenConfiguresSQLiteAndCreatesSchemaIdempotently(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("迁移记录数量 = %d, want 1", count)
 	}
+	var runs int
+	if err := reopened.DB().QueryRow("SELECT COUNT(*) FROM migration_runs WHERE status IN ('applied','noop')").Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if runs < 2 {
+		t.Fatalf("迁移审计记录数量 = %d, want at least 2", runs)
+	}
+	var artifact string
+	if err := reopened.DB().QueryRow("SELECT artifact_sha256 FROM migration_runs ORDER BY id DESC LIMIT 1").Scan(&artifact); err != nil {
+		t.Fatal(err)
+	}
+	if len(artifact) != 64 {
+		t.Fatalf("迁移审计制品 SHA-256 长度 = %d, want 64", len(artifact))
+	}
 }
 
 func TestApplyMigrationsRejectsChecksumConflict(t *testing.T) {

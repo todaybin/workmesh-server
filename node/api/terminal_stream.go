@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -46,6 +47,12 @@ const (
 )
 
 var terminalCommandCleanups sync.Map
+var terminalCommandCredentials sync.Map
+
+type terminalCommandCredential struct {
+	payload []byte
+	marker  []byte
+}
 
 // handleTerminalStream 建立本地、容器或 SSH 终端的双向 WebSocket 会话。
 func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +76,13 @@ func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 	defer cleanupTerminalCommand(command)
 	ws, err := upgradeStreamWebSocket(w, r)
 	if err != nil {
-		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": err.Error()})
+		status := http.StatusBadRequest
+		if err.Error() == "WEBSOCKET_ORIGIN_DENIED" {
+			status = http.StatusForbidden
+		} else if err.Error() == "WEBSOCKET_UNAVAILABLE" {
+			status = http.StatusServiceUnavailable
+		}
+		wmhttp.JSON(w, status, map[string]any{"code": "ERR", "details": map[string]string{"errCode": err.Error()}, "message": err.Error()})
 		return
 	}
 	defer ws.close()
@@ -80,6 +93,12 @@ func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer session.Close()
+	if credential, ok := terminalCommandCredentials.LoadAndDelete(command); ok {
+		if err := primeTerminalCredential(r.Context(), session, credential.(terminalCommandCredential)); err != nil {
+			_ = writeTerminalError(ws, errors.New("数据库终端认证初始化失败"))
+			return
+		}
+	}
 
 	// 输出泵与输入循环共享完成信号；任一方向断开都会终止子进程并释放 PTY。
 	done := make(chan struct{})
@@ -91,11 +110,29 @@ func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	defer finish()
-	go pumpTerminalOutput(ws, session.output, finish)
+	// 命令退出或输出通道断开时主动关闭网络连接，避免读循环长期阻塞而遗留 PTY。
+	go func() {
+		<-done
+		_ = ws.close()
+	}()
+	var outputPumps sync.WaitGroup
+	outputPumps.Add(1)
+	go func() {
+		defer outputPumps.Done()
+		pumpTerminalOutput(ws, session.output, func() {})
+	}()
 	if session.errOutput != nil {
-		go pumpTerminalOutput(ws, session.errOutput, finish)
+		outputPumps.Add(1)
+		go func() {
+			defer outputPumps.Done()
+			pumpTerminalOutput(ws, session.errOutput, func() {})
+		}()
 	}
-	go func() { _ = command.Wait(); finish() }()
+	go func() {
+		_ = command.Wait()
+		outputPumps.Wait()
+		finish()
+	}()
 
 	for {
 		opcode, payload, err := ws.readFrame()
@@ -234,6 +271,12 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 		}
 		// 认证目标完全来自 node_hosts，绝不从 URL 接收地址、用户名、端口或凭据。
 		args := []string{"-tt", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-p", strconv.Itoa(port), target}
+		// Deployments that keep host keys outside the process user's home can
+		// provide an explicit file without putting it in the request URL.
+		// The value is passed as an argv element, never through a shell.
+		if knownHosts := strings.TrimSpace(os.Getenv("WORKMESH_SSH_KNOWN_HOSTS")); knownHosts != "" && !strings.ContainsAny(knownHosts, "\x00\r\n") {
+			args = append(args[:len(args)-1], "-o", "UserKnownHostsFile="+knownHosts, args[len(args)-1])
+		}
 		if command := strings.TrimSpace(r.URL.Query().Get("command")); command != "" {
 			if len(command) > 4096 || strings.IndexByte(command, 0) >= 0 {
 				return nil, errors.New("command 参数无效")
@@ -282,6 +325,8 @@ func databaseTerminalCommand(ctx context.Context, r *http.Request) (*exec.Cmd, e
 		"postgres":           {"postgres", "postgresql", "postgresql-cluster"},
 		"postgresql":         {"postgresql", "postgres", "postgresql-cluster"},
 		"postgresql-cluster": {"postgresql-cluster", "postgresql", "postgres"},
+		"redis":              {"redis", "redis-cluster"},
+		"redis-cluster":      {"redis-cluster", "redis"},
 	}
 	types, supported := aliases[databaseType]
 	if !supported {
@@ -336,31 +381,164 @@ func databaseTerminalCommand(ctx context.Context, r *http.Request) (*exec.Cmd, e
 	}
 
 	args := []string{"exec", "-i", "-t", containerName}
+	var script string
 	switch databaseType {
 	case "mysql", "mysql-cluster":
-		if password != "" {
-			args = append([]string{"exec", "-e", "MYSQL_PWD=" + password, "-i", "-t", containerName}, "mysql", "-u"+username)
-			return exec.CommandContext(ctx, service.DockerBinary(), args...), nil
-		}
-		args = append(args, "mysql", "-u"+username)
-		return exec.CommandContext(ctx, service.DockerBinary(), args...), nil
+		script = terminalDatabasePasswordScript
+		args = append(args, "sh", "-c", script, "--", "mysql", "-u"+username)
 	case "mariadb":
-		if password != "" {
-			args = append([]string{"exec", "-e", "MYSQL_PWD=" + password, "-i", "-t", containerName}, "mariadb", "-u"+username)
-			return exec.CommandContext(ctx, service.DockerBinary(), args...), nil
-		}
-		args = append(args, "mariadb", "-u"+username)
+		script = terminalDatabasePasswordScript
+		args = append(args, "sh", "-c", script, "--", "mariadb", "-u"+username)
 	case "mongodb":
-		args = append(args, "mongosh", "--username", username, "--password", password, "--authenticationDatabase", "admin")
+		script = terminalMongoPasswordScript
+		args = append(args, "sh", "-c", script, "--", "mongosh", "--username", username, "--password", "--authenticationDatabase", "admin")
 	case "postgres", "postgresql", "postgresql-cluster":
 		if username == "root" {
 			username = "postgres"
 		}
-		args = []string{"exec", "-e", "PGPASSWORD=" + password, "-i", "-t", containerName, "psql", "-t", "-U", username}
+		script = terminalDatabasePasswordScript
+		args = append(args, "sh", "-c", script, "--", "psql", "-t", "-U", username)
+	case "redis", "redis-cluster":
+		host := strings.TrimSpace(connection.Host)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		port := connection.Port
+		if port <= 0 {
+			port = 6379
+		}
+		if strings.ContainsAny(host, "\x00\r\n \t") || port > 65535 {
+			return nil, errors.New("Redis 终端连接参数无效")
+		}
+		script = terminalDatabasePasswordScript
+		args = append(args, "sh", "-c", script, "--", "redis-cli", "--raw", "-h", host, "-p", strconv.Itoa(port))
 	}
-	return exec.CommandContext(ctx, service.DockerBinary(), args...), nil
+	if script == "" {
+		return nil, errors.New("数据库终端命令未配置")
+	}
+	command := exec.CommandContext(ctx, service.DockerBinary(), args...)
+	command.Env = terminalDatabaseCommandEnvironment()
+	payload, err := terminalCredentialPayload(password)
+	if err != nil {
+		return nil, err
+	}
+	terminalCommandCredentials.Store(command, terminalCommandCredential{
+		payload: payload,
+		marker:  []byte(terminalCredentialReadyMarker),
+	})
+	return command, nil
 }
 
+func terminalDatabaseCommandEnvironment() []string {
+	blocked := map[string]struct{}{
+		"MYSQL_PWD":     {},
+		"PGPASSWORD":    {},
+		"REDISCLI_AUTH": {},
+	}
+	result := make([]string, 0, len(os.Environ()))
+	for _, item := range os.Environ() {
+		key, _, ok := strings.Cut(item, "=")
+		if ok {
+			if _, blockedKey := blocked[key]; blockedKey {
+				continue
+			}
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+const terminalCredentialReadyMarker = "__WORKMESH_DATABASE_PASSWORD_READY__"
+
+// terminalDatabasePasswordScript is fixed source. The executable and all
+// user-controlled values are positional arguments, never shell source.
+const terminalDatabasePasswordScript = `set -eu
+stty -echo 2>/dev/null || :
+printf '%s\n' '__WORKMESH_DATABASE_PASSWORD_READY__'
+IFS= read -r _wm_pw_len
+case "$_wm_pw_len" in
+  ''|*[!0-9]*) exit 64 ;;
+esac
+_wm_pw=$(dd bs=1 count="$_wm_pw_len" 2>/dev/null; printf '\001')
+_wm_pw=${_wm_pw%?}
+IFS= read -r _wm_separator
+stty echo 2>/dev/null || :
+export MYSQL_PWD="$_wm_pw"
+export PGPASSWORD="$_wm_pw"
+export REDISCLI_AUTH="$_wm_pw"
+exec "$@"
+`
+
+// terminalMongoPasswordScript keeps the password out of argv and feeds it to
+// mongosh's password prompt after the fixed script has consumed the prefix.
+const terminalMongoPasswordScript = `set -eu
+stty -echo 2>/dev/null || :
+printf '%s\n' '__WORKMESH_DATABASE_PASSWORD_READY__'
+IFS= read -r _wm_pw_len
+case "$_wm_pw_len" in
+  ''|*[!0-9]*) exit 64 ;;
+esac
+_wm_pw=$(dd bs=1 count="$_wm_pw_len" 2>/dev/null; printf '\001')
+_wm_pw=${_wm_pw%?}
+IFS= read -r _wm_separator
+stty echo 2>/dev/null || :
+{ printf '%s\n' "$_wm_pw"; cat; } | exec "$@"
+`
+
+func terminalCredentialPayload(password string) ([]byte, error) {
+	if strings.IndexByte(password, 0) >= 0 {
+		return nil, errors.New("数据库密码包含不支持的空字节")
+	}
+	return []byte(strconv.Itoa(len(password)) + "\n" + password + "\n"), nil
+}
+
+func primeTerminalCredential(ctx context.Context, session *terminalSession, credential terminalCommandCredential) error {
+	if session == nil || session.output == nil || session.input == nil {
+		return errors.New("终端认证通道不可用")
+	}
+	readErr := make(chan error, 1)
+	go func() {
+		readErr <- readTerminalMarker(session.output, credential.marker)
+	}()
+	select {
+	case err := <-readErr:
+		if err != nil {
+			return err
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if _, err := session.input.Write(credential.payload); err != nil {
+		return errors.New("写入数据库终端认证信息失败")
+	}
+	return nil
+}
+
+func readTerminalMarker(reader io.Reader, marker []byte) error {
+	if len(marker) == 0 {
+		return errors.New("终端认证标记为空")
+	}
+	window := make([]byte, 0, len(marker))
+	buf := []byte{0}
+	for len(window) < 64*1024 {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			window = append(window, buf[:n]...)
+			if len(window) > len(marker) {
+				window = window[len(window)-len(marker):]
+			}
+			if bytes.Equal(window, marker) {
+				return nil
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return errors.New("终端认证初始化响应过大")
+}
+
+// temporarySSHIdentity 将私钥安全写入数据目录下的临时文件。
 func temporarySSHIdentity(privateKey string) (string, func(), error) {
 	dataRoot := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dataRoot == "" {
@@ -389,10 +567,12 @@ func temporarySSHIdentity(privateKey string) (string, func(), error) {
 	return name, func() { _ = os.Remove(name) }, nil
 }
 
+// cleanupTerminalCommand 删除终端命令关联的临时认证文件。
 func cleanupTerminalCommand(command *exec.Cmd) {
 	if cleanup, ok := terminalCommandCleanups.LoadAndDelete(command); ok {
 		cleanup.(func())()
 	}
+	terminalCommandCredentials.Delete(command)
 }
 
 // validTerminalProgram 仅允许容器内单个可执行文件名，禁止注入 shell 参数。
@@ -469,9 +649,4 @@ func pumpTerminalOutput(ws *streamWebSocket, reader io.Reader, finish func()) {
 			return
 		}
 	}
-}
-
-func writeTerminalError(ws *streamWebSocket, err error) error {
-	message, _ := json.Marshal(terminalServerMessage{Type: "cmd", Data: base64.StdEncoding.EncodeToString([]byte(err.Error() + "\r\n"))})
-	return ws.writeText(message)
 }

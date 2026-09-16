@@ -73,6 +73,7 @@
 ## 主项目与开发会话连续性
 
 - `apps/workmesh-server` 是当前主项目；`apps/1Panel` 只作为接口、行为和迁移差异的参考来源，不直接导入其私有实现，也不在该目录提交修改。
+- `apps/workmesh-node` 是废弃的过渡实现，不得作为路由、参数、业务逻辑、前端或语言包基准；历史清理脚本可以保留，但正式启动、测试和发布不得依赖它。
 - 开始或恢复开发前，先读取 `docs/development/STATUS.md`，再按当前任务链接读取对应进度文件和代码；不得为了恢复一个任务重复扫描全部迁移文档。
 - 每个独立任务使用 `docs/development/progress/` 下的一个 Markdown 文件，并在 `STATUS.md` 保留摘要、状态、证据链接和下一步。并行任务不得共用一个总进度文件。
 - 状态必须使用 `[x] 已完成`、`[>] 进行中`、`[ ] 未开始` 或 `[!] 阻塞`。迁移清单中的 `partial`、`compatibility`、`pending` 和缺少验证证据的 `implemented` 均不得标记为已完成。
@@ -112,9 +113,9 @@ npm.cmd run build:pro
 公开路由、迁移兼容或发布改动还需运行：
 
 ```powershell
-node test/contract/route-scan.mjs check --legacy ../workmesh-node --project . --manifest test/contract/routes.json
-node test/contract/implementation-scan.mjs --legacy ../workmesh-node --project . --manifest test/contract/routes.json --out .tmp/implementation-status.json
-node test/contract/hidden-function-scan.mjs --legacy ../workmesh-node --project . --out .tmp/hidden-function-status.json
+node test/contract/route-scan.mjs check --legacy /www/apps/1Panel --project . --manifest docs/inventory/route-inventory-1panel.json
+node test/contract/implementation-scan.mjs --legacy /www/apps/1Panel --project . --manifest docs/inventory/route-inventory-1panel.json --out .tmp/implementation-status.json
+node test/contract/hidden-function-scan.mjs --legacy /www/apps/1Panel --project . --out .tmp/hidden-function-status.json
 ```
 
 依赖真实环境的测试默认禁用，只能通过显式环境变量启用；验证不得自动启动开发服务器、连接生产系统或修改宿主机服务。交付时说明实际运行的命令、结果、未覆盖项和安全结论。

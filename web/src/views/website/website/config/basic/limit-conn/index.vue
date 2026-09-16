@@ -100,9 +100,7 @@ const search = (scopeReq: Website.NginxScopeReq) => {
             ruleKey.value = 'current';
             if (res.data) {
                 enable.value = res.data.enable;
-                if (res.data.enable == false) {
-                    req.operate = 'add';
-                }
+                req.operate = res.data.enable ? 'update' : 'add';
                 for (const param of res.data.params) {
                     if (param.name === 'limit_conn') {
                         if (param.params[0] === 'perserver' && param.params[1]) {
@@ -148,12 +146,11 @@ const submit = async (formEl: FormInstance | undefined) => {
         updateNginxConfig(req)
             .then(() => {
                 MsgSuccess(i18n.global.t('commons.msg.updateSuccess'));
-                search(req);
+                enable.value = req.operate !== 'delete' && req.operate !== 'disable';
+                req.operate = enable.value ? 'update' : 'add';
+                search(scopeReq);
             })
             .finally(() => {
-                if (req.operate === 'add') {
-                    enable.value = false;
-                }
                 loading.value = false;
             });
     });

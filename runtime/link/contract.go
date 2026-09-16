@@ -30,8 +30,9 @@ type Heartbeat struct {
 
 // SyncCursor 用于控制面增量同步和断点恢复。
 type SyncCursor struct {
-	Stream  string `json:"stream"`
-	Version uint64 `json:"version"`
+	Stream    string `json:"stream"`
+	Version   uint64 `json:"version"`
+	RoleEpoch uint64 `json:"roleEpoch,omitempty"`
 }
 
 // Client 是节点到节点的认证传输接口。

@@ -22,6 +22,7 @@ type supervisorRuntimeExecutor struct {
 	failAt string
 }
 
+// Execute 执行运行时相关处理并返回可观测错误。
 func (s *supervisorRuntimeExecutor) Execute(ctx context.Context, request model.CommandRequest) (model.CommandResult, error) {
 	s.recordingRuntimeExecutor.mu.Lock()
 	s.recordingRuntimeExecutor.requests = append(s.recordingRuntimeExecutor.requests, request)
@@ -36,6 +37,7 @@ func (s *supervisorRuntimeExecutor) Execute(ctx context.Context, request model.C
 	return model.CommandResult{}, nil
 }
 
+// TestSupervisorConfigCRUDAndStatus 验证运行时相关功能、失败边界和持久化结果。
 func TestSupervisorConfigCRUDAndStatus(t *testing.T) {
 	installDir := t.TempDir()
 	composePath := filepath.Join(installDir, "docker-compose.yml")
@@ -86,6 +88,7 @@ func TestSupervisorConfigCRUDAndStatus(t *testing.T) {
 	}
 }
 
+// TestSupervisorRejectsTraversalAndRollsBack 验证运行时相关功能、失败边界和持久化结果。
 func TestSupervisorRejectsTraversalAndRollsBack(t *testing.T) {
 	installDir := t.TempDir()
 	composePath := filepath.Join(installDir, "docker-compose.yml")
@@ -111,6 +114,7 @@ func TestSupervisorRejectsTraversalAndRollsBack(t *testing.T) {
 	}
 }
 
+// TestParseFastCGIStatusPayload 验证运行时相关功能、失败边界和持久化结果。
 func TestParseFastCGIStatusPayload(t *testing.T) {
 	items, err := parseFastCGIStatusPayload("Status: 200 OK\r\nContent-Type: text/plain\r\n\r\npool: www\naccepted conn: 17\nactive processes: 2\n")
 	if err != nil {

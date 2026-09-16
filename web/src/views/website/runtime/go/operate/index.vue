@@ -18,7 +18,14 @@
             <el-form-item :label="$t('commons.table.name')" prop="name">
                 <el-input :disabled="mode === 'edit'" v-model="runtime.name"></el-input>
             </el-form-item>
-            <AppConfig v-model="runtime" :mode="mode" appKey="go" />
+            <el-form-item label="运行方式" prop="mode">
+                <el-select v-model="runtime.mode" :disabled="mode === 'edit'" class="p-w-200">
+                    <el-option label="宿主机进程（Supervisor）" value="host" />
+                    <el-option label="Docker 容器（兼容模式）" value="docker" />
+                </el-select>
+                <span class="input-help">宿主机模式不创建容器，直接使用代码目录和启动命令。</span>
+            </el-form-item>
+            <AppConfig v-if="runtime.mode !== 'host'" v-model="runtime" :mode="mode" appKey="go" />
             <el-form-item :label="$t('tool.supervisor.dir')" prop="codeDir">
                 <el-input v-model.trim="runtime.codeDir" :disabled="mode === 'edit'">
                     <template #prepend>
@@ -40,7 +47,7 @@
                     {{ $t('runtime.goHelper') }}
                 </span>
             </el-form-item>
-            <el-form-item :label="$t('app.containerName')" prop="params.CONTAINER_NAME">
+            <el-form-item :label="runtime.mode === 'host' ? 'Supervisor 进程名称' : $t('app.containerName')" prop="params.CONTAINER_NAME">
                 <el-input v-model.trim="runtime.params['CONTAINER_NAME']"></el-input>
             </el-form-item>
             <el-form-item :label="$t('website.remark')" prop="remark">
@@ -94,6 +101,7 @@ const initData = (type: string) => ({
         HOST_IP: '0.0.0.0',
     },
     type: type,
+    mode: 'docker',
     resource: 'appstore',
     rebuild: false,
     codeDir: '/',
@@ -168,6 +176,13 @@ const submit = async (formEl: FormInstance | undefined) => {
         }
 
         if (mode.value == 'create') {
+            if (runtime.mode === 'host') {
+                runtime.resource = 'custom';
+                runtime.appDetailID = undefined;
+                runtime.appID = undefined;
+                runtime.image = '';
+                runtime.install = false;
+            }
             loading.value = true;
             const taskID = newUUID();
             runtime.taskID = taskID;
@@ -204,6 +219,7 @@ const getRuntime = async (id: number) => {
             appDetailID: data.appDetailID,
             image: data.image,
             type: data.type,
+            mode: data.mode || (data.params?.RUNTIME_MODE === 'host' ? 'host' : 'docker'),
             resource: data.resource,
             appID: data.appID,
             version: data.version,

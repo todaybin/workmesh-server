@@ -1,0 +1,1363 @@
+{
+  "schema": 1,
+  "generatedAt": "2026-09-13T13:52:22.878Z",
+  "generatedFrom": "/www/apps/workmesh-server/web/src",
+  "menuCount": 13,
+  "routeCount": 116,
+  "statuses": {
+    "not-run": 116
+  },
+  "menus": [
+    {
+      "module": "router.ts",
+      "path": "/",
+      "rawPath": "/",
+      "name": "Home-Menu",
+      "title": "menu.home",
+      "view": "@/views/home/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced",
+      "rawPath": "/advanced",
+      "name": "Advanced-Menu",
+      "title": "menu.advanced",
+      "view": "@/views/advanced/website-monitor/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "ai.ts",
+      "path": "/ai",
+      "rawPath": "/ai",
+      "name": "AI-Menu",
+      "title": "menu.aiTools",
+      "view": "@/views/ai/agents/agent/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "app-store.ts",
+      "path": "/apps",
+      "rawPath": "/apps",
+      "name": "App-Menu",
+      "title": "menu.apps",
+      "view": "@/views/app-store/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers",
+      "rawPath": "/containers",
+      "name": "Container-Menu",
+      "title": "menu.container",
+      "view": "@/views/container/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "cronjob.ts",
+      "path": "/cronjobs",
+      "rawPath": "/cronjobs",
+      "name": "Cronjob-Menu",
+      "title": "menu.cronjob",
+      "view": "@/views/cronjob/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases",
+      "rawPath": "/databases",
+      "name": "Database-Menu",
+      "title": "menu.database",
+      "view": "@/views/database/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts",
+      "rawPath": "/hosts",
+      "name": "System-Menu",
+      "title": "menu.system",
+      "view": "@/views/host/file-management/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "log.ts",
+      "path": "/logs",
+      "rawPath": "/logs",
+      "name": "Log-Menu",
+      "title": "menu.logs",
+      "view": "@/views/log/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings",
+      "rawPath": "/settings",
+      "name": "Setting-Menu",
+      "title": "menu.settings",
+      "view": "@/views/setting/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "terminal.ts",
+      "path": "/terminal",
+      "rawPath": "/terminal",
+      "name": "Terminal-Menu",
+      "title": "menu.terminal",
+      "view": "@/views/terminal/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "toolbox.ts",
+      "path": "/toolbox",
+      "rawPath": "/toolbox",
+      "name": "Toolbox-Menu",
+      "title": "menu.toolbox",
+      "view": "@/views/toolbox/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites",
+      "rawPath": "/websites",
+      "name": "Website-Menu",
+      "title": "menu.website",
+      "view": "@/views/website/website/index.vue",
+      "level": 0,
+      "status": "not-run"
+    }
+  ],
+  "routes": [
+    {
+      "module": "advanced.ts",
+      "path": "/advanced",
+      "rawPath": "/advanced",
+      "name": "Advanced-Menu",
+      "title": "menu.advanced",
+      "view": "@/views/advanced/website-monitor/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/website-monitor",
+      "rawPath": "/advanced/website-monitor",
+      "name": "AdvancedWebsiteMonitor",
+      "title": "menu.websiteMonitor",
+      "view": "@/views/advanced/website-monitor/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/website-monitor/dashboard",
+      "rawPath": "dashboard",
+      "name": "AdvancedWebsiteMonitorDashboard",
+      "title": "",
+      "view": "@/views/advanced/website-monitor/dashboard/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/website-monitor/rank",
+      "rawPath": "rank",
+      "name": "AdvancedWebsiteMonitorRank",
+      "title": "",
+      "view": "@/views/advanced/website-monitor/rank/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/website-monitor/trend",
+      "rawPath": "trend",
+      "name": "AdvancedWebsiteMonitorTrend",
+      "title": "",
+      "view": "@/views/advanced/website-monitor/trend/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/website-monitor/log",
+      "rawPath": "log",
+      "name": "AdvancedWebsiteMonitorLog",
+      "title": "",
+      "view": "@/views/advanced/website-monitor/log/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/website-monitor/websites",
+      "rawPath": "websites",
+      "name": "AdvancedWebsiteMonitorWebsites",
+      "title": "",
+      "view": "@/views/advanced/website-monitor/websites/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/website-monitor/setting",
+      "rawPath": "setting",
+      "name": "AdvancedWebsiteMonitorSetting",
+      "title": "menu.waf",
+      "view": "@/views/advanced/website-monitor/setting/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/waf",
+      "rawPath": "/advanced/waf",
+      "name": "AdvancedWaf",
+      "title": "menu.waf",
+      "view": "@/views/advanced/waf/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/waf/overview",
+      "rawPath": "overview",
+      "name": "AdvancedWafOverview",
+      "title": "",
+      "view": "@/views/advanced/waf/overview/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/waf/attack",
+      "rawPath": "attack",
+      "name": "AdvancedWafAttack",
+      "title": "",
+      "view": "@/views/advanced/waf/attack/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/waf/intercept",
+      "rawPath": "intercept",
+      "name": "AdvancedWafIntercept",
+      "title": "",
+      "view": "@/views/advanced/waf/intercept/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/waf/block",
+      "rawPath": "block",
+      "name": "AdvancedWafBlock",
+      "title": "",
+      "view": "@/views/advanced/waf/block/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/waf/blackwhite",
+      "rawPath": "blackwhite",
+      "name": "AdvancedWafBlackWhite",
+      "title": "",
+      "view": "@/views/advanced/waf/blackwhite/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/waf/websites",
+      "rawPath": "websites",
+      "name": "AdvancedWafWebsites",
+      "title": "menu.multiNode",
+      "view": "@/views/advanced/waf/websites/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/waf/global",
+      "rawPath": "global",
+      "name": "AdvancedWafGlobal",
+      "title": "menu.multiNode",
+      "view": "@/views/advanced/waf/global/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "advanced.ts",
+      "path": "/advanced/multi-node",
+      "rawPath": "/advanced/multi-node",
+      "name": "AdvancedMultiNode",
+      "title": "menu.multiNode",
+      "view": "@/views/advanced/multi-node/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "ai.ts",
+      "path": "/ai",
+      "rawPath": "/ai",
+      "name": "AI-Menu",
+      "title": "menu.aiTools",
+      "view": "@/views/ai/agents/agent/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "ai.ts",
+      "path": "/ai/agents/agent",
+      "rawPath": "/ai/agents/agent",
+      "name": "Agents",
+      "title": "aiTools.agents.agent",
+      "view": "@/views/ai/agents/agent/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "ai.ts",
+      "path": "/ai/model/account",
+      "rawPath": "/ai/model/account",
+      "name": "AIModel",
+      "title": "aiTools.model.model",
+      "view": "@/views/ai/model/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "ai.ts",
+      "path": "/ai/model/local",
+      "rawPath": "/ai/model/local",
+      "name": "LocalModel",
+      "title": "aiTools.model.localModel",
+      "view": "@/views/ai/model/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "ai.ts",
+      "path": "/ai/mcp",
+      "rawPath": "/ai/mcp",
+      "name": "MCPServer",
+      "title": "menu.mcp",
+      "view": "@/views/ai/mcp/server/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "ai.ts",
+      "path": "/ai/gpu/current",
+      "rawPath": "/ai/gpu/current",
+      "name": "GPU",
+      "title": "aiTools.gpu.gpu",
+      "view": "@/views/ai/gpu/current/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "ai.ts",
+      "path": "/ai/gpu/history",
+      "rawPath": "/ai/gpu/history",
+      "name": "GPUHistory",
+      "title": "aiTools.gpu.history",
+      "view": "@/views/ai/gpu/history/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "app-store.ts",
+      "path": "/apps",
+      "rawPath": "/apps",
+      "name": "App-Menu",
+      "title": "menu.apps",
+      "view": "@/views/app-store/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "app-store.ts",
+      "path": "/apps",
+      "rawPath": "/apps",
+      "name": "App",
+      "title": "app.all",
+      "view": "@/views/app-store/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "app-store.ts",
+      "path": "/apps/all",
+      "rawPath": "all",
+      "name": "AppAll",
+      "title": "app.all",
+      "view": "@/views/app-store/apps/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "app-store.ts",
+      "path": "/apps/installed",
+      "rawPath": "installed",
+      "name": "AppInstalled",
+      "title": "app.installed",
+      "view": "@/views/app-store/installed/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "app-store.ts",
+      "path": "/apps/upgrade",
+      "rawPath": "upgrade",
+      "name": "AppUpgrade",
+      "title": "app.canUpgrade",
+      "view": "@/views/app-store/installed/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "app-store.ts",
+      "path": "/apps/setting",
+      "rawPath": "setting",
+      "name": "AppStoreSetting",
+      "title": "commons.button.set",
+      "view": "@/views/app-store/setting/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers",
+      "rawPath": "/containers",
+      "name": "Container-Menu",
+      "title": "menu.container",
+      "view": "@/views/container/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers",
+      "rawPath": "/containers",
+      "name": "Container",
+      "title": "menu.home",
+      "view": "@/views/container/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers/dashboard",
+      "rawPath": "dashboard",
+      "name": "ContainerDashboard",
+      "title": "menu.home",
+      "view": "@/views/container/dashboard/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers/container",
+      "rawPath": "container",
+      "name": "ContainerItem",
+      "title": "menu.container",
+      "view": "@/views/container/container/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers/container/operate",
+      "rawPath": "container/operate",
+      "name": "ContainerCreate",
+      "title": "container.image",
+      "view": "@/views/container/container/operate/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers/image",
+      "rawPath": "image",
+      "name": "Image",
+      "title": "container.image",
+      "view": "@/views/container/image/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers/network",
+      "rawPath": "network",
+      "name": "Network",
+      "title": "container.network",
+      "view": "@/views/container/network/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers/volume",
+      "rawPath": "volume",
+      "name": "Volume",
+      "title": "container.volume",
+      "view": "@/views/container/volume/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers/repo",
+      "rawPath": "repo",
+      "name": "Repo",
+      "title": "container.repo",
+      "view": "@/views/container/repo/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers/compose",
+      "rawPath": "compose",
+      "name": "Compose",
+      "title": "container.compose",
+      "view": "@/views/container/compose/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers/template",
+      "rawPath": "template",
+      "name": "ComposeTemplate",
+      "title": "container.composeTemplate",
+      "view": "@/views/container/template/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "container.ts",
+      "path": "/containers/setting",
+      "rawPath": "setting",
+      "name": "ContainerSetting",
+      "title": "container.setting",
+      "view": "@/views/container/setting/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "cronjob.ts",
+      "path": "/cronjobs",
+      "rawPath": "/cronjobs",
+      "name": "Cronjob-Menu",
+      "title": "menu.cronjob",
+      "view": "@/views/cronjob/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "cronjob.ts",
+      "path": "/cronjobs",
+      "rawPath": "/cronjobs",
+      "name": "Cronjob",
+      "title": "menu.cronjob",
+      "view": "@/views/cronjob/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "cronjob.ts",
+      "path": "/cronjobs/cronjob",
+      "rawPath": "cronjob",
+      "name": "CronjobItem",
+      "title": "menu.cronjob",
+      "view": "@/views/cronjob/cronjob/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "cronjob.ts",
+      "path": "/cronjobs/cronjob/operate",
+      "rawPath": "cronjob/operate",
+      "name": "CronjobOperate",
+      "title": "cronjob.library.library",
+      "view": "@/views/cronjob/cronjob/operate/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "cronjob.ts",
+      "path": "/cronjobs/library",
+      "rawPath": "library",
+      "name": "Library",
+      "title": "cronjob.library.library",
+      "view": "@/views/cronjob/library/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases",
+      "rawPath": "/databases",
+      "name": "Database-Menu",
+      "title": "menu.database",
+      "view": "@/views/database/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases",
+      "rawPath": "/databases",
+      "name": "Database",
+      "title": "MySQL",
+      "view": "@/views/database/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases/mysql",
+      "rawPath": "mysql",
+      "name": "MySQL",
+      "title": "MySQL",
+      "view": "@/views/database/mysql/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases/mysql/setting/:type/:database",
+      "rawPath": "mysql/setting/:type/:database",
+      "name": "MySQL-Setting",
+      "title": "MySQL",
+      "view": "@/views/database/mysql/setting/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases/mysql/remote",
+      "rawPath": "mysql/remote",
+      "name": "MySQL-Remote",
+      "title": "MySQL",
+      "view": "@/views/database/mysql/remote/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases/postgresql",
+      "rawPath": "postgresql",
+      "name": "PostgreSQL",
+      "title": "PostgreSQL",
+      "view": "@/views/database/postgresql/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases/postgresql/remote",
+      "rawPath": "postgresql/remote",
+      "name": "PostgreSQL-Remote",
+      "title": "PostgreSQL",
+      "view": "@/views/database/postgresql/remote/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases/postgresql/setting/:type/:database",
+      "rawPath": "postgresql/setting/:type/:database",
+      "name": "PostgreSQL-Setting",
+      "title": "Redis",
+      "view": "@/views/database/postgresql/setting/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases/redis",
+      "rawPath": "redis",
+      "name": "Redis",
+      "title": "Redis",
+      "view": "@/views/database/redis/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases/redis/remote",
+      "rawPath": "redis/remote",
+      "name": "Redis-Remote",
+      "title": "Redis",
+      "view": "@/views/database/redis/remote/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases/mongodb",
+      "rawPath": "mongodb",
+      "name": "MongoDB",
+      "title": "MongoDB",
+      "view": "@/views/database/mongodb/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "database.ts",
+      "path": "/databases/mongodb/remote",
+      "rawPath": "mongodb/remote",
+      "name": "MongoDB-Remote",
+      "title": "MongoDB",
+      "view": "@/views/database/mongodb/remote/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "error.ts",
+      "path": "/error",
+      "rawPath": "/error",
+      "name": "404",
+      "title": "commons.msg.notFound",
+      "view": "@/components/error-message/404.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "error.ts",
+      "path": "/error/404",
+      "rawPath": "404",
+      "name": "404",
+      "title": "commons.msg.notFound",
+      "view": "@/components/error-message/404.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts",
+      "rawPath": "/hosts",
+      "name": "System-Menu",
+      "title": "menu.system",
+      "view": "@/views/host/file-management/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/files",
+      "rawPath": "/hosts/files",
+      "name": "File",
+      "title": "menu.files",
+      "view": "@/views/host/file-management/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/monitor/monitor",
+      "rawPath": "/hosts/monitor/monitor",
+      "name": "Monitorx",
+      "title": "menu.monitor",
+      "view": "@/views/host/monitor/monitor/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/monitor/setting",
+      "rawPath": "/hosts/monitor/setting",
+      "name": "HostMonitorSetting",
+      "title": "menu.monitor",
+      "view": "@/views/host/monitor/setting/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/firewall/rules",
+      "rawPath": "/hosts/firewall/rules",
+      "name": "FirewallPort",
+      "title": "menu.firewall",
+      "view": "@/views/host/firewall/rule/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/firewall/docker",
+      "rawPath": "/hosts/firewall/docker",
+      "name": "FirewallDockerGuard",
+      "title": "firewall.dockerGuard",
+      "view": "@/views/host/firewall/docker/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/firewall/forward",
+      "rawPath": "/hosts/firewall/forward",
+      "name": "FirewallForward",
+      "title": "firewall.forwardRule",
+      "view": "@/views/host/firewall/forward/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/firewall/setting",
+      "rawPath": "/hosts/firewall/setting",
+      "name": "FirewallSetting",
+      "title": "commons.button.set",
+      "view": "@/views/host/firewall/setting/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/disk",
+      "rawPath": "/hosts/disk",
+      "name": "Disk",
+      "title": "menu.disk",
+      "view": "@/views/host/disk-management/disk/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/process/process",
+      "rawPath": "/hosts/process/process",
+      "name": "Process",
+      "title": "menu.processManage",
+      "view": "@/views/host/process/process/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/process/network",
+      "rawPath": "/hosts/process/network",
+      "name": "ProcessNetwork",
+      "title": "menu.network",
+      "view": "@/views/host/process/network/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/ssh/ssh",
+      "rawPath": "/hosts/ssh/ssh",
+      "name": "SSH",
+      "title": "menu.ssh",
+      "view": "@/views/host/ssh/ssh/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/ssh/log",
+      "rawPath": "/hosts/ssh/log",
+      "name": "SSHLog",
+      "title": "ssh.loginLogs",
+      "view": "@/views/host/ssh/log/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "host.ts",
+      "path": "/hosts/ssh/session",
+      "rawPath": "/hosts/ssh/session",
+      "name": "SSHSession",
+      "title": "ssh.session",
+      "view": "@/views/host/ssh/session/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "log.ts",
+      "path": "/logs",
+      "rawPath": "/logs",
+      "name": "Log-Menu",
+      "title": "menu.logs",
+      "view": "@/views/log/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "log.ts",
+      "path": "/logs",
+      "rawPath": "/logs",
+      "name": "Log",
+      "title": "logs.operation",
+      "view": "@/views/log/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "log.ts",
+      "path": "/logs/operation",
+      "rawPath": "operation",
+      "name": "OperationLog",
+      "title": "logs.operation",
+      "view": "@/views/log/operation/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "log.ts",
+      "path": "/logs/login",
+      "rawPath": "login",
+      "name": "LoginLog",
+      "title": "logs.login",
+      "view": "@/views/log/login/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "log.ts",
+      "path": "/logs/website",
+      "rawPath": "website",
+      "name": "WebsiteLog",
+      "title": "logs.websiteLog",
+      "view": "@/views/log/website/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "log.ts",
+      "path": "/logs/system",
+      "rawPath": "system",
+      "name": "SystemLog",
+      "title": "logs.system",
+      "view": "@/views/log/system/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "log.ts",
+      "path": "/logs/host",
+      "rawPath": "host",
+      "name": "HostSystemLog",
+      "title": "logs.hostSystem",
+      "view": "@/views/log/host-system/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "log.ts",
+      "path": "/logs/ssh",
+      "rawPath": "ssh",
+      "name": "SSHLog2",
+      "title": "ssh.loginLogs",
+      "view": "@/views/host/ssh/log/log.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "log.ts",
+      "path": "/logs/task",
+      "rawPath": "task",
+      "name": "Task",
+      "title": "logs.task",
+      "view": "@/views/log/task/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings",
+      "rawPath": "/settings",
+      "name": "Setting-Menu",
+      "title": "menu.settings",
+      "view": "@/views/setting/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings",
+      "rawPath": "/settings",
+      "name": "Setting",
+      "title": "setting.panel",
+      "view": "@/views/setting/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings/panel",
+      "rawPath": "panel",
+      "name": "Panel",
+      "title": "setting.panel",
+      "view": "@/views/setting/panel/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings/bind",
+      "rawPath": "bind",
+      "name": "GatewayBind",
+      "title": "serverPages.gateway.bindRoute",
+      "view": "@/views/setting/bind/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings/alert",
+      "rawPath": "alert",
+      "name": "Alert",
+      "title": "xpack.alert.alertNotice",
+      "view": "@/views/setting/alert/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings/backupaccount",
+      "rawPath": "backupaccount",
+      "name": "BackupAccount",
+      "title": "setting.backupAccount",
+      "view": "@/views/setting/backup-account/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings/about",
+      "rawPath": "about",
+      "name": "About",
+      "title": "setting.about",
+      "view": "@/views/setting/about/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings/safe",
+      "rawPath": "safe",
+      "name": "Safe",
+      "title": "setting.safe",
+      "view": "@/views/setting/safe/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings/snapshot",
+      "rawPath": "snapshot",
+      "name": "Snapshot",
+      "title": "setting.snapshot",
+      "view": "@/views/setting/snapshot/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "setting.ts",
+      "path": "/settings/expired",
+      "rawPath": "expired",
+      "name": "Expired",
+      "title": "",
+      "view": "@/views/setting/expired.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "terminal.ts",
+      "path": "/terminal",
+      "rawPath": "/terminal",
+      "name": "Terminal-Menu",
+      "title": "menu.terminal",
+      "view": "@/views/terminal/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "terminal.ts",
+      "path": "/terminal",
+      "rawPath": "/terminal",
+      "name": "Terminal",
+      "title": "",
+      "view": "@/views/terminal/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "toolbox.ts",
+      "path": "/toolbox",
+      "rawPath": "/toolbox",
+      "name": "Toolbox-Menu",
+      "title": "menu.toolbox",
+      "view": "@/views/toolbox/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "toolbox.ts",
+      "path": "/toolbox",
+      "rawPath": "/toolbox",
+      "name": "Toolbox",
+      "title": "toolbox.device.toolbox",
+      "view": "@/views/toolbox/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "toolbox.ts",
+      "path": "/toolbox/device",
+      "rawPath": "device",
+      "name": "Device",
+      "title": "toolbox.device.toolbox",
+      "view": "@/views/toolbox/device/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "toolbox.ts",
+      "path": "/toolbox/supervisor",
+      "rawPath": "supervisor",
+      "name": "Supervisor",
+      "title": "menu.supervisor",
+      "view": "@/views/toolbox/supervisor/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "toolbox.ts",
+      "path": "/toolbox/clam",
+      "rawPath": "clam",
+      "name": "Clam",
+      "title": "toolbox.clam.clam",
+      "view": "@/views/toolbox/clam/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "toolbox.ts",
+      "path": "/toolbox/clam/setting",
+      "rawPath": "clam/setting",
+      "name": "Clam-Setting",
+      "title": "FTP",
+      "view": "@/views/toolbox/clam/setting/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "toolbox.ts",
+      "path": "/toolbox/ftp",
+      "rawPath": "ftp",
+      "name": "FTP",
+      "title": "FTP",
+      "view": "@/views/toolbox/ftp/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "toolbox.ts",
+      "path": "/toolbox/fail2ban",
+      "rawPath": "fail2ban",
+      "name": "Fail2ban",
+      "title": "Fail2Ban",
+      "view": "@/views/toolbox/fail2ban/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "toolbox.ts",
+      "path": "/toolbox/clean",
+      "rawPath": "clean",
+      "name": "Clean",
+      "title": "setting.diskClean",
+      "view": "@/views/toolbox/clean/index.vue",
+      "level": 2,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites",
+      "rawPath": "/websites",
+      "name": "Website-Menu",
+      "title": "menu.website",
+      "view": "@/views/website/website/index.vue",
+      "level": 0,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites",
+      "rawPath": "/websites",
+      "name": "Website",
+      "title": "menu.website",
+      "view": "@/views/website/website/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites/:id/config/:tab",
+      "rawPath": "/websites/:id/config/:tab",
+      "name": "WebsiteConfig",
+      "title": "menu.ssl",
+      "view": "@/views/website/website/config/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites/ssl",
+      "rawPath": "/websites/ssl",
+      "name": "SSL",
+      "title": "menu.ssl",
+      "view": "@/views/website/ssl/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites/templates",
+      "rawPath": "/websites/templates",
+      "name": "WebsiteTemplate",
+      "title": "menu.template",
+      "view": "@/views/website/template/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites/runtimes/php",
+      "rawPath": "/websites/runtimes/php",
+      "name": "PHP",
+      "title": "menu.runtime",
+      "view": "@/views/website/runtime/php/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites/runtimes/node",
+      "rawPath": "/websites/runtimes/node",
+      "name": "node",
+      "title": "menu.runtime",
+      "view": "@/views/website/runtime/node/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites/runtimes/java",
+      "rawPath": "/websites/runtimes/java",
+      "name": "java",
+      "title": "menu.runtime",
+      "view": "@/views/website/runtime/java/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites/runtimes/go",
+      "rawPath": "/websites/runtimes/go",
+      "name": "go",
+      "title": "menu.runtime",
+      "view": "@/views/website/runtime/go/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites/runtimes/python",
+      "rawPath": "/websites/runtimes/python",
+      "name": "python",
+      "title": "menu.runtime",
+      "view": "@/views/website/runtime/python/index.vue",
+      "level": 1,
+      "status": "not-run"
+    },
+    {
+      "module": "website.ts",
+      "path": "/websites/runtimes/dotnet",
+      "rawPath": "/websites/runtimes/dotnet",
+      "name": "dotNet",
+      "title": "menu.runtime",
+      "view": "@/views/website/runtime/dotnet/index.vue",
+      "level": 1,
+      "status": "not-run"
+    }
+  ],
+  "sources": [
+    {
+      "file": "src/routers/modules/advanced.ts",
+      "sha256": "6aefb8f8620ac0c3f0cd24f9b958655556fab221d0dc1a14347bf45e9b904d06"
+    },
+    {
+      "file": "src/routers/modules/ai.ts",
+      "sha256": "83d0a93583f774f1d3ef1cb8d79267a23c37c67df7247be6189c915557bd5f9e"
+    },
+    {
+      "file": "src/routers/modules/app-store.ts",
+      "sha256": "140b63686014a336c87791c984501a5fba4d2a57940f0cab07598f773f44ce4a"
+    },
+    {
+      "file": "src/routers/modules/container.ts",
+      "sha256": "6b5d9522ebb1508863d3c0ec76f68caf8061095d239fd144307cf169ed73af3e"
+    },
+    {
+      "file": "src/routers/modules/cronjob.ts",
+      "sha256": "f5c1ec3c5add43ef303039c4d1eee2df87b884c03edd9a7dc9f89d033c4e882e"
+    },
+    {
+      "file": "src/routers/modules/database.ts",
+      "sha256": "568200690fe43a8a2c2237394149741bc2e4772af9f4767045d3e8f0e15eb5b7"
+    },
+    {
+      "file": "src/routers/modules/error.ts",
+      "sha256": "c627415832f412c9b83461ad6a6404c2cd3eff65e82b127c66037b345e86a35c"
+    },
+    {
+      "file": "src/routers/modules/host.ts",
+      "sha256": "70696d1868f51a0f7057be916614ebbf6f25d35c6c497413265f2dc985e8f382"
+    },
+    {
+      "file": "src/routers/modules/log.ts",
+      "sha256": "9c92bd30bf241bf7897215b8ab675ea16863e56bd0c788c880d48047cea16f1d"
+    },
+    {
+      "file": "src/routers/modules/setting.ts",
+      "sha256": "a5c18e7dfa96ee46eb3fe0e6a2321a350d0d1e462c1677392c0fa5af79ca24e2"
+    },
+    {
+      "file": "src/routers/modules/terminal.ts",
+      "sha256": "fdf4e0bded943e9fb0506649db988ef46c02ca651aa5719dcd29ac918e9291aa"
+    },
+    {
+      "file": "src/routers/modules/toolbox.ts",
+      "sha256": "01c68cf13ce64856bad0c75ca2f76cede54fe9cc4429c8dd49fc00ed518abdef"
+    },
+    {
+      "file": "src/routers/modules/website.ts",
+      "sha256": "adaad5455cb378df221802077ba9944b1665ce2a7dc980764bfdfc0b9a87c422"
+    }
+  ],
+  "limitations": [
+    "标题是 i18n key，不在清单中复制语言包文本；实际显示文字由语言包决定。",
+    "动态权限、xpack 路由、运行时菜单和弹窗操作需要登录后人工/浏览器验收。",
+    "not-run 只代表尚未完成真实页面和接口闭环测试。"
+  ]
+}

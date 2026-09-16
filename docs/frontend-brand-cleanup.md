@@ -1,6 +1,6 @@
 # 前端品牌清理清单
 
-完整前端源码已从 `apps/workmesh-node/frontend/src` 迁入 `apps/workmesh-server/web/src`，迁移阶段不删除任何业务页面、API 模块、路由、语言包或组件。以下清单记录后续必须逐项处理的旧产品标识，避免把品牌清理误认为功能删减。
+前端兼容审计以只读参考 `/www/apps/1Panel/frontend/src` 为来源，WorkMesh 的工作副本位于 `apps/workmesh-server/web/src`。迁移阶段不删除任何业务页面、API 模块、路由、语言包或组件。以下清单记录后续必须逐项处理的旧产品标识，避免把品牌清理误认为功能删减。
 
 ## 已处理
 

@@ -88,3 +88,38 @@ func TestCronjobStartIsIdempotent(t *testing.T) {
 	}
 	t.Fatal("调度器取消后未释放运行标记")
 }
+
+func TestCronjobHandleOnceRollsBackWhenPersistenceFails(t *testing.T) {
+	s := newTestCronjobService(t)
+	job, err := s.Create(context.Background(), model.Cronjob{Name: "持久化失败", Command: "echo ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.RLock()
+	db := s.db
+	s.mu.RUnlock()
+	if db == nil {
+		t.Fatal("计划任务数据库未初始化")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		fallbackSQLiteMu.Lock()
+		delete(fallbackSQLiteDB, s.fallbackPath)
+		fallbackSQLiteMu.Unlock()
+	})
+
+	if _, err := s.HandleOnce(context.Background(), job.ID); err == nil {
+		t.Fatal("计划任务执行结果持久化失败时必须返回错误")
+	}
+	if got := s.Records(context.Background(), job.ID); len(got) != 0 {
+		t.Fatalf("持久化失败后执行记录未回滚: %+v", got)
+	}
+	restored, ok := s.Get(context.Background(), job.ID)
+	if !ok || restored.LastRunAt != "" {
+		t.Fatalf("持久化失败后任务状态未回滚: %+v exists=%v", restored, ok)
+	}
+
+}

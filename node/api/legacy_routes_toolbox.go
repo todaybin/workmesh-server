@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 WorkMesh contributors
+
+package api
+
+// registerLegacyToolboxRoutes 注册 toolbox 领域尚未迁移的兼容路由。
+func registerLegacyToolboxRoutes(mux routeRegistrar) {
+	mux.HandleFunc("GET /api/v2/toolbox/device/users", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/toolbox/device/zone/options", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/base", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/load/conf", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/toolbox/ftp/base", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/base", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/file/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/file/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/handle", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/record/clean", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/record/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/status/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clam/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/clean", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/base", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/check/dns", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/conf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/byconf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/conf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/host", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/passwd", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/swap", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/operate/sshd", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/fail2ban/update/byconf", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/del", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/log/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/operate", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/sync", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/ftp/update", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/toolbox/scan", fallbackRouteHandler)
+}

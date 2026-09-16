@@ -587,13 +587,23 @@ const syncContainerRows = (containers: Record<string, any>[]) => {
 };
 
 const applyStatsToRows = (stats: Record<string, any>[]) => {
-    if (stats.length === 0 || data.value.length === 0) {
+    if (data.value.length === 0) {
         return;
     }
     const statsMap = new Map(stats.map((item) => [item.containerID, item]));
     for (const container of data.value) {
         const stat = statsMap.get(container.containerID);
         if (!stat) {
+            // Docker `stats` only returns running containers. A stopped, exited,
+            // created, or dead container has no live usage sample and must not
+            // remain in an indeterminate loading state in the list.
+            if (String(container.state || '').toLowerCase() !== 'running') {
+                container.hasLoad = true;
+                container.hasLoadSize = false;
+                for (const field of statFields) {
+                    container[field] = 0;
+                }
+            }
             continue;
         }
         if (!container.hasLoad) {
@@ -603,6 +613,22 @@ const applyStatsToRows = (stats: Record<string, any>[]) => {
             if (container[field] !== stat[field]) {
                 container[field] = stat[field];
             }
+        }
+    }
+};
+
+// Docker stats only emits running containers. Initialize every non-running row
+// immediately so stopped containers render stable zero values instead of an
+// indeterminate loading spinner while the stats request is pending or fails.
+const initializeStoppedRows = () => {
+    for (const container of data.value) {
+        if (String(container.state || '').toLowerCase() === 'running') {
+            continue;
+        }
+        container.hasLoad = true;
+        container.hasLoadSize = false;
+        for (const field of statFields) {
+            container[field] = 0;
         }
     }
 };
@@ -729,11 +755,17 @@ const search = async (column?: any) => {
     if (containerResult.status === 'fulfilled') {
         const containers = containerResult.value.data.items || [];
         syncContainerRows(containers);
+        initializeStoppedRows();
         paginationConfig.total = containerResult.value.data.total;
     }
 
     if (statsResult.status === 'fulfilled') {
         applyStatsToRows(statsResult.value.data || []);
+    } else {
+        // A stats failure must not leave stopped rows spinning forever. Running
+        // rows remain visibly pending so a transient Docker error is not shown
+        // as a successful zero measurement.
+        initializeStoppedRows();
     }
 
     if (statusResult.status === 'fulfilled') {
@@ -780,9 +812,21 @@ const refresh = async () => {
         orderBy: paginationConfig.orderBy,
         order: paginationConfig.order,
     };
-    const [containerResult, statsResult] = await Promise.all([searchContainer(params), containerListStats()]);
-    syncContainerRows(containerResult.data.items || []);
-    applyStatsToRows(statsResult.data || []);
+    const [containerResult, statsResult] = await Promise.allSettled([searchContainer(params), containerListStats()]);
+    if (containerResult.status === 'fulfilled') {
+        syncContainerRows(containerResult.value.data.items || []);
+        // Docker stats only contains running containers. Keep stopped rows stable
+        // at zero during manual refresh as well as the initial search path.
+        initializeStoppedRows();
+        paginationConfig.total = containerResult.value.data.total;
+    }
+    if (statsResult.status === 'fulfilled') {
+        applyStatsToRows(statsResult.value.data || []);
+    } else {
+        // A stats dependency failure must not leave stopped rows in a loading
+        // state; running rows remain pending until a real sample is available.
+        initializeStoppedRows();
+    }
 };
 
 const loadSize = async (row: any) => {

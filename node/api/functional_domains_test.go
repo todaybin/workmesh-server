@@ -227,6 +227,7 @@ func TestFunctionalBackupAlertSettings(t *testing.T) {
 
 func TestSettingsOperationalEndpointsReturnPersistedState(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	t.Setenv("WORKMESH_SSL_RELOAD_COMMAND", "true")
 	mux := http.NewServeMux()
 	registerBackupAlertLogSettingsRoutes(mux)
 	for _, path := range []string{"/api/v2/core/settings/menu/default", "/api/v2/core/settings/terminal/search", "/api/v2/core/settings/ssl/download", "/api/v2/core/settings/ssl/reload"} {
@@ -235,6 +236,50 @@ func TestSettingsOperationalEndpointsReturnPersistedState(t *testing.T) {
 		if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"path"`) {
 			t.Fatalf("settings endpoint %s failed: %d %s", path, res.Code, res.Body.String())
 		}
+	}
+}
+
+func TestSettingsRuntimeChangesReportPendingRestartAndValidateSSL(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerBackupAlertLogSettingsRoutes(mux)
+
+	post := func(path, body string) *httptest.ResponseRecorder {
+		res := httptest.NewRecorder()
+		mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+		return res
+	}
+	port := post("/api/v2/core/settings/port/update", `{"serverPort":18080}`)
+	if port.Code != http.StatusOK || !strings.Contains(port.Body.String(), `"restartRequired":true`) || !strings.Contains(port.Body.String(), `"effective":false`) {
+		t.Fatalf("port response=%d %s", port.Code, port.Body.String())
+	}
+	bind := post("/api/v2/core/settings/bind/update", `{"ipv6":"Disable","bindAddress":"127.0.0.1"}`)
+	if bind.Code != http.StatusOK || !strings.Contains(bind.Body.String(), `"pending-restart"`) {
+		t.Fatalf("bind response=%d %s", bind.Code, bind.Body.String())
+	}
+	invalidBind := post("/api/v2/core/settings/bind/update", `{"ipv6":"Enable","bindAddress":"127.0.0.1"}`)
+	if invalidBind.Code != http.StatusBadRequest {
+		t.Fatalf("invalid IPv6 bind status=%d body=%s", invalidBind.Code, invalidBind.Body.String())
+	}
+	invalidSSL := post("/api/v2/core/settings/ssl/update", `{"ssl":"Enable","sslType":"import-paste","cert":"bad","key":"bad"}`)
+	if invalidSSL.Code != http.StatusBadRequest || !strings.Contains(invalidSSL.Body.String(), "INVALID_SSL") {
+		t.Fatalf("invalid SSL status=%d body=%s", invalidSSL.Code, invalidSSL.Body.String())
+	}
+	disabledSSL := post("/api/v2/core/settings/ssl/update", `{"ssl":"Disable","sslType":"self","cert":"","key":"","sslID":0}`)
+	if disabledSSL.Code != http.StatusOK || !strings.Contains(disabledSSL.Body.String(), `"reloadRequired":true`) {
+		t.Fatalf("disabled SSL response=%d %s", disabledSSL.Code, disabledSSL.Body.String())
+	}
+}
+
+func TestSSLReloadRequiresConfiguredHook(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	t.Setenv("WORKMESH_SSL_RELOAD_COMMAND", "")
+	mux := http.NewServeMux()
+	registerBackupAlertLogSettingsRoutes(mux)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/core/settings/ssl/reload", strings.NewReader(`{}`)))
+	if res.Code != http.StatusServiceUnavailable || !strings.Contains(res.Body.String(), "SSL_RELOAD_UNAVAILABLE") {
+		t.Fatalf("missing reload hook status=%d body=%s", res.Code, res.Body.String())
 	}
 }
 
@@ -440,5 +485,36 @@ func TestCoreSettingsExposeContractFieldsAndKeyValueUpdate(t *testing.T) {
 	}
 	if result.Data["panelName"] != "Demo" {
 		t.Fatalf("键值更新未生效: %#v", result.Data["panelName"])
+	}
+}
+
+func TestSettingsNormalizeTypesAndRejectInvalidRanges(t *testing.T) {
+	dataDir := t.TempDir()
+	store := &domainStore{path: filepath.Join(dataDir, "domains.json"), state: domainState{Settings: map[string]any{}}}
+	mux := http.NewServeMux()
+	registerSettingsRoutes(mux, store)
+	post := func(body string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v2/core/settings/update", bytes.NewBufferString(body))
+		mux.ServeHTTP(response, request)
+		return response
+	}
+	if response := post(`{"key":"ServerPort","value":"18080"}`); response.Code != http.StatusOK {
+		t.Fatalf("valid server port rejected: %d %s", response.Code, response.Body.String())
+	}
+	if got, ok := store.state.Settings["serverPort"].(int); !ok || got != 18080 {
+		t.Fatalf("serverPort should be persisted as int, got %#v", store.state.Settings["serverPort"])
+	}
+	if response := post(`{"key":"SessionTimeout","value":"299"}`); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_SETTING") {
+		t.Fatalf("invalid session timeout should return INVALID_SETTING: %d %s", response.Code, response.Body.String())
+	}
+	if response := post(`{"key":"ProxyType","value":"telnet"}`); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_SETTING") {
+		t.Fatalf("invalid proxy type should return INVALID_SETTING: %d %s", response.Code, response.Body.String())
+	}
+	if response := post(`{"key":"PanelName"}`); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_SETTING") {
+		t.Fatalf("missing setting value should return INVALID_SETTING: %d %s", response.Code, response.Body.String())
+	}
+	if response := post(`{"key":"AllowIPs","value":"192.0.2.0/24,2001:db8::1"}`); response.Code != http.StatusOK {
+		t.Fatalf("valid allowIPs rejected: %d %s", response.Code, response.Body.String())
 	}
 }

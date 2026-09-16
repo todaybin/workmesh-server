@@ -6,10 +6,10 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,11 +22,11 @@ import (
 	"github.com/todaybin/workmesh-server/config"
 	controlapi "github.com/todaybin/workmesh-server/control/api"
 	"github.com/todaybin/workmesh-server/internal/storage"
+	"github.com/todaybin/workmesh-server/internal/webassets"
 	nodeapi "github.com/todaybin/workmesh-server/node/api"
 	"github.com/todaybin/workmesh-server/node/service"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 	"github.com/todaybin/workmesh-server/runtime/log"
-	"github.com/todaybin/workmesh-server/runtime/role"
 )
 
 func main() {
@@ -35,23 +35,25 @@ func main() {
 		_, _ = fmt.Fprintln(os.Stderr, "加载服务配置失败:", configErr)
 		os.Exit(1)
 	}
-	if err := cfg.ApplyRuntimeEnvironment(); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "同步服务配置失败:", err)
+	if err := runServer(cfg); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// runServer 完成单进程服务的存储初始化、路由装配和优雅退出。
+func runServer(cfg config.Config) error {
+	if err := cfg.ApplyRuntimeEnvironment(); err != nil {
+		return fmt.Errorf("同步服务配置失败: %w", err)
+	}
 	if err := initializeDataDir(cfg.DataDir); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "初始化数据目录失败:", err)
-		os.Exit(1)
+		return fmt.Errorf("初始化数据目录失败: %w", err)
 	}
 	// 安全入口由 functional_domain_state 中的共享 SQLite 持久化状态提供。
 	// 启动时不得从旧 domains.json 生成随机入口，否则每次重新部署/重启
 	// 都会造成入口变化并覆盖用户看到的地址。
 	if handled, err := runCLI(os.Args[1:], cfg.DataDir); handled {
-		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		return
+		return err
 	}
 	logger := log.New(nil)
 	if logWriter, openErr := log.Open(log.Config{Path: filepath.Join(cfg.DataDir, "logs", "server.log")}); openErr == nil {
@@ -60,48 +62,26 @@ func main() {
 	}
 	readiness := newReadinessState()
 	readiness.SetNotReady("正在初始化统一存储")
-	stateStore, err := storage.Open(filepath.Join(cfg.DataDir, "workmesh.db"))
+	stateStore, err := initializeServerState(cfg)
 	if err != nil {
-		logger.Error("打开状态存储失败", "error", err)
-		os.Exit(1)
+		logger.Error("初始化统一存储失败", "error", err)
+		return err
 	}
 	defer stateStore.Close()
-	if err := initializeUnifiedSchema(stateStore); err != nil {
-		logger.Error("执行统一存储迁移失败", "error", err)
-		os.Exit(1)
-	}
-	if err := service.SetWebsiteDB(stateStore.DB()); err != nil {
-		logger.Error("初始化网站公共数据库存储失败", "error", err)
-		os.Exit(1)
-	}
-	if err := service.SetWebsiteSecurityDB(stateStore.DB()); err != nil {
-		logger.Error("初始化证书公共数据库存储失败", "error", err)
-		os.Exit(1)
-	}
-	if report, err := importLegacyData(context.Background(), stateStore, cfg.DataDir); err != nil {
-		logger.Error("导入旧数据失败", "error", err, "report", report)
-		os.Exit(1)
-	}
-	if err := nodeapi.SetSharedStore(stateStore); err != nil {
-		logger.Error("初始化节点公共控制面存储失败", "error", err)
-		os.Exit(1)
-	}
-	if err := nodeapi.SetCoreDatabase(stateStore.DB()); err != nil {
-		logger.Error("初始化认证 SQLite 存储失败", "error", err)
-		os.Exit(1)
-	}
-	if err := nodeapi.RecoverDeploymentState(cfg.DataDir); err != nil {
-		logger.Error("恢复部署制品状态失败", "error", err)
-		os.Exit(1)
-	}
-	if _, err := role.New(cfg.NodeID, cfg.Role); err != nil {
-		logger.Error("节点角色配置无效", "error", err)
-		os.Exit(1)
-	}
+	return runHTTPService(cfg, readiness, logger)
+}
+
+// runHTTPService 启动后台任务、网关和 HTTP 服务，并等待退出信号。
+func runHTTPService(cfg config.Config, readiness *readinessState, logger interface {
+	Error(string, ...any)
+	Info(string, ...any)
+}) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	mux, gatewayStore := httpMuxWithReadiness(cfg, readiness)
-	if cfg.BackgroundTasks.Enabled && backgroundTasksConfigured(cfg.DataDir) {
+	// SSL 自动续期和计划任务需要在没有现存 Cronjob 时也启动扫描器；
+	// 具体任务是否到期由各自的 SQLite 状态决定。
+	if cfg.BackgroundTasks.Enabled {
 		nodeapi.StartBackgroundTasks(ctx)
 	}
 	gatewayStore.Start(ctx, []string{"system", "containers", "files", "databases", "websites", "tasks"})
@@ -123,9 +103,15 @@ func main() {
 	defer cancel()
 	readiness.SetNotReady("服务正在关闭")
 	_ = server.Shutdown(shutdownCtx)
+	return nil
 }
 
-func initializeUnifiedSchema(s *storage.Store) error {
+// unifiedSchemaMigrations 返回统一 SQLite 的稳定启动迁移顺序。
+//
+// 迁移 ID 和 checksum 是持久化兼容契约：已经应用的迁移不能改写
+// SQL 或 checksum。0006 的两个领域迁移必须先于 0007，数据库备份和
+// 运行时状态则严格按 0008、0009 顺序追加。
+func unifiedSchemaMigrations() []storage.Migration {
 	legacyMigration := storage.SQLMigration("0002-legacy-payloads", `CREATE TABLE IF NOT EXISTS legacy_payloads (
 		domain TEXT NOT NULL,
 		source_path TEXT NOT NULL,
@@ -159,9 +145,24 @@ func initializeUnifiedSchema(s *storage.Store) error {
 	CREATE INDEX IF NOT EXISTS idx_database_grants_database ON database_grants(database_name,id);
 	CREATE TABLE IF NOT EXISTS database_variables (database_name TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(database_name,name));
 	CREATE TABLE IF NOT EXISTS database_configs (database_name TEXT PRIMARY KEY, content BLOB NOT NULL, updated_at TEXT NOT NULL);`)
+	return []storage.Migration{
+		legacyMigration,
+		nodeMigration,
+		databaseMigration,
+		databaseAdminMigration,
+		service.WebsiteSchemaMigration(),
+		service.DatabaseContainerNameMigration(),
+		service.DatabaseBackupSchemaMigration(),
+		service.DatabaseRuntimeStateSchemaMigration(),
+		service.WebsiteDefaultHTMLMigration(),
+		nodeapi.WebsiteTemplateMigration(),
+	}
+}
+
+func initializeUnifiedSchema(s *storage.Store) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return storage.ApplyMigrations(ctx, s.DB(), []storage.Migration{legacyMigration, nodeMigration, databaseMigration, databaseAdminMigration, service.WebsiteSchemaMigration()})
+	return storage.ApplyMigrations(ctx, s.DB(), unifiedSchemaMigrations())
 }
 
 func importLegacyData(ctx context.Context, s *storage.Store, dataDir string) (storage.LegacyImportReport, error) {
@@ -230,24 +231,10 @@ func (s *readinessState) ServeHTTP(w http.ResponseWriter) {
 	wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "NOT_READY"}, "message": reason})
 }
 
-// backgroundTasksConfigured 只在数据目录确实存在可执行任务时启用周期维护。
+// backgroundTasksConfigured 保留给兼容调用方查询 SQLite 计划任务状态。
 func backgroundTasksConfigured(dataDir string) bool {
-	cronPath := filepath.Join(dataDir, "cronjobs.json")
-	if raw, err := os.ReadFile(cronPath); err == nil {
-		var payload struct {
-			Items map[string]struct {
-				Status string `json:"status"`
-			} `json:"items"`
-		}
-		if json.Unmarshal(raw, &payload) == nil {
-			for _, item := range payload.Items {
-				if strings.EqualFold(strings.TrimSpace(item.Status), "enabled") {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	_ = dataDir
+	return nodeapi.BackgroundTasksConfigured()
 }
 
 func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) {
@@ -257,128 +244,17 @@ func httpMux(cfg config.Config) (*http.ServeMux, *controlapi.GatewayStateStore) 
 }
 
 func httpMuxWithReadiness(cfg config.Config, readiness *readinessState) (*http.ServeMux, *controlapi.GatewayStateStore) {
+	return httpMuxWithReadinessAndFrontend(cfg, readiness, webassets.Dist)
+}
+
+func httpMuxWithReadinessAndFrontend(cfg config.Config, readiness *readinessState, frontend fs.FS) (*http.ServeMux, *controlapi.GatewayStateStore) {
 	mux := http.NewServeMux()
-	// 静态资源必须在 API 兼容层之前命中文件系统，否则浏览器会收到 JSON 错误响应并拒绝执行模块脚本。
-	staticRoot := filepath.Join("web", "dist")
-	staticFiles := http.StripPrefix("/", http.FileServer(http.Dir(staticRoot)))
-	serveIndex := func(w http.ResponseWriter, r *http.Request, index string) {
-		// SPA 入口不是哈希资源；禁止缓存可避免部署新版本后继续加载旧 chunk。
-		w.Header().Set("Cache-Control", "no-store, max-age=0")
-		w.Header().Set("Pragma", "no-cache")
-		http.ServeFile(w, r, index)
-	}
-	mux.HandleFunc("GET /assets/{filepath...}", func(w http.ResponseWriter, r *http.Request) {
-		staticFiles.ServeHTTP(w, r)
-	})
-	// 旧前端仍会请求 images/static 资源；统一映射到发布包 public 目录并拒绝路径穿越。
-	publicRoot := filepath.Join("public")
-	servePublic := func(w http.ResponseWriter, r *http.Request) {
-		relative := strings.TrimPrefix(r.URL.Path, "/api/v2/")
-		relative = strings.TrimPrefix(relative, "images/")
-		if strings.HasPrefix(r.URL.Path, "/api/v2/static/") {
-			relative = strings.TrimPrefix(r.URL.Path, "/api/v2/static/")
-		}
-		clean := filepath.Clean(filepath.FromSlash(relative))
-		if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "INVALID_ASSET_PATH"}})
-			return
-		}
-		file := filepath.Join(publicRoot, clean)
-		if _, err := os.Stat(file); err != nil {
-			wmhttp.JSON(w, http.StatusNotFound, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "ASSET_NOT_FOUND"}})
-			return
-		}
-		http.ServeFile(w, r, file)
-	}
-	// 兼容旧前端的公开静态入口，路径已移除旧产品品牌前缀。
-	mux.HandleFunc("GET /public/{filepath...}", func(w http.ResponseWriter, r *http.Request) {
-		relative := strings.TrimPrefix(r.URL.Path, "/public/")
-		clean := filepath.Clean(filepath.FromSlash(relative))
-		if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "INVALID_ASSET_PATH"}})
-			return
-		}
-		file := filepath.Join(publicRoot, clean)
-		if _, err := os.Stat(file); err != nil {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		http.ServeFile(w, r, file)
-	})
-	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		file := filepath.Join(publicRoot, "favicon.ico")
-		if _, err := os.Stat(file); err != nil {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		http.ServeFile(w, r, file)
-	})
-	mux.HandleFunc("GET /favicon.ico/{filepath...}", func(w http.ResponseWriter, r *http.Request) {
-		relative := strings.TrimPrefix(r.URL.Path, "/favicon.ico/")
-		clean := filepath.Clean(filepath.FromSlash(relative))
-		if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		file := filepath.Join(publicRoot, clean)
-		if _, err := os.Stat(file); err != nil {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		http.ServeFile(w, r, file)
-	})
-	// Swagger 文档入口保留功能但使用 WorkMesh 无品牌路径；具体文档由发布包提供时再替换响应体。
-	mux.HandleFunc("GET /swagger/{any...}", func(w http.ResponseWriter, _ *http.Request) {
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"openapi": "3.0.0", "info": map[string]any{"title": "WorkMesh Server API", "version": "v2"}, "servers": []any{map[string]any{"url": "/api/v2"}}})
-	})
-	mux.HandleFunc("GET /api/v2/images/{filename...}", servePublic)
-	mux.HandleFunc("GET /api/v2/static/{filename...}", servePublic)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// 发布包包含 web/dist 时由同一进程托管前端，开发环境无构建产物则返回服务信息。
-		index := filepath.Join(staticRoot, "index.html")
-		if _, err := os.Stat(index); err != nil {
-			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]string{"service": "workmesh-server"}})
-			return
-		}
-		// API 未命中时必须继续返回 JSON 404，不能把接口请求错误地回退成 HTML。
-		if strings.HasPrefix(r.URL.Path, "/api/") || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
-			wmhttp.JSON(w, http.StatusNotFound, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "ROUTE_NOT_FOUND", "path": r.URL.Path}})
-			return
-		}
-		// Vue Router 使用 history 模式。存在的静态文件照常返回，其他前端路径统一回退到 index.html，
-		// 这样直接刷新 /login、/settings/bind 等页面不会被 FileServer 当作物理文件返回 404。
-		clean := filepath.Clean(filepath.FromSlash(strings.TrimPrefix(r.URL.Path, "/")))
-		if clean != "." && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			candidate := filepath.Join(staticRoot, clean)
-			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-				http.ServeFile(w, r, candidate)
-				return
-			}
-		}
-		serveIndex(w, r, index)
-	})
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
-	})
-	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, r *http.Request) {
-		readiness.ServeHTTP(w)
-	})
-	mux.HandleFunc("GET /api/v2/health/check", func(w http.ResponseWriter, r *http.Request) {
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]string{"status": "ok"}})
-	})
+	controlapi.SetControlDatabase(nodeapi.SharedDatabase())
+	controlapi.SetGatewayDatabase(nodeapi.SharedDatabase())
+	registerStaticRoutesWithFS(mux, frontend)
+	registerHealthRoutes(mux, readiness)
 	gatewayStore := controlapi.Register(mux, cfg.NodeID, cfg.Role, nodeapi.AuthorizeControlRequest)
-	nodeMux := http.NewServeMux()
-	nodeapi.Register(nodeMux)
-	// 节点执行面统一经过本机会话鉴权；流接口保留各自的短期 Token 校验。
-	// 节点执行面先进行本机会话校验，再按 CurrentNode/operateNode 透传到已登记节点。
-	// 透传请求由共享密钥和 role epoch 保护，目标节点未登记或签名失效时明确返回错误。
-	securedNodeMux := authenticateNodeAPI(nodeMux)
-	mux.Handle("/api/v2/", nodeapi.NewNodeRelay(securedNodeMux, nodeapi.RelayOptions{
-		DataDir: cfg.DataDir,
-		NodeID:  cfg.NodeID,
-		Secret:  []byte(os.Getenv("WORKMESH_LINK_SECRET")),
-		Timeout: cfg.RequestTimeout,
-	}))
+	registerNodeRoutes(mux, cfg)
 	return mux, gatewayStore
 }
 

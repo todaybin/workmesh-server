@@ -16,10 +16,10 @@
 
 ## 完整性校验
 
-`test/contract/routes.json` 是从旧 Core/Agent 路由源码生成的基线（当前 825 条）。使用以下命令生成或校验：
+`test/contract/routes.json` 是从只读参考 `/www/apps/1Panel` 的 Core/Agent 路由源码生成的兼容基线（当前 759 条）；同一份来源和字段也归档在 `docs/inventory/route-inventory-1panel.json`。已废弃的 `apps/workmesh-node` 不再作为正式基线。使用以下命令校验：
 
 ```powershell
-node test/contract/route-scan.mjs check --legacy ../workmesh-node --project . --manifest test/contract/routes.json
+node test/contract/route-scan.mjs check --legacy /www/apps/1Panel --project . --manifest docs/inventory/route-inventory-1panel.json
 ```
 
 缺失、路径前缀错误或未审查的额外路由会返回非零退出码。迁移完成前该命令失败是预期状态，不能删除清单来获得通过。

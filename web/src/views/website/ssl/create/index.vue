@@ -323,11 +323,14 @@ const acceptParams = (op: string, websiteSSL?: Website.SSLDTO) => {
             rules.value.primaryDomain = [];
         }
         ssl.value.pushNode = websiteSSL.pushNode;
-        if (websiteSSL.nodes != '') {
+        // 兼容旧接口或缺少 nodes 字段的证书记录，避免对 undefined 调用 split。
+        if (typeof websiteSSL.nodes === 'string' && websiteSSL.nodes.trim() !== '') {
             ssl.value.pushNodes = websiteSSL.nodes
                 .split(',')
                 .map((item) => item.trim())
                 .filter((item) => item !== '');
+        } else {
+            ssl.value.pushNodes = [];
         }
         ssl.value.isIP = websiteSSL.isIP;
     }

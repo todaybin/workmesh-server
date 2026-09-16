@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 WorkMesh contributors
+
+[Unit]
+Description=Run WorkMesh Server signed release updater periodically
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=6h
+RandomizedDelaySec=15min
+Persistent=true
+Unit=workmesh-server-update.service
+
+[Install]
+WantedBy=timers.target

@@ -3,6 +3,8 @@
 
 # 2026-08-30 迁移批次九部署验收
 
+> Historical record：本文记录历史部署批次。旧 `apps/workmesh-node` 命令仅保留作当时的执行证据，不得直接复用；当前路由、实现和隐藏能力扫描统一使用只读参考 `/www/apps/1Panel`。
+
 ## 本地制品
 
 - 目标平台：Linux amd64
@@ -37,4 +39,3 @@ node scripts/with-dev-env.mjs -- powershell -NoProfile -Command "`$env:GOWORK='o
 node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/route-scan.mjs check --legacy apps/workmesh-node --project apps/workmesh-server --manifest apps/workmesh-server/test/contract/routes.json
 node scripts/with-dev-env.mjs -- node apps/workmesh-server/test/contract/hidden-function-scan.mjs --legacy apps/workmesh-node --project apps/workmesh-server
 ```
-

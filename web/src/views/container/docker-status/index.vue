@@ -5,7 +5,7 @@
             <el-button type="primary" link class="bt" @click="goSetting">【 {{ $t('container.setting') }} 】</el-button>
             <span>{{ $t('container.startIn') }}</span>
         </el-card>
-        <NoSuchService v-if="!isExist" name="Docker" />
+        <NoSuchService v-if="!isExist && !prop.isHide" name="Docker" />
     </div>
 </template>
 

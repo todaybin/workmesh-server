@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2026 WorkMesh contributors
+
+[Unit]
+Description=WorkMesh Server signed release updater
+Wants=network-online.target
+After=network-online.target workmesh-server.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@WORKMESH_SERVER_ROOT@
+EnvironmentFile=-@WORKMESH_SERVER_ROOT@/config/server.env
+EnvironmentFile=-@WORKMESH_SERVER_ROOT@/config/update.env
+ExecStart=@WORKMESH_SERVER_ROOT@/bin/workmesh-auto-update
+User=root
+Group=root
+UMask=0027
+TimeoutStartSec=30min
+StandardOutput=journal
+StandardError=journal

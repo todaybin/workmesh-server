@@ -256,10 +256,6 @@ const openTerminal = (row: Runtime.Runtime) => {
 };
 
 const openLog = (row: any) => {
-    if (row.taskID && row.status !== 'Running' && row.status !== 'Stopped') {
-        taskLogRef.value.openWithTaskID(row.taskID, true);
-        return;
-    }
     composeLogRef.value.acceptParams({
         compose: runtimeComposePath(row),
         resource: row.name,

@@ -4,9 +4,10 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
-	"hash/fnv"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,19 +15,23 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/todaybin/workmesh-server/internal/storage"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 	"github.com/todaybin/workmesh-server/runtime/role"
 )
 
 // RoleController 提供本机主节点与次节点的安全切换接口。
 type RoleController struct {
-	mu        sync.Mutex
-	manager   *role.Manager
-	state     role.Transition
-	nodesMu   sync.RWMutex
-	nodes     map[string]nodeListItem
-	nodesPath string
+	mu         sync.Mutex
+	manager    *role.Manager
+	state      role.Transition
+	nodesMu    sync.RWMutex
+	nodes      map[string]nodeListItem
+	nodesPath  string
+	db         *sql.DB
+	repository storage.Transactional
 }
 
 // nodeListItem 是前端节点选择器使用的兼容字段集合。
@@ -67,11 +72,15 @@ func NewRoleManager(nodeID, initialRole string) *role.Manager {
 	var manager *role.Manager
 	var err error
 	if dataDir != "" {
-		statePath := filepath.Join(dataDir, "role-state.json")
-		if absolute, absErr := filepath.Abs(statePath); absErr == nil {
-			statePath = absolute
+		if db := controlDB; db != nil {
+			manager, err = role.NewSQLite(db, nodeID, initialRole)
+		} else {
+			statePath := filepath.Join(dataDir, "role-state.json")
+			if absolute, absErr := filepath.Abs(statePath); absErr == nil {
+				statePath = absolute
+			}
+			manager, err = role.NewPersistent(nodeID, initialRole, statePath)
 		}
-		manager, err = role.NewPersistent(nodeID, initialRole, statePath)
 	} else {
 		manager, err = role.New(nodeID, initialRole)
 	}
@@ -81,7 +90,7 @@ func NewRoleManager(nodeID, initialRole string) *role.Manager {
 	return manager
 }
 
-// RegisterRoleRoutesWithManager 使用指定管理器注册角色接口，确保 fencing 与角色查询共享 epoch。
+// RegisterRoleRoutesWithManager 将角色及节点路由绑定到共享 epoch 管理器和可选鉴权器。
 func RegisterRoleRoutesWithManager(mux *http.ServeMux, manager *role.Manager, authorizers ...RequestAuthorizer) {
 	if manager == nil {
 		return
@@ -126,16 +135,33 @@ func RegisterRoleRoutesWithManager(mux *http.ServeMux, manager *role.Manager, au
 	mux.HandleFunc("POST /api/v2/core/nodes/role/abort", write(controller.abort))
 }
 
+// newRoleController 创建控制器并从 SQLite 或兼容节点文件恢复节点列表。
 func newRoleController(manager *role.Manager) *RoleController {
 	dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dataDir == "" {
 		dataDir = "./data"
 	}
-	c := &RoleController{manager: manager, nodes: make(map[string]nodeListItem), nodesPath: filepath.Join(dataDir, "nodes.json")}
+	c := &RoleController{manager: manager, nodes: make(map[string]nodeListItem), nodesPath: filepath.Join(dataDir, "nodes.json"), db: controlDB}
 	state := manager.State(nil)
 	current := c.nodeItem(state.NodeID, state.Role, true)
 	c.nodes[state.NodeID] = current
-	if b, err := os.ReadFile(c.nodesPath); err == nil {
+	if c.db != nil {
+		_, _ = c.db.Exec(`CREATE TABLE IF NOT EXISTS role_nodes (node_id TEXT PRIMARY KEY, id INTEGER NOT NULL, name TEXT NOT NULL, addr TEXT NOT NULL, endpoint TEXT NOT NULL DEFAULT '', role TEXT NOT NULL, status TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_favorite INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)`)
+		c.repository, _ = storage.NewSQLiteRepository(c.db)
+		rows, _ := c.repository.Query(`SELECT node_id,id,name,addr,endpoint,role,status,description,is_favorite FROM role_nodes`)
+		if rows != nil {
+			defer rows.Close()
+			for rows.Next() {
+				var item nodeListItem
+				var favorite int
+				if rows.Scan(&item.NodeID, &item.ID, &item.Name, &item.Addr, &item.Endpoint, &item.Role, &item.Status, &item.Description, &favorite) == nil {
+					item.IsFavorite = favorite != 0
+					item.DisplayName = item.Name
+					c.nodes[item.NodeID] = item
+				}
+			}
+		}
+	} else if b, err := os.ReadFile(c.nodesPath); err == nil {
 		var saved []nodeListItem
 		if json.Unmarshal(b, &saved) == nil {
 			for _, item := range saved {
@@ -148,24 +174,27 @@ func newRoleController(manager *role.Manager) *RoleController {
 	return c
 }
 
-func (c *RoleController) nodeItem(nodeID, nodeRole string, current bool) nodeListItem {
-	name := nodeID
-	if name == "" {
-		name = "local"
-	}
-	addr := strings.TrimSpace(os.Getenv("WORKMESH_NODE_ENDPOINT_URL"))
-	if addr == "" {
-		addr = "127.0.0.1"
-	}
-	return nodeListItem{ID: nodeNumericID(nodeID), NodeID: nodeID, Name: name, Addr: addr, Version: "workmesh-server", SystemVersion: "workmesh-server", IsBound: true, DisplayName: name, Role: nodeRole, Status: "online", IsCurrent: current}
-}
-
+// persistNodes 在 SQLite 可用时更新关系表，否则原子写入兼容节点文件。
 func (c *RoleController) persistNodes() error {
 	items := make([]nodeListItem, 0, len(c.nodes))
 	for _, item := range c.nodes {
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	if c.repository != nil {
+		return c.repository.WithTx(context.Background(), func(tx storage.SQLExecutor) error {
+			if _, err := tx.Exec(`DELETE FROM role_nodes`); err != nil {
+				return err
+			}
+			now := time.Now().UTC().Format(time.RFC3339Nano)
+			for _, item := range items {
+				if _, err := tx.Exec(`INSERT INTO role_nodes(node_id,id,name,addr,endpoint,role,status,description,is_favorite,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, item.NodeID, item.ID, item.Name, item.Addr, item.Endpoint, item.Role, item.Status, item.Description, boolIntRole(item.IsFavorite), now); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
 	if err := os.MkdirAll(filepath.Dir(c.nodesPath), 0o750); err != nil {
 		return err
 	}
@@ -180,6 +209,7 @@ func (c *RoleController) persistNodes() error {
 	return os.Rename(tmp, c.nodesPath)
 }
 
+// list 返回真实节点列表并按请求搜索条件过滤当前节点状态。
 func (c *RoleController) list(w http.ResponseWriter, r *http.Request) {
 	state := c.manager.State(r.Context())
 	c.nodesMu.Lock()
@@ -214,6 +244,7 @@ func (c *RoleController) list(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": items})
 }
 
+// addNode 校验并登记远端节点地址、角色和展示信息。
 func (c *RoleController) addNode(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		ID          string `json:"id"`
@@ -276,6 +307,7 @@ func (c *RoleController) addNode(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
 }
 
+// updateNode 更新已登记节点的名称、地址、状态或角色后持久化变更。
 func (c *RoleController) updateNode(w http.ResponseWriter, r *http.Request) {
 	var request nodeListItem
 	if err := decodeJSON(r, &request); err != nil || strings.TrimSpace(request.NodeID) == "" && strings.TrimSpace(request.Name) == "" {
@@ -315,6 +347,7 @@ func (c *RoleController) updateNode(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
 }
 
+// deleteNode 删除非当前节点的登记信息，避免误删正在提供服务的节点。
 func (c *RoleController) deleteNode(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		ID     int    `json:"id"`
@@ -350,6 +383,7 @@ func (c *RoleController) deleteNode(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200})
 }
 
+// favorite 按节点 ID 或数值 ID 更新节点收藏标记。
 func (c *RoleController) favorite(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		ID         int    `json:"id"`
@@ -384,20 +418,12 @@ func (c *RoleController) favorite(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200})
 }
 
-func nodeNumericID(nodeID string) int {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(nodeID))
-	id := int(h.Sum32() & 0x7fffffff)
-	if id == 0 {
-		return 1
-	}
-	return id
-}
-
+// current 返回角色管理器当前节点、角色和 epoch 状态。
 func (c *RoleController) current(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": c.manager.State(r.Context())})
 }
 
+// check 校验角色切换请求的目标角色、节点身份和预期 epoch。
 func (c *RoleController) check(w http.ResponseWriter, r *http.Request) {
 	var request role.Transition
 	if err := decodeJSON(r, &request); err != nil || request.To == "" {
@@ -412,6 +438,7 @@ func (c *RoleController) check(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"ready": true, "current": state}})
 }
 
+// prepare 校验并暂存一次带操作 ID 的角色切换请求。
 func (c *RoleController) prepare(w http.ResponseWriter, r *http.Request) {
 	var request role.Transition
 	if err := decodeJSON(r, &request); err != nil {
@@ -433,6 +460,7 @@ func (c *RoleController) prepare(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]string{"status": "prepared"}})
 }
 
+// commit 使用暂存请求执行角色切换，并在成功后清理过渡状态。
 func (c *RoleController) commit(w http.ResponseWriter, r *http.Request) {
 	c.mu.Lock()
 	request := c.state
@@ -452,6 +480,7 @@ func (c *RoleController) commit(w http.ResponseWriter, r *http.Request) {
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": state})
 }
 
+// abort 清理尚未提交的角色切换过渡状态。
 func (c *RoleController) abort(w http.ResponseWriter, _ *http.Request) {
 	c.mu.Lock()
 	c.state = role.Transition{}

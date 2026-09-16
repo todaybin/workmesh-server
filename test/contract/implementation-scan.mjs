@@ -25,6 +25,14 @@ const dynamicEmptyResponseRoutes = new Set([
   // 这些接口返回布尔状态或配置对象，源码文件中同时包含其他空集合，不能按文件级上下文误判。
   'GET /api/v2/backups/check/:name',
   'GET /api/v2/core/backups/client/:clientType',
+  // DNS manual verification returns TXT records only for dnsmanual providers;
+  // other providers correctly return an empty resolution set.
+  'POST /api/v2/websites/ssl/resolve',
+  // Push currently fails explicitly when the multi-node executor is absent;
+  // the response is an execution error, not a fixed collection placeholder.
+  'POST /api/v2/websites/ssl/push',
+  // Deleting the final load-balancer upstream clears the persisted collection.
+  'POST /api/v2/websites/lbs/del',
 ]);
 
 function filesUnder(root, { includeTests = false } = {}) {
@@ -320,14 +328,15 @@ function inspectRoute(route, sources) {
 }
 
 function usage() {
-  console.error('用法: node implementation-scan.mjs [--legacy <apps/workmesh-node>] [--project <apps/workmesh-server>] [--manifest <routes.json>] [--out <implementation-status.json>] [--markdown <function-checklist.md>]');
+	console.error('用法: node implementation-scan.mjs [--legacy </www/apps/1Panel>] [--project </www/apps/workmesh-server>] [--manifest <route-inventory.json>] [--out <implementation-status.json>] [--markdown <function-checklist.md>]');
 }
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 if (args.includes('--help') || args.includes('-h')) { usage(); process.exit(0); }
 const projectRoot = path.resolve(option('--project', process.cwd()));
-const legacyRoot = path.resolve(option('--legacy', path.resolve(projectRoot, '../workmesh-node')));
+// 1Panel 是只读业务参考；旧 apps/workmesh-node 已废弃。
+const legacyRoot = path.resolve(option('--legacy', '/www/apps/1Panel'));
 const output = option('--out', null);
 const markdownOutput = option('--markdown', null);
 const manifestPath = option('--manifest', null);
@@ -335,7 +344,15 @@ let routes = scanLegacy(legacyRoot);
 if (manifestPath) {
   const manifest = path.resolve(manifestPath);
   if (!fs.existsSync(manifest)) throw new Error(`路由清单不存在: ${manifest}`);
-  routes = JSON.parse(fs.readFileSync(manifest, 'utf8')).routes ?? [];
+  const manifestRoutes = JSON.parse(fs.readFileSync(manifest, 'utf8')).routes ?? [];
+  // 当前 inventory 使用 methods 数组，旧版测试 fixture 使用 method 单值；
+  // 统一为扫描器内部的单方法记录，避免清单格式差异造成 undefined 路径异常。
+  routes = manifestRoutes.flatMap((route) => {
+    const methods = Array.isArray(route.methods) ? route.methods : [route.method];
+    return methods
+      .filter((method) => typeof method === 'string' && method.length > 0)
+      .map((method) => ({ ...route, method }));
+  });
 }
 if (!routes.length) throw new Error(`未发现旧 Core/Agent 路由: ${legacyRoot}`);
 const sources = collectNewSources(projectRoot);
@@ -347,7 +364,7 @@ const interfaces = routes.map((route) => {
 });
 const report = {
   schema: 1,
-  generatedFrom: 'apps/workmesh-node/core+agent',
+	generatedFrom: `${legacyRoot}/core+agent`,
   project: path.relative(process.cwd(), projectRoot).replaceAll('\\', '/') || '.',
   generatedAt: new Date().toISOString(),
   routeCount: interfaces.length,
@@ -376,7 +393,7 @@ if (markdownOutput) {
     '',
     '# WorkMesh 功能迁移逐路由清单',
     '',
-    `基线来源：旧 \`apps/workmesh-node/core\` 与 \`agent\` 全源码，生成时间：${report.generatedAt}。`,
+		`基线来源：只读参考 \`/www/apps/1Panel/core\` 与 \`agent\` 全源码，生成时间：${report.generatedAt}。`,
     `共 ${report.routeCount} 条接口：${Object.entries(report.summary).map(([key, value]) => `${key} ${value}`).join('、')}。`,
     '',
     '状态定义：`implemented`=已实现并有具体处理器，`partial`=具体处理器仍返回固定空数据或存在 TODO，`compatibility`=兼容占位，`pending`=迁移中，`missing`=未发现注册。',
@@ -394,7 +411,7 @@ if (markdownOutput) {
     '',
     '| 功能 | 来源 | 新实现 | 覆盖 | 状态 |',
     '| --- | --- | --- | --- | --- |',
-    '| Core/Agent 后端语言包与前端语言入口 | `apps/workmesh-node/core/i18n`、`apps/workmesh-node/agent/i18n`、旧 frontend | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 12 种语言；后端每种 1037 键；前端键结构和菜单入口通过 `i18n-scan.mjs` | implemented |',
+    '| Core/Agent 后端语言包与前端语言入口 | 只读参考 `/www/apps/1Panel/core/i18n`、`/www/apps/1Panel/agent/i18n`、`/www/apps/1Panel/frontend` | `i18n/i18n.go`、`i18n/lang/*.yaml`、`web/src/lang` 与各页面入口 | 语言键和菜单入口通过 `i18n-scan.mjs` | implemented |',
     '',
   );
   fs.writeFileSync(target, `${lines.join('\n')}\n`, 'utf8');

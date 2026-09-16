@@ -11,6 +11,8 @@
         "type-check": "node --max-old-space-size=8192 ./node_modules/vue-tsc/bin/vue-tsc.js --noEmit",
         "build:test": "npm run type-check && vite build --mode test",
         "build:pro": "vite build --mode production",
+        "build:server": "npm run build:pro",
+        "test:targeted": "node --experimental-strip-types tests/app-status-log.test.ts",
         "preview": "vite preview",
         "lint:eslint": "eslint --fix --ext .js,.ts,.vue ./src",
         "lint:prettier": "prettier --write --loglevel warn \"src/**/*.{js,ts,json,tsx,css,less,scss,vue,html,md}\"",

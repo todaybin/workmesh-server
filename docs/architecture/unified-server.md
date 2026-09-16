@@ -13,7 +13,7 @@
         -> control 业务分区
         -> node 业务分区
         -> NodeRelay（仅服务端透传）
-     -> web/dist（同源静态资源）
+     -> 内置 embed.FS（同源静态资源）
      -> Unified SQLite Store
 ```
 

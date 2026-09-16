@@ -3,6 +3,8 @@
 
 # 2026-08-30 部署记录
 
+> Historical record：本文记录 2026 年 8 月 30 日的生产部署。旧 `workmesh-node-*` 服务名和清理动作只用于历史追溯，不属于当前 WorkMesh Server 启动流程；当前业务参考统一为只读 `/www/apps/1Panel`。
+
 ## 制品
 
 - 目标平台：Linux amd64

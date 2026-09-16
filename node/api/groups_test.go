@@ -15,7 +15,9 @@ import (
 func TestGroupSearchReturnsArrayAndCreatePersists(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	service.SetSharedDatabase(db)
 	defer service.SetSharedDatabase(nil)

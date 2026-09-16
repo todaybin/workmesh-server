@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/internal/storage"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
 
@@ -32,11 +33,12 @@ type scriptLibraryItem struct {
 	UpdatedAt   string `json:"updatedAt"`
 }
 type scriptLibraryStore struct {
-	mu      sync.RWMutex
-	db      *sql.DB
-	path    string
-	items   []scriptLibraryItem
-	initErr error
+	mu         sync.RWMutex
+	db         *sql.DB
+	repository storage.Transactional
+	path       string
+	items      []scriptLibraryItem
+	initErr    error
 }
 
 var scriptStoreMu sync.Mutex
@@ -59,23 +61,27 @@ func getScriptStore() *scriptLibraryStore {
 			scriptStore.initErr = errors.New("公共数据库未初始化")
 			return scriptStore
 		}
-		_, scriptStore.initErr = scriptStore.db.Exec(`CREATE TABLE IF NOT EXISTS script_library (id TEXT PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', approved INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+		scriptStore.repository, scriptStore.initErr = storage.NewSQLiteRepository(scriptStore.db)
+		if scriptStore.initErr != nil {
+			return scriptStore
+		}
+		_, scriptStore.initErr = scriptStore.repository.Exec(`CREATE TABLE IF NOT EXISTS script_library (id TEXT PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', approved INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`)
 		if scriptStore.initErr != nil {
 			return scriptStore
 		}
 		var count int
-		_ = scriptStore.db.QueryRow(`SELECT COUNT(*) FROM script_library`).Scan(&count)
+		_ = scriptStore.repository.QueryRow(`SELECT COUNT(*) FROM script_library`).Scan(&count)
 		if count == 0 {
 			if b, e := os.ReadFile(scriptStore.path); e == nil {
 				var legacy []scriptLibraryItem
 				if json.Unmarshal(b, &legacy) == nil {
 					for _, it := range legacy {
-						_, _ = scriptStore.db.Exec(`INSERT OR IGNORE INTO script_library(id,name,script,description,version,approved,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, it.ID, it.Name, it.Script, it.Description, it.Version, boolInt(it.Approved), it.CreatedAt, it.UpdatedAt)
+						_, _ = scriptStore.repository.Exec(`INSERT OR IGNORE INTO script_library(id,name,script,description,version,approved,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, it.ID, it.Name, it.Script, it.Description, it.Version, boolInt(it.Approved), it.CreatedAt, it.UpdatedAt)
 					}
 				}
 			}
 		}
-		rows, err := scriptStore.db.Query(`SELECT id,name,script,description,version,approved,created_at,updated_at FROM script_library ORDER BY name,id`)
+		rows, err := scriptStore.repository.Query(`SELECT id,name,script,description,version,approved,created_at,updated_at FROM script_library ORDER BY name,id`)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
@@ -91,23 +97,20 @@ func getScriptStore() *scriptLibraryStore {
 	return scriptStore
 }
 func (s *scriptLibraryStore) saveLocked() error {
-	if s.initErr != nil || s.db == nil {
+	if s.initErr != nil || s.repository == nil {
 		return errors.New("公共数据库未初始化")
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err = tx.Exec(`DELETE FROM script_library`); err != nil {
-		return err
-	}
-	for _, it := range s.items {
-		if _, err = tx.Exec(`INSERT INTO script_library(id,name,script,description,version,approved,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, it.ID, it.Name, it.Script, it.Description, it.Version, boolInt(it.Approved), it.CreatedAt, it.UpdatedAt); err != nil {
+	return s.repository.WithTx(context.Background(), func(tx storage.SQLExecutor) error {
+		if _, err := tx.Exec(`DELETE FROM script_library`); err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		for _, it := range s.items {
+			if _, err := tx.Exec(`INSERT INTO script_library(id,name,script,description,version,approved,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, it.ID, it.Name, it.Script, it.Description, it.Version, boolInt(it.Approved), it.CreatedAt, it.UpdatedAt); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func registerCoreResourceRoutes(mux *http.ServeMux) {
@@ -253,8 +256,12 @@ func handleScriptCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	s := getScriptStore()
 	s.mu.Lock()
+	previous := append([]scriptLibraryItem(nil), s.items...)
 	s.items = append(s.items, in)
 	err := s.saveLocked()
+	if err != nil {
+		s.items = previous
+	}
 	s.mu.Unlock()
 	if err != nil {
 		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
@@ -308,6 +315,7 @@ func handleScriptUpdate(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	for i := range s.items {
 		if s.items[i].ID == in.ID {
+			previous := s.items[i]
 			if in.Name != "" {
 				s.items[i].Name = in.Name
 			}
@@ -319,6 +327,7 @@ func handleScriptUpdate(w http.ResponseWriter, r *http.Request) {
 			s.items[i].Approved = in.Approved
 			s.items[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 			if err := s.saveLocked(); err != nil {
+				s.items[i] = previous
 				wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
 				return
 			}
@@ -405,6 +414,7 @@ func handleScriptSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	store.mu.Lock()
+	previous := append([]scriptLibraryItem(nil), store.items...)
 	for i := range incoming {
 		incoming[i].ID = strings.TrimSpace(incoming[i].ID)
 		if incoming[i].ID == "" {
@@ -422,6 +432,9 @@ func handleScriptSync(w http.ResponseWriter, r *http.Request) {
 	}
 	store.items = incoming
 	err = store.saveLocked()
+	if err != nil {
+		store.items = previous
+	}
 	store.mu.Unlock()
 	if err != nil {
 		wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SCRIPT_SAVE_FAILED"}, "message": err.Error()})

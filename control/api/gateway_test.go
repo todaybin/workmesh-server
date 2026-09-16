@@ -4,13 +4,17 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/todaybin/workmesh-server/runtime/gateway"
 )
 
 func TestGatewayRoutesUseExternalProtocolClient(t *testing.T) {
@@ -169,6 +173,62 @@ func TestGatewayLoginDoesNotReportSuccessWhenNodeRegistrationFails(t *testing.T)
 	mux.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/gateway/login", strings.NewReader(`{"username":"workmesh","password":"secret"}`)))
 	if login.Code != http.StatusBadGateway || strings.Contains(login.Body.String(), `"bound":true`) {
 		t.Fatalf("login status = %d, body = %s", login.Code, login.Body.String())
+	}
+}
+
+func TestGatewayHeartbeatDisconnectRecoveryKeepsBinding(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	t.Setenv("WORKMESH_GATEWAY_ALLOW_HTTP", "1")
+	t.Setenv("WORKMESH_GATEWAY_ID", "gateway-recovery")
+	t.Setenv("WORKMESH_GATEWAY_SECRET", "gateway-recovery-secret")
+	var available atomic.Bool
+	available.Store(true)
+	var registers atomic.Int32
+	var heartbeats atomic.Int32
+	cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if !available.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"code":"ERR","message":"gateway unavailable"}`))
+			return
+		}
+		switch r.URL.Path {
+		case "/workmesh/node/register":
+			registers.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"item": map[string]any{"nodeId": "node-recovery", "bindingId": "binding-recovery"}}})
+		case "/workmesh/node/heartbeat":
+			heartbeats.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"accepted": true}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer cloud.Close()
+	t.Setenv("WORKMESH_GATEWAY_URL", cloud.URL)
+
+	store := RegisterGatewayRoutes(http.NewServeMux(), "node-recovery", "secondary")
+	store.connectGateway(context.Background(), []string{"system"})
+	if store.auth.BindingID != "binding-recovery" || store.status.Registration != gateway.RegistrationRegistered {
+		t.Fatalf("initial registration failed: status=%+v auth=%+v", store.status, store.auth)
+	}
+	if registers.Load() != 1 {
+		t.Fatalf("expected one registration, got %d", registers.Load())
+	}
+
+	available.Store(false)
+	store.gatewayHeartbeat(context.Background())
+	if store.status.Connected || store.status.Registration != gateway.RegistrationRegistered {
+		t.Fatalf("disconnect should preserve binding and mark offline: status=%+v", store.status)
+	}
+
+	available.Store(true)
+	store.connectGateway(context.Background(), []string{"system"})
+	if !store.status.Connected || store.status.Registration != gateway.RegistrationRegistered {
+		t.Fatalf("recovery heartbeat failed: status=%+v", store.status)
+	}
+	if registers.Load() != 1 || heartbeats.Load() != 1 {
+		t.Fatalf("recovery must heartbeat without re-registering: registers=%d heartbeats=%d", registers.Load(), heartbeats.Load())
 	}
 }
 

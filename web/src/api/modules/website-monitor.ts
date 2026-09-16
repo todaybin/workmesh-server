@@ -26,11 +26,32 @@ export interface MonitorConfig {
     cdnType: string;
     realIPHeader: string;
 }
+export interface MonitorDailyStat {
+    day: string;
+    pv: number;
+    uv: number;
+    ip: number;
+    flow: number;
+    spider: number;
+    req: number;
+    count4xx: number;
+    count5xx: number;
+}
+export interface MonitorVisitorLocation {
+    name: string;
+    value: number;
+}
+export interface MonitorQPS {
+    qps: number;
+    flow: number;
+    updatedAt?: string;
+    source?: string;
+}
 const root = '/websites/monitor';
-export const monitorStat = (q: MonitorQuery) => http.post(`${root}/stat`, q);
-export const monitorVisitors = (q: MonitorQuery) => http.post(`${root}/visitors`, q);
-export const monitorVisitorsLoc = (q: MonitorQuery) => http.post(`${root}/visitors/loc`, q);
-export const monitorQPS = (q: MonitorQuery) => http.post(`${root}/qps`, q);
+export const monitorStat = (q: MonitorQuery) => http.post<MonitorDailyStat[]>(`${root}/stat`, q);
+export const monitorVisitors = (q: MonitorQuery) => http.post<MonitorDailyStat[]>(`${root}/visitors`, q);
+export const monitorVisitorsLoc = (q: MonitorQuery) => http.post<MonitorVisitorLocation[]>(`${root}/visitors/loc`, q);
+export const monitorQPS = (q: MonitorQuery) => http.post<MonitorQPS>(`${root}/qps`, q);
 export const monitorRank = (q: MonitorQuery) => http.post(`${root}/rank`, q);
 export const monitorTrend = (q: MonitorQuery) => http.post(`${root}/trend`, q);
 export const monitorLogs = (q: MonitorQuery) => http.post(`${root}/logs/search`, q);

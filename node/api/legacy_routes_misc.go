@@ -1,0 +1,86 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 WorkMesh contributors
+
+package api
+
+// registerLegacyMiscRoutes 注册低频、跨领域的兼容路由。
+func registerLegacyMiscRoutes(mux routeRegistrar) {
+	// 低频路由按原始契约顺序保留，统一使用真实兼容处理器。
+	// access_lists 领域兼容路由。
+	mux.HandleFunc("GET /api/v2/access-lists", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/access-lists", fallbackRouteHandler)
+	// attack 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/attack/stat", fallbackRouteHandler)
+	// block 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/block/search", fallbackRouteHandler)
+	// config 领域兼容路由。
+	mux.HandleFunc("GET /api/v2/config/global", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/config/global", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/config/site", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/config/site/update", fallbackRouteHandler)
+	// cubesandbox 领域兼容路由。
+	mux.HandleFunc("GET /api/v2/cubesandbox/health", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/cubesandbox/status", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cubesandbox/reconcile", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cubesandbox/start", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/cubesandbox/stop", fallbackRouteHandler)
+	// deployment_artifact 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/deployment-artifact/activate", fallbackRouteHandler)
+	// deployment_manifest 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/deployment-manifest/verify", fallbackRouteHandler)
+	// global 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/global", fallbackRouteHandler)
+	// images 领域兼容路由。
+	mux.HandleFunc("GET /api/v2/images/*filename", fallbackRouteHandler)
+	// log 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/log/search", fallbackRouteHandler)
+	// logs 领域兼容路由。
+	mux.HandleFunc("GET /api/v2/logs/system/files", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/logs/system/services", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/logs/system/status", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/logs/tasks/executing/count", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/clear", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/detail", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/search", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/stat", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/system/read", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/tasks/read", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/logs/tasks/search", fallbackRouteHandler)
+	// process 领域兼容路由。
+	mux.HandleFunc("GET /api/v2/process/ws", fallbackRouteHandler)
+	// qps 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/qps", fallbackRouteHandler)
+	// rank 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/rank", fallbackRouteHandler)
+	// relation 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/relation/stat", fallbackRouteHandler)
+	// rules 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/rules", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/rules/delete", fallbackRouteHandler)
+	// sites 领域兼容路由。
+	mux.HandleFunc("GET /api/v2/sites", fallbackRouteHandler)
+	mux.HandleFunc("GET /api/v2/sites/:id/rules", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/sites", fallbackRouteHandler)
+	// standard_rules 领域兼容路由。
+	mux.HandleFunc("GET /api/v2/standard-rules", fallbackRouteHandler)
+	// static 领域兼容路由。
+	mux.HandleFunc("GET /api/v2/static/*filename", fallbackRouteHandler)
+	// status 领域兼容路由。
+	mux.HandleFunc("GET /api/v2/status", fallbackRouteHandler)
+	// stat 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/stat", fallbackRouteHandler)
+	// test 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/test", fallbackRouteHandler)
+	// trend 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/trend", fallbackRouteHandler)
+	// visitors 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/visitors", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/visitors/loc", fallbackRouteHandler)
+	// workmesh 领域兼容路由。
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/cancel", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/collect", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/create", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/destroy", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/exec", fallbackRouteHandler)
+	mux.HandleFunc("POST /api/v2/workmesh/tasks/start", fallbackRouteHandler)
+}

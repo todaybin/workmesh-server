@@ -3,7 +3,14 @@
 
 package service
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/todaybin/workmesh-server/internal/storage"
+)
 
 func TestCoreUserPasswordPersistsAfterReload(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
@@ -62,5 +69,117 @@ func TestCoreAPIKeyPersistsAfterReload(t *testing.T) {
 	}
 	if !config.Enabled || config.IPWhiteList != "127.0.0.1" || config.ValidityHours != 24 {
 		t.Fatalf("服务重载后 API 配置不完整: %#v", config)
+	}
+}
+
+func TestCoreSQLiteIgnoresLegacyJSONAfterInitialization(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	legacy := map[string]persistedUser{
+		"admin": {ID: "admin", Name: "admin", Role: "ADMIN", Password: hashPassword("legacy-password")},
+	}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "users.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first := NewCoreService()
+	if err := first.SetDatabase(store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	legacy["admin"] = persistedUser{ID: "admin", Name: "admin", Role: "ADMIN", Password: hashPassword("stale-file-password")}
+	raw, err = json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "users.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second := NewCoreService()
+	if err := second.SetDatabase(store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := second.Login("admin", "legacy-password"); err != nil {
+		t.Fatalf("SQLite 用户未恢复: %v", err)
+	}
+	if _, _, err := second.Login("admin", "stale-file-password"); err == nil {
+		t.Fatal("SQLite 已初始化后不应回读 users.json")
+	}
+}
+
+func TestCoreGroupsAndSettingsPersistThroughRepository(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	store, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	first := NewCoreService()
+	if err := first.SetDatabase(store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.UpsertGroup("group-repository", "运维", "host"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.UpdateSettings(map[string]string{"language": "en", "securityEntrance": "secure"}); err != nil {
+		t.Fatal(err)
+	}
+
+	second := NewCoreService()
+	if err := second.SetDatabase(store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	groups := second.Groups()
+	if len(groups) != 1 || groups[0]["id"] != "group-repository" || groups[0]["name"] != "运维" {
+		t.Fatalf("repository 未恢复核心分组: %#v", groups)
+	}
+	settings := second.Settings()
+	if settings["language"] != "en" || settings["securityEntrance"] != "secure" {
+		t.Fatalf("repository 未恢复核心设置: %#v", settings)
+	}
+}
+
+func TestCoreGroupAndSettingsPersistenceFailureRollsBackMemory(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	store, err := storage.Open(filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := NewCoreService()
+	if err := first.SetDatabase(store.DB()); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	if _, err := first.UpsertGroup("stable", "稳定", "host"); err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	store.Close()
+
+	if _, err := first.UpsertGroup("failed", "失败", "host"); err == nil {
+		t.Fatal("数据库关闭后分组写入应失败")
+	}
+	if err := first.UpdateSettings(map[string]string{"language": "en"}); err == nil {
+		t.Fatal("数据库关闭后设置写入应失败")
+	}
+	if err := first.DeleteGroup("stable"); err == nil {
+		t.Fatal("数据库关闭后分组删除应失败")
+	}
+	groups := first.Groups()
+	if len(groups) != 1 || groups[0]["id"] != "stable" {
+		t.Fatalf("持久化失败后分组内存快照被错误修改: %#v", groups)
+	}
+	if first.Settings()["language"] != "zh" {
+		t.Fatalf("持久化失败后设置内存快照被错误修改: %#v", first.Settings())
 	}
 }

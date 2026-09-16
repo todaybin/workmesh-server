@@ -180,12 +180,13 @@ const acceptParams = (websiteSSL?: Website.SSLDTO) => {
         ssl.value.privateKeyPath = websiteSSL.privateKeyPath;
         ssl.value.certificatePath = websiteSSL.certPath;
         ssl.value.pushNode = websiteSSL.pushNode;
-        ssl.value.pushNodes = websiteSSL.nodes
-            ? websiteSSL.nodes
-                  .split(',')
-                  .map((item) => item.trim())
-                  .filter((item) => item !== '')
-            : [];
+        ssl.value.pushNodes =
+            typeof websiteSSL.nodes === 'string' && websiteSSL.nodes.trim() !== ''
+                ? websiteSSL.nodes
+                      .split(',')
+                      .map((item) => item.trim())
+                      .filter((item) => item !== '')
+                : [];
         if (ssl.value.certificatePath != '' && ssl.value.privateKeyPath != '') {
             ssl.value.type = 'local';
         }

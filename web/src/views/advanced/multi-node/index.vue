@@ -67,7 +67,7 @@
                             </el-table-column>
                             <el-table-column prop="addr" :label="$t('serverPages.multiNode.panelAddress')" min-width="220" />
                             <el-table-column prop="version" :label="$t('serverPages.multiNode.version')" width="140">
-                                <template #default="{ row }">{{ row.version || 'workmesh-node' }}</template>
+                                <template #default="{ row }">{{ row.version || 'workmesh-server' }}</template>
                             </el-table-column>
                             <el-table-column :label="$t('serverPages.multiNode.healthStatus')" width="120">
                                 <template #default="{ row }">

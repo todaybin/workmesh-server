@@ -4,18 +4,17 @@
 package api
 
 import (
-	"context"
-	"encoding/json"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/internal/storage"
 	"github.com/todaybin/workmesh-server/runtime/gateway"
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
 )
@@ -24,6 +23,11 @@ var (
 	errNodeIDRequired      = errors.New("节点 ID 不能为空")
 	errGatewayUnregistered = errors.New("节点尚未注册 Gateway")
 )
+
+var gatewayDB *sql.DB
+
+// SetGatewayDatabase 注入共享 SQLite，Gateway 绑定状态不再依赖 JSON 文件。
+func SetGatewayDatabase(db *sql.DB) { gatewayDB = db }
 
 // GatewayStateStore 保存本机 Gateway 授权摘要；访问令牌不会序列化到响应。
 type GatewayStateStore struct {
@@ -39,20 +43,8 @@ type GatewayStateStore struct {
 	// statePath 位于数据目录内，仅保存本机绑定快照和受限访问令牌。
 	statePath    string
 	identityPath string
-}
-
-// persistedGatewayState 是磁盘上的绑定快照。AccessToken 不会通过 HTTP 响应序列化。
-type persistedGatewayState struct {
-	Status      gateway.Status `json:"status"`
-	BindingID   string         `json:"bindingId,omitempty"`
-	Scopes      []string       `json:"scopes,omitempty"`
-	ExpiresAt   string         `json:"expiresAt,omitempty"`
-	Refreshable bool           `json:"refreshable"`
-	AccessToken string         `json:"accessToken,omitempty"`
-	GatewayURL  string         `json:"gatewayUrl,omitempty"`
-	GatewayID   string         `json:"gatewayId,omitempty"`
-	Account     string         `json:"account,omitempty"`
-	UpdatedAt   string         `json:"updatedAt"`
+	db           *sql.DB
+	repository   storage.Transactional
 }
 
 var gatewayCapabilities = []string{"system", "containers", "files", "databases", "websites", "tasks"}
@@ -73,136 +65,25 @@ type gatewayRegisterRequest struct {
 	EndpointURL       string            `json:"endpointUrl,omitempty"`
 }
 
-// Start 启动节点自动注册和周期心跳；未配置云端客户端时不创建后台任务。
-func (s *GatewayStateStore) Start(ctx context.Context, capabilities []string) {
-	s.startMu.Lock()
-	if s.started {
-		s.startMu.Unlock()
-		return
-	}
-	s.started = true
-	s.startMu.Unlock()
-	if s.client == nil {
-		return
-	}
-	go func() {
-		connect := func() {
-			s.mu.RLock()
-			bound := s.status.Registration == gateway.RegistrationRegistered && s.auth.BindingID != ""
-			registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Role: s.status.Role, Registered: bound}
-			s.mu.RUnlock()
-			// 已绑定节点优先恢复心跳，不再次要求账号登录或创建新绑定。
-			if bound {
-				if err := s.client.Heartbeat(ctx, registration); err == nil {
-					s.mu.Lock()
-					s.status.Connected = true
-					s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
-					s.status.Reason = ""
-					s.mu.Unlock()
-					_ = s.persist()
-					return
-				}
-				s.mu.Lock()
-				s.status.Connected = false
-				// 绑定凭据仍然有效时保留 registered；仅连接状态降级，避免前端误要求重新绑定。
-				s.status.Registration = gateway.RegistrationRegistered
-				s.status.Reason = "Gateway 绑定已保存，但心跳恢复失败"
-				s.mu.Unlock()
-				_ = s.persist()
-				return
-			}
-			if err := s.loginIfConfigured(ctx); err != nil {
-				s.mu.Lock()
-				s.status.Registration = gateway.RegistrationPending
-				s.status.Connected = false
-				s.status.Reason = err.Error()
-				s.mu.Unlock()
-				return
-			}
-			s.mu.RLock()
-			request := gateway.RegisterRequest{NodeID: s.status.NodeID, Role: s.status.Role, ProtocolVersion: "v2", Capabilities: capabilities}
-			s.mu.RUnlock()
-			auth, err := s.client.Register(ctx, request)
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			if err != nil {
-				s.status.Registration = gateway.RegistrationPending
-				s.status.Connected = false
-				s.status.Reason = err.Error()
-				return
-			}
-			s.status.Registration = gateway.RegistrationRegistered
-			s.status.Connected = true
-			s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
-			s.status.Reason = ""
-			s.auth = auth
-			_ = s.persistLocked()
-		}
-		connect()
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				s.mu.RLock()
-				registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Role: s.status.Role, Registered: s.status.Registration == gateway.RegistrationRegistered}
-				s.mu.RUnlock()
-				if err := s.client.Heartbeat(ctx, registration); err != nil {
-					s.mu.Lock()
-					s.status.Connected = false
-					s.status.Reason = err.Error()
-					s.mu.Unlock()
-					_ = s.persist()
-				} else {
-					s.mu.Lock()
-					if s.auth.BindingID != "" {
-						s.status.Registration = gateway.RegistrationRegistered
-					}
-					s.status.Connected = true
-					s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
-					s.mu.Unlock()
-					_ = s.persist()
-				}
-			}
-		}
-	}()
-}
-
-func (s *GatewayStateStore) loginIfConfigured(ctx context.Context) error {
-	s.mu.RLock()
-	hasToken := s.auth.AccessToken != ""
-	s.mu.RUnlock()
-	if hasToken {
-		return nil
-	}
-	username := os.Getenv("WORKMESH_GATEWAY_USERNAME")
-	password := os.Getenv("WORKMESH_GATEWAY_PASSWORD")
-	if username == "" && password == "" {
-		return nil
-	}
-	if username == "" || password == "" {
-		return errors.New("Gateway 登录凭据配置不完整")
-	}
-	auth, err := s.client.Login(ctx, gateway.LoginRequest{Username: username, Password: password})
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	s.auth = auth
-	err = s.persistLocked()
-	s.mu.Unlock()
-	return err
-}
-
 // RegisterGatewayRoutes 注册前端使用的 Gateway 状态、注册、心跳和授权接口。
 func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string, authorizers ...RequestAuthorizer) *GatewayStateStore {
 	dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dataDir == "" {
 		dataDir = "./data"
 	}
-	store := &GatewayStateStore{status: gateway.Status{Registration: gateway.RegistrationUnregistered, NodeID: nodeID, GatewayID: os.Getenv("WORKMESH_GATEWAY_ID"), Role: role}, statePath: filepath.Join(dataDir, "gateway-binding.json"), identityPath: filepath.Join(dataDir, "gateway-identity.ed25519")}
+	store := &GatewayStateStore{status: gateway.Status{Registration: gateway.RegistrationUnregistered, NodeID: nodeID, GatewayID: os.Getenv("WORKMESH_GATEWAY_ID"), Role: role}, statePath: filepath.Join(dataDir, "gateway-binding.json"), identityPath: filepath.Join(dataDir, "gateway-identity.ed25519"), db: gatewayDB}
+	if store.db != nil {
+		if _, err := store.db.Exec(`CREATE TABLE IF NOT EXISTS gateway_binding (id INTEGER PRIMARY KEY CHECK(id=1), status BLOB NOT NULL, auth BLOB NOT NULL, gateway_url TEXT NOT NULL DEFAULT '', account TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL)`); err != nil {
+			store.status.Registration = gateway.RegistrationPending
+			store.status.Reason = fmt.Sprintf("初始化 Gateway 持久化失败: %v", err)
+		}
+		if repository, err := storage.NewSQLiteRepository(store.db); err != nil {
+			store.status.Registration = gateway.RegistrationPending
+			store.status.Reason = fmt.Sprintf("初始化 Gateway repository 失败: %v", err)
+		} else {
+			store.repository = repository
+		}
+	}
 	store.load()
 	// 配置 Gateway 地址后启用真实云端协议；未配置时保留离线开发模式。
 	baseURL := strings.TrimSpace(os.Getenv("WORKMESH_GATEWAY_URL"))
@@ -254,120 +135,7 @@ func RegisterGatewayRoutes(mux *http.ServeMux, nodeID, role string, authorizers 
 	return store
 }
 
-func (s *GatewayStateStore) loginHandler(w http.ResponseWriter, r *http.Request) {
-	var request gateway.LoginRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	// 允许绑定表单显式指定 Gateway 地址；地址只影响本次及后续持久化连接。
-	if strings.TrimSpace(request.GatewayURL) != "" {
-		baseURL := strings.TrimRight(strings.TrimSpace(request.GatewayURL), "/")
-		if err := validateGatewayBaseURL(baseURL); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		identity, identityErr := gateway.LoadOrCreateIdentity(s.identityPath)
-		if identityErr != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Errorf("加载 Gateway 节点身份失败: %w", identityErr))
-			return
-		}
-		client := gateway.NewHTTPClientWithIdentity(baseURL, os.Getenv("WORKMESH_GATEWAY_ID"), os.Getenv("WORKMESH_GATEWAY_SECRET"), identity)
-		s.mu.Lock()
-		s.client = client
-		s.gatewayURL = baseURL
-		s.mu.Unlock()
-	}
-	s.mu.RLock()
-	client := s.client
-	s.mu.RUnlock()
-	if client == nil {
-		writeError(w, http.StatusServiceUnavailable, errors.New("Gateway 未配置"))
-		return
-	}
-	request.Username = strings.TrimSpace(request.Username)
-	if request.Username == "" || request.Password == "" {
-		writeError(w, http.StatusBadRequest, errors.New("Gateway 用户名和密码不能为空"))
-		return
-	}
-	// 显式绑定必须重新验证用户凭据；本地存在旧快照不能代替本次账号认证。
-	auth, err := client.Login(r.Context(), request)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, err)
-		return
-	}
-	s.mu.RLock()
-	nodeID := s.status.NodeID
-	role := s.status.Role
-	existingBindingID := s.auth.BindingID
-	s.mu.RUnlock()
-	if strings.TrimSpace(nodeID) == "" {
-		writeError(w, http.StatusInternalServerError, errNodeIDRequired)
-		return
-	}
-
-	// 已有绑定先用新登录令牌验证心跳。验证成功时复用 bindingId，保证重复绑定幂等。
-	bound := false
-	if existingBindingID != "" {
-		registration := gateway.Registration{NodeID: nodeID, BindingID: existingBindingID, Role: role, Registered: true}
-		if heartbeatErr := client.Heartbeat(r.Context(), registration); heartbeatErr == nil {
-			auth.BindingID = existingBindingID
-			bound = true
-		}
-	}
-	if !bound {
-		registered, registerErr := client.Register(r.Context(), gateway.RegisterRequest{
-			NodeID: nodeID, DisplayName: nodeID, Role: role, ProtocolVersion: "v2", Capabilities: append([]string(nil), gatewayCapabilities...),
-		})
-		if registerErr != nil {
-			writeError(w, http.StatusBadGateway, fmt.Errorf("Gateway 节点注册失败: %w", registerErr))
-			return
-		}
-		if registered.BindingID == "" {
-			writeError(w, http.StatusBadGateway, errors.New("Gateway 节点注册响应缺少绑定标识"))
-			return
-		}
-		auth.BindingID = registered.BindingID
-		if len(registered.Scopes) > 0 {
-			auth.Scopes = registered.Scopes
-		}
-		if registered.ExpiresAt != "" {
-			auth.ExpiresAt = registered.ExpiresAt
-		}
-		auth.Refreshable = auth.Refreshable || registered.Refreshable
-		if auth.AccessToken == "" {
-			auth.AccessToken = registered.AccessToken
-		}
-		registration := gateway.Registration{NodeID: nodeID, BindingID: auth.BindingID, Role: role, Registered: true}
-		if heartbeatErr := client.Heartbeat(r.Context(), registration); heartbeatErr != nil {
-			writeError(w, http.StatusBadGateway, fmt.Errorf("Gateway 节点注册后心跳验证失败: %w", heartbeatErr))
-			return
-		}
-	}
-	if auth.BindingID == "" {
-		writeError(w, http.StatusBadGateway, errors.New("Gateway 账号登录成功，但节点尚未完成绑定"))
-		return
-	}
-	s.mu.Lock()
-	s.status.Registration = gateway.RegistrationRegistered
-	s.status.Connected = true
-	s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
-	s.status.AuthorizationExpireAt = auth.ExpiresAt
-	s.status.Reason = ""
-	s.auth = auth
-	s.account = request.Username
-	if s.gatewayURL == "" {
-		s.gatewayURL = strings.TrimRight(strings.TrimSpace(os.Getenv("WORKMESH_GATEWAY_URL")), "/")
-	}
-	if err := s.persistLocked(); err != nil {
-		s.mu.Unlock()
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("保存 Gateway 授权失败: %w", err))
-		return
-	}
-	s.mu.Unlock()
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"bound": true, "account": request.Username, "nodeId": nodeID, "status": "running"}})
-}
-
+// statusHandler 返回脱敏的 Gateway 绑定、连接和授权过期状态。
 func (s *GatewayStateStore) statusHandler(w http.ResponseWriter, _ *http.Request) {
 	s.mu.RLock()
 	status := s.status
@@ -402,101 +170,7 @@ func (s *GatewayStateStore) gatewayURLValue() string {
 	return s.gatewayURL
 }
 
-func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Request) {
-	var request gatewayRegisterRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	request.NodeID = strings.TrimSpace(request.NodeID)
-	if request.NodeID == "" {
-		writeError(w, http.StatusBadRequest, errNodeIDRequired)
-		return
-	}
-	s.mu.RLock()
-	if s.status.Registration == gateway.RegistrationRegistered && s.auth.BindingID != "" {
-		boundNode := s.status.NodeID
-		auth := s.auth
-		s.mu.RUnlock()
-		if request.NodeID == boundNode {
-			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": auth})
-		} else {
-			writeError(w, http.StatusConflict, errors.New("Gateway 已绑定其他节点，如需切换请先解绑"))
-		}
-		return
-	}
-	s.mu.RUnlock()
-	// 前端绑定表单可在请求中提供 Gateway 地址和登录令牌。地址必须经过严格校验，
-	// 令牌只注入临时客户端，避免把凭据写入节点配置或响应。
-	client := s.client
-	if strings.TrimSpace(request.GatewayURL) != "" {
-		baseURL := strings.TrimRight(strings.TrimSpace(request.GatewayURL), "/")
-		if err := validateGatewayBaseURL(baseURL); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		if strings.TrimSpace(request.RegistrationToken) == "" {
-			writeError(w, http.StatusBadRequest, errors.New("Gateway 注册令牌不能为空"))
-			return
-		}
-		temporary := gateway.NewHTTPClient(baseURL, os.Getenv("WORKMESH_GATEWAY_ID"), os.Getenv("WORKMESH_GATEWAY_SECRET"))
-		temporary.AccessToken = strings.TrimSpace(request.RegistrationToken)
-		client = temporary
-	}
-	if client != nil {
-		if strings.TrimSpace(request.RegistrationToken) == "" {
-			if err := s.loginIfConfigured(r.Context()); err != nil {
-				writeError(w, http.StatusBadGateway, err)
-				return
-			}
-		}
-		registerRequest := gateway.RegisterRequest{NodeID: request.NodeID, PublicKey: request.PublicKey, DisplayName: request.DisplayName, Role: request.Role, ProtocolVersion: request.ProtocolVersion, Capabilities: request.Capabilities, Metadata: request.Metadata}
-		if registerRequest.DisplayName == "" {
-			registerRequest.DisplayName = request.NodeID
-		}
-		if registerRequest.Role == "" {
-			s.mu.RLock()
-			registerRequest.Role = s.status.Role
-			s.mu.RUnlock()
-		}
-		if registerRequest.ProtocolVersion == "" {
-			registerRequest.ProtocolVersion = "v2"
-		}
-		if len(registerRequest.Capabilities) == 0 {
-			registerRequest.Capabilities = append([]string(nil), gatewayCapabilities...)
-		}
-		auth, err := client.Register(r.Context(), registerRequest)
-		if err != nil {
-			writeError(w, http.StatusBadGateway, err)
-			return
-		}
-		s.mu.Lock()
-		s.client = client
-		s.gatewayURL = strings.TrimRight(strings.TrimSpace(request.GatewayURL), "/")
-		if s.gatewayURL == "" {
-			s.gatewayURL = strings.TrimRight(strings.TrimSpace(os.Getenv("WORKMESH_GATEWAY_URL")), "/")
-		}
-		s.status.Registration = gateway.RegistrationRegistered
-		s.status.NodeID = registerRequest.NodeID
-		s.status.Role = registerRequest.Role
-		s.status.Connected = true
-		s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
-		s.status.AuthorizationExpireAt = auth.ExpiresAt
-		s.status.Reason = ""
-		s.auth = auth
-		if err := s.persistLocked(); err != nil {
-			s.mu.Unlock()
-			writeError(w, http.StatusInternalServerError, fmt.Errorf("保存 Gateway 绑定失败: %w", err))
-			return
-		}
-		s.mu.Unlock()
-		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"registered": true, "gatewayUrl": s.gatewayURL, "nodeId": registerRequest.NodeID, "status": "running", "bindingId": auth.BindingID}})
-		return
-	}
-	// 未配置真实 Gateway 客户端时禁止伪造注册成功，避免节点绕过云端授权。
-	writeError(w, http.StatusServiceUnavailable, errors.New("Gateway 未配置有效凭据，无法完成节点注册"))
-}
-
+// heartbeatHandler 向 Gateway 验证当前绑定并刷新本地连接时间戳。
 func (s *GatewayStateStore) heartbeatHandler(w http.ResponseWriter, r *http.Request) {
 	if s.client != nil {
 		s.mu.RLock()
@@ -508,12 +182,20 @@ func (s *GatewayStateStore) heartbeatHandler(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	s.mu.Lock()
+	previous := s.status
 	s.status.Connected = true
 	s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
+	if err := s.persistLocked(); err != nil {
+		s.status = previous
+		s.mu.Unlock()
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("保存 Gateway 心跳状态失败: %w", err))
+		return
+	}
 	s.mu.Unlock()
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200})
 }
 
+// refreshHandler 刷新已注册节点的 Gateway 授权并原子保存新令牌。
 func (s *GatewayStateStore) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	auth := s.auth
@@ -530,6 +212,11 @@ func (s *GatewayStateStore) refreshHandler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		s.mu.Lock()
+		previousAuth, previousStatus := s.auth, s.status
+		previousAccessToken := ""
+		if httpClient, ok := s.client.(*gateway.HTTPClient); ok {
+			previousAccessToken = httpClient.AccessToken
+		}
 		s.auth = refreshed
 		auth = refreshed
 		s.status.AuthorizationExpireAt = refreshed.ExpiresAt
@@ -537,6 +224,10 @@ func (s *GatewayStateStore) refreshHandler(w http.ResponseWriter, r *http.Reques
 			httpClient.AccessToken = refreshed.AccessToken
 		}
 		if err := s.persistLocked(); err != nil {
+			s.auth, s.status = previousAuth, previousStatus
+			if httpClient, ok := s.client.(*gateway.HTTPClient); ok {
+				httpClient.AccessToken = previousAccessToken
+			}
 			s.mu.Unlock()
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("保存 Gateway 刷新授权失败: %w", err))
 			return
@@ -546,6 +237,7 @@ func (s *GatewayStateStore) refreshHandler(w http.ResponseWriter, r *http.Reques
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": auth})
 }
 
+// unbindHandler 撤销远端授权并清除本地绑定状态，保证解绑后不可继续透传。
 func (s *GatewayStateStore) unbindHandler(w http.ResponseWriter, r *http.Request) {
 	if s.client != nil {
 		if err := s.client.Revoke(r.Context()); err != nil {
@@ -554,115 +246,18 @@ func (s *GatewayStateStore) unbindHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 	s.mu.Lock()
+	previousStatus, previousAuth, previousAccount := s.status, s.auth, s.account
 	s.status.Registration = gateway.RegistrationUnregistered
 	s.status.Connected = false
 	s.status.Reason = "用户解除绑定"
 	s.auth = gateway.Authorization{}
 	s.account = ""
 	if err := s.removePersisted(); err != nil {
+		s.status, s.auth, s.account = previousStatus, previousAuth, previousAccount
 		s.mu.Unlock()
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("清理 Gateway 绑定失败: %w", err))
 		return
 	}
 	s.mu.Unlock()
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200})
-}
-
-// validateGatewayBaseURL 校验外部 Gateway 地址，拒绝凭据、查询和片段以避免 SSRF 与凭据泄露。
-func validateGatewayBaseURL(value string) error {
-	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(value), "/"))
-	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && strings.TrimSpace(os.Getenv("WORKMESH_GATEWAY_ALLOW_HTTP")) == "1")) {
-		return errors.New("Gateway 地址必须是无凭据 HTTPS URL；本地 HTTP 需显式启用 WORKMESH_GATEWAY_ALLOW_HTTP=1")
-	}
-	return nil
-}
-
-// load 从数据目录恢复绑定。损坏快照只会进入 pending，不会伪造已注册状态。
-func (s *GatewayStateStore) load() {
-	raw, err := os.ReadFile(s.statePath)
-	if os.IsNotExist(err) {
-		return
-	}
-	if err != nil {
-		s.status.Registration = gateway.RegistrationPending
-		s.status.Reason = fmt.Sprintf("读取 Gateway 绑定状态失败: %v", err)
-		return
-	}
-	var saved persistedGatewayState
-	if err := json.Unmarshal(raw, &saved); err != nil || saved.Status.NodeID == "" {
-		s.status.Registration = gateway.RegistrationPending
-		s.status.Reason = "Gateway 绑定状态文件损坏"
-		return
-	}
-	s.status = saved.Status
-	s.gatewayURL = strings.TrimRight(strings.TrimSpace(saved.GatewayURL), "/")
-	if s.status.GatewayID == "" {
-		s.status.GatewayID = strings.TrimSpace(saved.GatewayID)
-	}
-	s.auth = gateway.Authorization{BindingID: saved.BindingID, Scopes: saved.Scopes, ExpiresAt: saved.ExpiresAt, Refreshable: saved.Refreshable, AccessToken: saved.AccessToken}
-	s.account = saved.Account
-	if s.status.Registration == gateway.RegistrationRegistered && s.auth.BindingID == "" {
-		s.status.Registration = gateway.RegistrationPending
-		s.status.Connected = false
-	}
-}
-
-// persist 将当前绑定原子写入数据目录，文件权限限制为仅所有者可读写。
-func (s *GatewayStateStore) persist() error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.persistSnapshot(s.status, s.auth)
-}
-
-func (s *GatewayStateStore) persistLocked() error {
-	return s.persistSnapshot(s.status, s.auth)
-}
-
-func (s *GatewayStateStore) persistSnapshot(status gateway.Status, auth gateway.Authorization) error {
-	if err := os.MkdirAll(filepath.Dir(s.statePath), 0o700); err != nil {
-		return err
-	}
-	// 调用方在 persistLocked 中已持有写锁，在 persist 中持有读锁；此处不能再次申请写锁。
-	gatewayURL := s.gatewayURL
-	account := s.account
-	if configuredURL := strings.TrimSpace(os.Getenv("WORKMESH_GATEWAY_URL")); configuredURL != "" {
-		gatewayURL = strings.TrimRight(configuredURL, "/")
-	}
-	saved := persistedGatewayState{Status: status, BindingID: auth.BindingID, Scopes: auth.Scopes, ExpiresAt: auth.ExpiresAt, Refreshable: auth.Refreshable, AccessToken: auth.AccessToken, GatewayURL: gatewayURL, GatewayID: status.GatewayID, Account: account, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
-	if saved.ExpiresAt != "" {
-		saved.Status.AuthorizationExpireAt = saved.ExpiresAt
-	}
-	raw, err := json.MarshalIndent(saved, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.statePath), ".gateway-binding-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, s.statePath)
-}
-
-func (s *GatewayStateStore) removePersisted() error {
-	if err := os.Remove(s.statePath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
 }

@@ -53,3 +53,26 @@ func TestWebsiteExtensionRejectsUnsafeComposerPath(t *testing.T) {
 		t.Fatalf("expected bad request, got %d", res.Code)
 	}
 }
+
+func TestWebsiteDatabasesReturnsOnlyRealRecords(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	registerWebsiteExtensionRoutes(mux)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v2/websites/databases", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("database list status=%d body=%s", res.Code, res.Body.String())
+	}
+	var envelope struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("invalid database response: %v body=%s", err, res.Body.String())
+	}
+	if envelope.Data == nil {
+		t.Fatalf("empty database list must be [] rather than null: %s", res.Body.String())
+	}
+	if bytes.Contains(res.Body.Bytes(), []byte("website_extension_state")) {
+		t.Fatalf("database list leaked extension state: %s", res.Body.String())
+	}
+}

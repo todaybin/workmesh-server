@@ -24,7 +24,7 @@
 GOWORK=off go test ./node/api -run 'TestScriptSyncUsesConfiguredRemoteAndSQLite|TestInstalledSyncAndCustomStoreRequireRealSources|TestDashboardRestartRequiresExplicitAuthorization' -count=1 -v
 ```
 
-结果：3 个测试通过。完整 `node/api` 测试仍受其他领域测试环境约束，详见主状态页。
+结果：3 个测试通过。完整 `server/node/api` 测试仍受其他领域测试环境约束，详见主状态页。
 
 ## 未完成/阻塞
 

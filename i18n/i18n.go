@@ -135,6 +135,7 @@ func ErrorCode(status int, fallback string) string {
 	}
 }
 
+// isStableErrorCode 判断字符串是否符合可供客户端分支处理的稳定错误码格式。
 func isStableErrorCode(value string) bool {
 	if value == "" || len(value) > 96 {
 		return false
@@ -219,6 +220,7 @@ func LocalizeError(locale, code, fallback string) string {
 	return message
 }
 
+// containsNonASCII 检测错误上下文是否包含非 ASCII 字符，以控制跨语言展示混排。
 func containsNonASCII(value string) bool {
 	for _, char := range value {
 		if char > 127 {
@@ -275,6 +277,7 @@ func Format(locale, key string, data map[string]any) (string, error) {
 	return strings.ReplaceAll(rendered.String(), ": <no value>", ""), nil
 }
 
+// loadCatalogs 一次性读取并解析所有内置语言目录，供后续消息查询复用。
 func loadCatalogs() {
 	initLocaleManifest()
 	catalogs = make(map[string]map[string]string, len(supportedLocales))
@@ -295,6 +298,7 @@ func loadCatalogs() {
 
 var localeManifestOnce sync.Once
 
+// initLocaleManifest 一次性解析语言清单并建立代码、别名和文件映射。
 func initLocaleManifest() {
 	localeManifestOnce.Do(func() {
 		var manifest localeManifestDefinition
@@ -352,6 +356,7 @@ func parseCatalog(content []byte) (map[string]string, error) {
 	return catalog, nil
 }
 
+// parseScalar 解析单层 YAML 标量，支持未引用、单引号和双引号值。
 func parseScalar(value string) (string, error) {
 	if len(value) < 2 {
 		return value, nil

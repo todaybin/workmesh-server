@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/todaybin/workmesh-server/internal/storage"
 	_ "modernc.org/sqlite"
 )
 
@@ -35,6 +36,7 @@ type DatabaseUser struct {
 // DatabaseGrant 描述用户可访问的数据库和权限集合。
 type DatabaseGrant struct {
 	ID         int64    `json:"id"`
+	Server     string   `json:"server"`
 	Database   string   `json:"database"`
 	Username   string   `json:"username"`
 	Host       string   `json:"host"`
@@ -57,6 +59,7 @@ type DatabaseAdminStore struct {
 	initMu        sync.Mutex
 	initializedDB *sql.DB
 	db            *sql.DB
+	repository    storage.Transactional
 }
 
 var fallbackSQLiteMu sync.Mutex
@@ -122,6 +125,26 @@ func (s *DatabaseAdminStore) database(ctx context.Context) (*sql.DB, error) {
 	return db, nil
 }
 
+// executor 返回已经完成表初始化的统一 SQLite repository。
+// database 保留 *sql.DB 仅用于启动迁移、旧文件导入和离线兼容。
+func (s *DatabaseAdminStore) executor(ctx context.Context) (storage.Transactional, error) {
+	db, err := s.database(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.initMu.Lock()
+	defer s.initMu.Unlock()
+	if s.repository != nil && s.initializedDB == db {
+		return s.repository, nil
+	}
+	repository, err := storage.NewSQLiteRepository(db)
+	if err != nil {
+		return nil, err
+	}
+	s.repository = repository
+	return repository, nil
+}
+
 func (s *DatabaseAdminStore) initializeDatabase(ctx context.Context, db *sql.DB) error {
 	s.initMu.Lock()
 	defer s.initMu.Unlock()
@@ -132,15 +155,26 @@ func (s *DatabaseAdminStore) initializeDatabase(ctx context.Context, db *sql.DB)
 		`CREATE TABLE IF NOT EXISTS database_users (id INTEGER PRIMARY KEY AUTOINCREMENT, database_id INTEGER NOT NULL DEFAULT 0, database_name TEXT NOT NULL, type TEXT NOT NULL DEFAULT '', username TEXT NOT NULL, host TEXT NOT NULL DEFAULT '%', description TEXT NOT NULL DEFAULT '', password_set INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_users_identity ON database_users(database_name,username,host)`,
 		`CREATE INDEX IF NOT EXISTS idx_database_users_database ON database_users(database_name,id)`,
-		`CREATE TABLE IF NOT EXISTS database_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, database_name TEXT NOT NULL, username TEXT NOT NULL, host TEXT NOT NULL DEFAULT '%', privileges BLOB NOT NULL DEFAULT '[]')`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_grants_identity ON database_grants(database_name,username,host)`,
-		`CREATE INDEX IF NOT EXISTS idx_database_grants_database ON database_grants(database_name,id)`,
+		`CREATE TABLE IF NOT EXISTS database_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL DEFAULT '', database_name TEXT NOT NULL, username TEXT NOT NULL, host TEXT NOT NULL DEFAULT '%', privileges BLOB NOT NULL DEFAULT '[]')`,
 		`CREATE TABLE IF NOT EXISTS database_variables (database_name TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(database_name,name))`,
 		`CREATE TABLE IF NOT EXISTS database_configs (database_name TEXT PRIMARY KEY, content BLOB NOT NULL, updated_at TEXT NOT NULL)`,
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("初始化数据库管理表失败: %w", err)
+		}
+	}
+	// 早期 SQLite 表没有实例维度；保留旧数据并在升级后使用新列隔离授权。
+	if _, err := db.ExecContext(ctx, `ALTER TABLE database_grants ADD COLUMN server_name TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return fmt.Errorf("升级数据库授权表失败: %w", err)
+	}
+	for _, statement := range []string{
+		`DROP INDEX IF EXISTS idx_database_grants_identity`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_database_grants_server_identity ON database_grants(server_name,database_name,username,host)`,
+		`CREATE INDEX IF NOT EXISTS idx_database_grants_server_database ON database_grants(server_name,database_name,id)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("初始化数据库授权索引失败: %w", err)
 		}
 	}
 	if err := s.importLegacy(ctx, db); err != nil {
@@ -182,7 +216,7 @@ func (s *DatabaseAdminStore) importLegacy(ctx context.Context, db *sql.DB) error
 	}
 	for _, grant := range payload.Grants {
 		privileges, _ := json.Marshal(grant.Privileges)
-		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO database_grants(id,database_name,username,host,privileges) VALUES(?,?,?,?,?)`, grant.ID, grant.Database, grant.Username, defaultAdminHost(grant.Host), privileges); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO database_grants(id,server_name,database_name,username,host,privileges) VALUES(?,?,?,?,?,?)`, grant.ID, grant.Server, grant.Database, grant.Username, defaultAdminHost(grant.Host), privileges); err != nil {
 			return fmt.Errorf("导入数据库授权失败: %w", err)
 		}
 	}
@@ -229,11 +263,11 @@ func parseAdminTime(value string) time.Time {
 
 // ListUsers 按数据库和用户名筛选，最多返回 1000 条。
 func (s *DatabaseAdminStore) ListUsers(ctx context.Context, database, username string) []DatabaseUser {
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return []DatabaseUser{}
 	}
-	rows, err := db.QueryContext(contextOrBackground(ctx), `SELECT id,database_id,database_name,type,username,host,description,password_set,created_at FROM database_users WHERE (?='' OR lower(database_name)=lower(?)) AND (?='' OR lower(username) LIKE '%'||lower(?)||'%') ORDER BY id LIMIT 1000`, database, database, username, username)
+	rows, err := repository.QueryContext(contextOrBackground(ctx), `SELECT id,database_id,database_name,type,username,host,description,password_set,created_at FROM database_users WHERE (?='' OR lower(database_name)=lower(?)) AND (?='' OR lower(username) LIKE '%'||lower(?)||'%') ORDER BY id LIMIT 1000`, database, database, username, username)
 	if err != nil {
 		return []DatabaseUser{}
 	}
@@ -257,11 +291,11 @@ func (s *DatabaseAdminStore) CreateUser(ctx context.Context, user DatabaseUser) 
 		return DatabaseUser{}, errors.New("数据库和用户名不能为空")
 	}
 	user.Host, user.CreatedAt = defaultAdminHost(user.Host), time.Now().UTC()
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return DatabaseUser{}, err
 	}
-	result, err := db.ExecContext(contextOrBackground(ctx), `INSERT INTO database_users(database_id,database_name,type,username,host,description,password_set,created_at) VALUES(?,?,?,?,?,?,?,?)`, user.DatabaseID, user.Database, user.Type, user.Username, user.Host, user.Description, databaseBoolInt(user.PasswordSet), user.CreatedAt.Format(time.RFC3339Nano))
+	result, err := repository.ExecContext(contextOrBackground(ctx), `INSERT INTO database_users(database_id,database_name,type,username,host,description,password_set,created_at) VALUES(?,?,?,?,?,?,?,?)`, user.DatabaseID, user.Database, user.Type, user.Username, user.Host, user.Description, databaseBoolInt(user.PasswordSet), user.CreatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return DatabaseUser{}, fmt.Errorf("创建数据库用户失败: %w", err)
 	}
@@ -274,17 +308,17 @@ func (s *DatabaseAdminStore) UpdateUser(ctx context.Context, user DatabaseUser) 
 	if strings.TrimSpace(user.Username) == "" || strings.TrimSpace(user.Database) == "" {
 		return DatabaseUser{}, errors.New("数据库和用户名不能为空")
 	}
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return DatabaseUser{}, err
 	}
 	var created string
 	var passwordSet int
-	if err = db.QueryRowContext(contextOrBackground(ctx), `SELECT created_at,password_set FROM database_users WHERE id=?`, user.ID).Scan(&created, &passwordSet); err != nil {
+	if err = repository.QueryRowContext(contextOrBackground(ctx), `SELECT created_at,password_set FROM database_users WHERE id=?`, user.ID).Scan(&created, &passwordSet); err != nil {
 		return DatabaseUser{}, errors.New("数据库用户不存在")
 	}
 	user.Host = defaultAdminHost(user.Host)
-	if _, err = db.ExecContext(contextOrBackground(ctx), `UPDATE database_users SET database_id=?,database_name=?,type=?,username=?,host=?,description=? WHERE id=?`, user.DatabaseID, user.Database, user.Type, user.Username, user.Host, user.Description, user.ID); err != nil {
+	if _, err = repository.ExecContext(contextOrBackground(ctx), `UPDATE database_users SET database_id=?,database_name=?,type=?,username=?,host=?,description=? WHERE id=?`, user.DatabaseID, user.Database, user.Type, user.Username, user.Host, user.Description, user.ID); err != nil {
 		return DatabaseUser{}, fmt.Errorf("更新数据库用户失败: %w", err)
 	}
 	user.CreatedAt, user.PasswordSet = parseAdminTime(created), passwordSet != 0
@@ -293,11 +327,27 @@ func (s *DatabaseAdminStore) UpdateUser(ctx context.Context, user DatabaseUser) 
 
 // DeleteUser 删除数据库用户。
 func (s *DatabaseAdminStore) DeleteUser(ctx context.Context, id int64) error {
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return err
 	}
-	result, err := db.ExecContext(contextOrBackground(ctx), `DELETE FROM database_users WHERE id=?`, id)
+	result, err := repository.ExecContext(contextOrBackground(ctx), `DELETE FROM database_users WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return errors.New("数据库用户不存在")
+	}
+	return nil
+}
+
+// DeleteUserByIdentity 按数据库、用户名和主机删除用户，兼容前端不暴露内部 ID 的请求。
+func (s *DatabaseAdminStore) DeleteUserByIdentity(ctx context.Context, database, username, host string) error {
+	repository, err := s.executor(ctx)
+	if err != nil {
+		return err
+	}
+	result, err := repository.ExecContext(contextOrBackground(ctx), `DELETE FROM database_users WHERE lower(database_name)=lower(?) AND lower(username)=lower(?) AND host=?`, strings.TrimSpace(database), strings.TrimSpace(username), defaultAdminHost(host))
 	if err != nil {
 		return err
 	}
@@ -309,11 +359,11 @@ func (s *DatabaseAdminStore) DeleteUser(ctx context.Context, id int64) error {
 
 // SetPassword 标记用户已经设置密码；实际密码由目标数据库负责保存。
 func (s *DatabaseAdminStore) SetPassword(ctx context.Context, id int64) error {
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return err
 	}
-	result, err := db.ExecContext(contextOrBackground(ctx), `UPDATE database_users SET password_set=1 WHERE id=?`, id)
+	result, err := repository.ExecContext(contextOrBackground(ctx), `UPDATE database_users SET password_set=1 WHERE id=?`, id)
 	if err != nil {
 		return err
 	}
@@ -323,13 +373,52 @@ func (s *DatabaseAdminStore) SetPassword(ctx context.Context, id int64) error {
 	return nil
 }
 
-// ListGrants 查询授权记录，结果固定排序且最多 1000 条。
-func (s *DatabaseAdminStore) ListGrants(ctx context.Context, database, username string) []DatabaseGrant {
-	db, err := s.database(ctx)
+// SetPasswordByIdentity 按数据库、用户名和主机标记密码已设置。
+func (s *DatabaseAdminStore) SetPasswordByIdentity(ctx context.Context, database, username, host string) error {
+	repository, err := s.executor(ctx)
+	if err != nil {
+		return err
+	}
+	result, err := repository.ExecContext(contextOrBackground(ctx), `UPDATE database_users SET password_set=1 WHERE lower(database_name)=lower(?) AND lower(username)=lower(?) AND host=?`, strings.TrimSpace(database), strings.TrimSpace(username), defaultAdminHost(host))
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return errors.New("数据库用户不存在")
+	}
+	return nil
+}
+
+// UpdateUserByIdentity 按前端用户身份更新主机和说明，保留密码状态及创建时间。
+func (s *DatabaseAdminStore) UpdateUserByIdentity(ctx context.Context, user DatabaseUser, newHost string) (DatabaseUser, error) {
+	repository, err := s.executor(ctx)
+	if err != nil {
+		return DatabaseUser{}, err
+	}
+	oldHost := defaultAdminHost(user.Host)
+	newHost = defaultAdminHost(newHost)
+	var item DatabaseUser
+	var passwordSet int
+	var created string
+	err = repository.QueryRowContext(contextOrBackground(ctx), `SELECT id,database_id,database_name,type,username,host,description,password_set,created_at FROM database_users WHERE lower(database_name)=lower(?) AND lower(username)=lower(?) AND host=?`, user.Database, user.Username, oldHost).Scan(&item.ID, &item.DatabaseID, &item.Database, &item.Type, &item.Username, &item.Host, &item.Description, &passwordSet, &created)
+	if err != nil {
+		return DatabaseUser{}, errors.New("数据库用户不存在")
+	}
+	if _, err = repository.ExecContext(contextOrBackground(ctx), `UPDATE database_users SET host=?,description=? WHERE id=?`, newHost, user.Description, item.ID); err != nil {
+		return DatabaseUser{}, fmt.Errorf("更新数据库用户失败: %w", err)
+	}
+	item.Host, item.Description = newHost, user.Description
+	item.PasswordSet, item.CreatedAt = passwordSet != 0, parseAdminTime(created)
+	return item, nil
+}
+
+// ListGrants 查询一个 MySQL/MariaDB 实例的授权记录，结果固定排序且最多 1000 条。
+func (s *DatabaseAdminStore) ListGrants(ctx context.Context, server, username string) []DatabaseGrant {
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return []DatabaseGrant{}
 	}
-	rows, err := db.QueryContext(contextOrBackground(ctx), `SELECT id,database_name,username,host,privileges FROM database_grants WHERE (?='' OR lower(database_name)=lower(?)) AND (?='' OR lower(username)=lower(?)) ORDER BY id LIMIT 1000`, database, database, username, username)
+	rows, err := repository.QueryContext(contextOrBackground(ctx), `SELECT id,server_name,database_name,username,host,privileges FROM database_grants WHERE (?='' OR lower(server_name)=lower(?) OR (server_name='' AND lower(database_name)=lower(?))) AND (?='' OR lower(username)=lower(?)) ORDER BY id LIMIT 1000`, server, server, server, username, username)
 	if err != nil {
 		return []DatabaseGrant{}
 	}
@@ -338,7 +427,7 @@ func (s *DatabaseAdminStore) ListGrants(ctx context.Context, database, username 
 	for rows.Next() {
 		var item DatabaseGrant
 		var raw []byte
-		if rows.Scan(&item.ID, &item.Database, &item.Username, &item.Host, &raw) == nil {
+		if rows.Scan(&item.ID, &item.Server, &item.Database, &item.Username, &item.Host, &raw) == nil {
 			_ = json.Unmarshal(raw, &item.Privileges)
 			if item.Privileges == nil {
 				item.Privileges = []string{}
@@ -355,20 +444,24 @@ func (s *DatabaseAdminStore) UpsertGrant(ctx context.Context, grant DatabaseGran
 		return DatabaseGrant{}, errors.New("数据库和用户名不能为空")
 	}
 	grant.Host = defaultAdminHost(grant.Host)
+	grant.Server = strings.TrimSpace(grant.Server)
+	if grant.Server == "" {
+		grant.Server = grant.Database
+	}
 	if grant.Privileges == nil {
 		grant.Privileges = []string{}
 	}
 	privileges, _ := json.Marshal(grant.Privileges)
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return DatabaseGrant{}, err
 	}
-	_ = db.QueryRowContext(contextOrBackground(ctx), `SELECT id FROM database_grants WHERE database_name=? AND username=? AND host=?`, grant.Database, grant.Username, grant.Host).Scan(&grant.ID)
+	_ = repository.QueryRowContext(contextOrBackground(ctx), `SELECT id FROM database_grants WHERE server_name=? AND database_name=? AND username=? AND host=?`, grant.Server, grant.Database, grant.Username, grant.Host).Scan(&grant.ID)
 	if grant.ID > 0 {
-		_, err = db.ExecContext(contextOrBackground(ctx), `UPDATE database_grants SET privileges=? WHERE id=?`, privileges, grant.ID)
+		_, err = repository.ExecContext(contextOrBackground(ctx), `UPDATE database_grants SET privileges=? WHERE id=?`, privileges, grant.ID)
 	} else {
 		var result sql.Result
-		result, err = db.ExecContext(contextOrBackground(ctx), `INSERT INTO database_grants(database_name,username,host,privileges) VALUES(?,?,?,?)`, grant.Database, grant.Username, grant.Host, privileges)
+		result, err = repository.ExecContext(contextOrBackground(ctx), `INSERT INTO database_grants(server_name,database_name,username,host,privileges) VALUES(?,?,?,?,?)`, grant.Server, grant.Database, grant.Username, grant.Host, privileges)
 		if err == nil {
 			grant.ID, _ = result.LastInsertId()
 		}
@@ -381,11 +474,27 @@ func (s *DatabaseAdminStore) UpsertGrant(ctx context.Context, grant DatabaseGran
 
 // DeleteGrant 删除授权记录。
 func (s *DatabaseAdminStore) DeleteGrant(ctx context.Context, id int64) error {
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return err
 	}
-	result, err := db.ExecContext(contextOrBackground(ctx), `DELETE FROM database_grants WHERE id=?`, id)
+	result, err := repository.ExecContext(contextOrBackground(ctx), `DELETE FROM database_grants WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return errors.New("授权记录不存在")
+	}
+	return nil
+}
+
+// DeleteGrantByIdentity 按实例、数据库、用户和主机撤销授权记录。
+func (s *DatabaseAdminStore) DeleteGrantByIdentity(ctx context.Context, server, database, username, host string) error {
+	repository, err := s.executor(ctx)
+	if err != nil {
+		return err
+	}
+	result, err := repository.ExecContext(contextOrBackground(ctx), `DELETE FROM database_grants WHERE lower(server_name)=lower(?) AND lower(database_name)=lower(?) AND lower(username)=lower(?) AND host=?`, strings.TrimSpace(server), strings.TrimSpace(database), strings.TrimSpace(username), defaultAdminHost(host))
 	if err != nil {
 		return err
 	}
@@ -397,11 +506,11 @@ func (s *DatabaseAdminStore) DeleteGrant(ctx context.Context, id int64) error {
 
 // Variables 返回数据库变量列表。
 func (s *DatabaseAdminStore) Variables(ctx context.Context, database string) []DatabaseVariable {
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return []DatabaseVariable{}
 	}
-	rows, err := db.QueryContext(contextOrBackground(ctx), `SELECT database_name,name,value,updated_at FROM database_variables WHERE (?='' OR lower(database_name)=lower(?)) ORDER BY name LIMIT 1000`, database, database)
+	rows, err := repository.QueryContext(contextOrBackground(ctx), `SELECT database_name,name,value,updated_at FROM database_variables WHERE (?='' OR lower(database_name)=lower(?)) ORDER BY name LIMIT 1000`, database, database)
 	if err != nil {
 		return []DatabaseVariable{}
 	}
@@ -429,11 +538,11 @@ func (s *DatabaseAdminStore) SetVariable(ctx context.Context, variable DatabaseV
 	}
 	variable.Database, variable.Name = strings.TrimSpace(variable.Database), strings.TrimSpace(variable.Name)
 	variable.UpdatedAt = time.Now().UTC()
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return DatabaseVariable{}, err
 	}
-	_, err = db.ExecContext(contextOrBackground(ctx), `INSERT INTO database_variables(database_name,name,value,updated_at) VALUES(?,?,?,?) ON CONFLICT(database_name,name) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`, variable.Database, variable.Name, variable.Value, variable.UpdatedAt.Format(time.RFC3339Nano))
+	_, err = repository.ExecContext(contextOrBackground(ctx), `INSERT INTO database_variables(database_name,name,value,updated_at) VALUES(?,?,?,?) ON CONFLICT(database_name,name) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`, variable.Database, variable.Name, variable.Value, variable.UpdatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return DatabaseVariable{}, fmt.Errorf("保存数据库变量失败: %w", err)
 	}
@@ -445,21 +554,21 @@ func (s *DatabaseAdminStore) SetConfig(ctx context.Context, database, content st
 	if len(content) > 1<<20 {
 		return errors.New("配置文件超过 1 MiB")
 	}
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(contextOrBackground(ctx), `INSERT INTO database_configs(database_name,content,updated_at) VALUES(?,?,?) ON CONFLICT(database_name) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at`, database, content, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err = repository.ExecContext(contextOrBackground(ctx), `INSERT INTO database_configs(database_name,content,updated_at) VALUES(?,?,?) ON CONFLICT(database_name) DO UPDATE SET content=excluded.content,updated_at=excluded.updated_at`, database, content, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
 }
 
 // Config 读取数据库配置内容。
 func (s *DatabaseAdminStore) Config(ctx context.Context, database string) string {
-	db, err := s.database(ctx)
+	repository, err := s.executor(ctx)
 	if err != nil {
 		return ""
 	}
 	var content string
-	_ = db.QueryRowContext(contextOrBackground(ctx), `SELECT content FROM database_configs WHERE database_name=?`, database).Scan(&content)
+	_ = repository.QueryRowContext(contextOrBackground(ctx), `SELECT content FROM database_configs WHERE database_name=?`, database).Scan(&content)
 	return content
 }

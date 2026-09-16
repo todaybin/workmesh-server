@@ -3,11 +3,13 @@
 
 # 前端页面与同源 API 复刻
 
+> Historical record：本文记录 2026 年 9 月 3 日的迁移阶段。当前前端接口、菜单和页面审计必须读取只读参考 `/www/apps/1Panel/frontend`，WorkMesh 工作副本仅为 `/www/apps/workmesh-server/web`。
+
 状态：[x] 已完成（静态核对与构建门禁）
 
 ## 本次修改
 
-- 对照 `apps/workmesh-node/frontend/src` 与 `web/src` 的 routers、views、api 文件清单，页面和动态 import 无缺失。
+- 当前前端唯一实现目录是 `/www/apps/workmesh-server/web/`；页面、动态 import 和 API 清单以该目录为准，业务行为只对照只读参考 `/www/apps/1Panel/frontend`。
 - API 客户端将绝对 `VITE_API_URL` 归一为当前 origin 下的 API 路径，保持浏览器不直连节点或远程服务。
 - 应用图标、文件下载、文件分享下载/二维码和文件预览统一通过同源 URL 构造器，保留节点与业务查询参数。
 

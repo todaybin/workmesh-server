@@ -1,5 +1,8 @@
 import i18n from '@/lang';
 
+export type { AppInstallId, AppOperationTarget } from './app-install';
+export { getAppInstallId, normalizeAppInstallId, resolveAppOperationTarget } from './app-install';
+
 export function getLanguage() {
     return String(i18n.global.locale.value || localStorage.getItem('lang') || 'en');
 }

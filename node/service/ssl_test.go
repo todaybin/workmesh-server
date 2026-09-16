@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/todaybin/workmesh-server/internal/storage"
 	"github.com/todaybin/workmesh-server/node/model"
 )
 
@@ -31,6 +32,47 @@ func TestSSLServiceCreateAndList(t *testing.T) {
 	list := service.List(context.Background(), "example")
 	if len(list) != 1 || list[0].PrivateKey != "" {
 		t.Fatalf("证书列表异常或泄漏私钥: %+v", list)
+	}
+}
+
+func TestSSLServiceEnrichesAccountRelationsWithoutSecrets(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", root)
+	store, err := storage.Open(filepath.Join(root, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetWebsiteDB(store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { websiteDBMu.Lock(); websiteDB = nil; websiteDBMu.Unlock(); _ = store.Close() })
+	svc := NewSSLService()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := svc.db.Exec(`INSERT INTO website_acme_accounts(email,url,private_key,type,key_type,use_proxy,ca_dir_url,use_eab,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, "ssl@example.com", "https://acme.test/acct/1", "secret", "letsencrypt", "RSA2048", 0, "", 0, now, now)
+	if err != nil {
+		t.Fatalf("create ACME account: %v", err)
+	}
+	accountID, _ := result.LastInsertId()
+	if accountID == 0 {
+		t.Fatal("ACME account id is zero")
+	}
+	var check int
+	if err := svc.db.QueryRow(`SELECT COUNT(*) FROM website_acme_accounts WHERE id=?`, accountID).Scan(&check); err != nil || check != 1 {
+		t.Fatalf("ACME row missing: %v count=%d", err, check)
+	}
+	item, err := svc.Create(context.Background(), model.WebsiteSSLCreateRequest{PrimaryDomain: "relation.example.com", Provider: "http", AcmeAccountID: uint(accountID)})
+	if err != nil {
+		t.Fatalf("create SSL: %v", err)
+	}
+	got, err := svc.Get(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("get SSL: %v", err)
+	}
+	if got.AcmeAccount == nil || got.AcmeAccount.Email != "ssl@example.com" {
+		t.Fatalf("ACME relation missing: %+v", got.AcmeAccount)
+	}
+	if got.PrivateKey != "" || got.AcmeAccount.URL == "" {
+		t.Fatalf("SSL response leaked or omitted public fields: %+v", got)
 	}
 }
 

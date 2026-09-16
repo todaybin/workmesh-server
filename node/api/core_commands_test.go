@@ -51,6 +51,11 @@ func TestCoreCommandsLifecycleAndPersistence(t *testing.T) {
 	if update.Code != http.StatusOK {
 		t.Fatalf("update status = %d", update.Code)
 	}
+	exported := httptest.NewRecorder()
+	mux.ServeHTTP(exported, httptest.NewRequest(http.MethodPost, "/api/v2/core/commands/export", nil))
+	if exported.Code != http.StatusOK || !bytes.Contains(exported.Body.Bytes(), []byte("List all files")) {
+		t.Fatalf("export status = %d body = %s", exported.Code, exported.Body.String())
+	}
 	remove := httptest.NewRecorder()
 	mux.ServeHTTP(remove, httptest.NewRequest(http.MethodPost, "/api/v2/core/commands/del", bytes.NewBufferString(`{"ids":[`+created.Data.ID+`]}`)))
 	if remove.Code != http.StatusOK {

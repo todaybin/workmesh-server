@@ -69,6 +69,21 @@ function loadServerConfigProxyTarget(): string {
     }
 }
 
+function emitWorkmeshStaticJSON(): Plugin {
+    return {
+        name: 'emit-workmesh-static-json',
+        generateBundle() {
+            for (const name of ['china.json', 'world.json']) {
+                this.emitFile({
+                    type: 'asset',
+                    fileName: `static/${name}`,
+                    source: readFileSync(resolve(import.meta.dirname, `./src/assets/json/${name}`)),
+                });
+            }
+        },
+    };
+}
+
 export default defineConfig(async ({ mode }: ConfigEnv): Promise<UserConfig> => {
     const env = loadEnv(mode, process.cwd());
     const viteEnv = wrapperEnv(env);
@@ -115,6 +130,7 @@ export default defineConfig(async ({ mode }: ConfigEnv): Promise<UserConfig> => 
         },
         plugins: [
             patchCodeFilterOverflow(),
+            emitWorkmeshStaticJSON(),
             vue(),
             eslintPlugin({
                 cache: false,
@@ -151,7 +167,9 @@ export default defineConfig(async ({ mode }: ConfigEnv): Promise<UserConfig> => 
         ],
         build: {
             sourcemap: false,
-            outDir: 'dist',
+            // 和 1Panel 一样，前端产物先进入 Go 包目录，再由 go:embed 编译进二进制。
+            outDir: '../internal/webassets/dist',
+            emptyOutDir: true,
             minify: 'oxc',
             target: 'esnext',
             cssCodeSplit: false,

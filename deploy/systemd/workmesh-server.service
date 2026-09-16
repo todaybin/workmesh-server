@@ -3,14 +3,15 @@
 
 [Unit]
 Description=WorkMesh Server
-Wants=network-online.target
-After=network-online.target
+Wants=network-online.target docker.service
+After=network-online.target docker.service
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/workmesh-server
-ExecStart=/opt/workmesh-server/bin/workmesh-server
-EnvironmentFile=-/opt/workmesh-server/config/server.env
+WorkingDirectory=@WORKMESH_SERVER_ROOT@
+ExecCondition=/usr/bin/test -x @WORKMESH_SERVER_ROOT@/bin/workmesh-server
+ExecStart=@WORKMESH_SERVER_ROOT@/bin/workmesh-server
+EnvironmentFile=-@WORKMESH_SERVER_ROOT@/config/server.env
 Restart=on-failure
 RestartSec=5s
 UMask=0027
