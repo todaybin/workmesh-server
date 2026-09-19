@@ -28,7 +28,7 @@
 - [x] 已通过 `deploy/install/activate-release.sh` 原子替换 `/opt/workmesh-server/bin/workmesh-server`，旧版本保留为 `/opt/workmesh-server/bin/workmesh-server.bak.20260919201823-3813745`；新 systemd MainPID 为 `3813845`。
 - [x] 新版本 `/health`、`/ready`、9999 端口归属和 `/advanced/waf` 静态资源检查通过。
 - [x] 部署后稳定空闲采样：WorkMesh RSS/PSS `33.0 MiB`、匿名 `9.5 MiB`、file-backed `23.5 MiB`、Swap `0`、线程 `10`；cgroup `memory.current` `14.8 MiB`、`memory.swap.current` `0`，`anon` `9.5 MiB`、`file` `4.7 MiB`、`inactive_file` `4.7 MiB`。
-- [x] 同一采样口径下 1Panel agent/core 合计 PSS `64.7 MiB`、匿名 `44.3 MiB`、file-backed `20.3 MiB`、Swap `9.7 MiB`、线程 `19`；两服务 cgroup memory current 合计 `87.0 MiB`、swap current 合计 `38.8 MiB`。WorkMesh PSS 约低 `31.7 MiB`（约 `49%`），且未观察到自身换出页。
+- [x] 同一采样口径下 1Panel agent/core 合计 PSS `64.7 MiB`、匿名 `44.3 MiB`、file-backed `20.3 MiB`、Swap `9.7 MiB`、线程 `19`；两服务 cgroup memory current 合计 `86.2 MiB`、swap current 合计 `38.8 MiB`。WorkMesh PSS 约低 `31.7 MiB`（约 `49%`），且未观察到自身换出页。
 - [>] GitHub 远端推送尚未获得确认：本地提交完整保留，`git push`/`git ls-remote` 在当前网络连接上超时；待网络或凭据链路恢复后重试并记录远端分支 SHA。
 
 ## 边界与安全结论
