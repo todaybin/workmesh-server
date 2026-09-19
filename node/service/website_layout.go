@@ -85,10 +85,6 @@ func (s *WebsiteService) ensureSiteLayout(site model.Website) error {
 			return err
 		}
 	}
-	// 旧版本部分调用方仍访问 config/basic，保留空兼容目录但不在其中保存新配置。
-	if err := os.MkdirAll(filepath.Join(s.SitePath(site, "site"), "config", "basic"), 0o755); err != nil {
-		return err
-	}
 	siteConfigPath := s.SitePath(site, "site.conf")
 	configInfo, configErr := os.Stat(siteConfigPath)
 	if errors.Is(configErr, os.ErrNotExist) || (configErr == nil && configInfo.Size() == 0) {

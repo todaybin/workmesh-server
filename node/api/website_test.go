@@ -131,10 +131,13 @@ func TestZNMPStaticWebsiteAllInterfaces(t *testing.T) {
 	}
 
 	base := filepath.Join(siteRoot, "znmp.sopvip.com")
-	for _, rel := range []string{"app", "nginx", "nginx/rewrite", "nginx/proxy", "nginx/redirect", "nginx/auth_basic", "nginx/path_auth", "nginx/upstream", "waf", "logs", "ssl", ".workmesh/runtime", ".workmesh/cache", "config/basic"} {
+	for _, rel := range []string{"app", "nginx", "nginx/rewrite", "nginx/proxy", "nginx/redirect", "nginx/auth_basic", "nginx/path_auth", "nginx/upstream", "waf", "logs", "ssl", ".workmesh/runtime", ".workmesh/cache"} {
 		if info, err := os.Stat(filepath.Join(base, rel)); err != nil || !info.IsDir() {
 			t.Fatalf("缺少站点目录 %s: %v", rel, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(base, "config", "basic")); !os.IsNotExist(err) {
+		t.Fatalf("不应创建 config/basic 兼容磁盘目录: %v", err)
 	}
 	for _, rel := range []string{"nginx/site.conf", "nginx/stream.conf"} {
 		if info, err := os.Stat(filepath.Join(base, rel)); err != nil || info.IsDir() {

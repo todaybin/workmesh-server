@@ -7,6 +7,12 @@
 
 更新时间：2026-09-16
 
+## 2026-09-16 znmp 应用目录隔离
+
+- [>] 停止创建网站 `config/basic` 兼容磁盘目录，保留基础设置 API 与页面功能；WorkMesh Server 继续作为 `/opt/workmesh-server` 下的独立公共管理面板。
+- [ ] 定向测试、完整 Go 测试、生产构建与站点切换尚待完成。
+- [x] 详情见 [`2026-09-16-znmp-app-layout.md`](progress/2026-09-16-znmp-app-layout.md)。
+
 ## 2026-09-16 反向站点代理配置
 
 - [x] 反向站点创建后生成 `nginx/proxy/root.conf` 并由 `site.conf` 引用，代理菜单可读取默认配置。
