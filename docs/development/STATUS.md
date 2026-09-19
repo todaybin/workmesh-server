@@ -16,7 +16,7 @@
 - [x] 已从 `0803bdb` 重新编译并部署到 `/opt/workmesh-server`，systemd、`/health`、`/ready`、9999 端口和前端路由检查通过；随后已部署 cgroup 诊断提交 `7365810`，最新空闲 RSS/PSS 约 `33.0 MiB`，匿名约 `9.5 MiB`，Swap 为 `0`。
 - [!] 完整 `node/api` 保留两个既有网站代理测试失败；Gateway 迁移、真实登录/心跳和任务峰值采样仍待维护窗口，详情见 [`2026-09-19-machine-resource-governance.md`](progress/2026-09-19-machine-resource-governance.md)。
 
-- [>] `7365810` 已完成本地提交和部署；GitHub 远端推送因当前连接超时尚未获得确认，需恢复网络/凭据后执行 `git push origin main` 并核对远端 SHA。
+- [x] `7365810` 已完成本地提交、部署并推送；部署验收记录提交为 `9b75441`，资源采样校正提交为 `2bc3c2b`，远端 `origin/main` 已确认指向 `2bc3c2b`。
 
 ## 2026-09-19 单进程内存治理
 
