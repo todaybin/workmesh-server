@@ -87,13 +87,15 @@ func fetchRemoteCompose(url string) string {
 }
 
 func appInstalledGet(w http.ResponseWriter, s *appStore, r *http.Request, id string) {
-	s.mu.RLock()
+	s.mu.Lock()
+	_ = s.ensureCatalogLocked()
 	_, item := findApp(s.state.Apps, id)
-	s.mu.RUnlock()
+	metadata := append([]appTagRecord(nil), s.state.CatalogTags...)
+	s.mu.Unlock()
 	if item.ID == "" {
 		appOK(w, map[string]any{"id": id, "status": "not_installed", "env": map[string]any{}})
 		return
 	}
-	data := appInstalledResponseData(item, workmeshi18n.LocaleFromRequest(r), s.state.CatalogTags)
+	data := appInstalledResponseData(item, workmeshi18n.LocaleFromRequest(r), metadata)
 	appOK(w, data)
 }

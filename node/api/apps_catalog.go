@@ -19,6 +19,81 @@ import (
 	"time"
 )
 
+// ensureCatalogLocked 按需加载目录，并在空闲 TTL 后释放所有大对象引用。
+// 调用方必须持有 s.mu 写锁。
+func (s *appStore) ensureCatalogLocked() error {
+	if !s.catalogLoaded {
+		if repository, err := SharedRepository(); err == nil {
+			var payload []byte
+			if err := repository.QueryRow(`SELECT payload FROM app_catalog_cache WHERE id=1`).Scan(&payload); err == nil {
+				var cache appCatalogCache
+				if err := json.Unmarshal(payload, &cache); err != nil {
+					return fmt.Errorf("解析应用目录缓存失败: %w", err)
+				}
+				s.state.Catalog, s.state.CatalogVersion = cache.Catalog, cache.Version
+				s.state.CatalogLastModified, s.state.CatalogSyncing = cache.LastModified, cache.Syncing
+				s.state.CatalogSyncedAt, s.state.CatalogTags = cache.SyncedAt, cache.Tags
+			}
+		} else if payload, err := os.ReadFile(filepath.Join(filepath.Dir(s.path), "app-catalog.json")); err == nil {
+			var cache appCatalogCache
+			if err := json.Unmarshal(payload, &cache); err != nil {
+				return fmt.Errorf("解析应用目录缓存失败: %w", err)
+			}
+			s.state.Catalog, s.state.CatalogVersion = cache.Catalog, cache.Version
+			s.state.CatalogLastModified, s.state.CatalogSyncing = cache.LastModified, cache.Syncing
+			s.state.CatalogSyncedAt, s.state.CatalogTags = cache.SyncedAt, cache.Tags
+		}
+		s.catalogLoaded = true
+	}
+	s.touchCatalogExpiryLocked()
+	return nil
+}
+
+func (s *appStore) touchCatalogExpiryLocked() {
+	s.catalogEpoch++
+	epoch := s.catalogEpoch
+	if s.catalogExpiry != nil {
+		s.catalogExpiry.Stop()
+	}
+	s.catalogExpiry = time.AfterFunc(runtimeCatalogTTL(), func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.catalogEpoch != epoch {
+			return
+		}
+		s.state.Catalog = nil
+		s.state.CatalogTags = nil
+		s.state.CatalogVersion = ""
+		s.state.CatalogLastModified = 0
+		s.state.CatalogSyncing = false
+		s.state.CatalogSyncedAt = time.Time{}
+		s.catalogLoaded = false
+		s.catalogPath, s.catalogSize, s.catalogModTime = "", 0, time.Time{}
+	})
+}
+
+// saveCatalogLocked 只持久化目录缓存，不触碰已安装应用状态。
+func (s *appStore) saveCatalogLocked() error {
+	s.catalogLoaded = true
+	s.touchCatalogExpiryLocked()
+	cache := appCatalogCache{Catalog: s.state.Catalog, Version: s.state.CatalogVersion, LastModified: s.state.CatalogLastModified, Syncing: s.state.CatalogSyncing, SyncedAt: s.state.CatalogSyncedAt, Tags: s.state.CatalogTags}
+	if sharedDB() != nil {
+		return saveJSONState("app_catalog_cache", cache)
+	}
+	payload, err := json.Marshal(cache)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(filepath.Dir(s.path), "app-catalog.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path+".tmp", payload, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
+
 // appCatalogFromEnv 从受控环境变量加载本地应用目录。
 func appCatalogFromEnv() []appRecord {
 	if file := strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG")); file != "" {
@@ -288,6 +363,9 @@ func normalizeRemoteApps(list remoteAppList) []appRecord {
 
 // refreshRemoteLocked 在持有应用商店锁时刷新远程目录并持久化结果。
 func (s *appStore) refreshRemoteLocked(force bool) error {
+	if err := s.ensureCatalogLocked(); err != nil {
+		return err
+	}
 	if !force && len(s.state.Catalog) > 0 {
 		return nil
 	}
@@ -319,7 +397,7 @@ func (s *appStore) refreshRemoteLocked(force bool) error {
 	}
 	s.state.CatalogSyncing = false
 	s.state.CatalogSyncedAt = time.Now().UTC()
-	return s.saveLocked()
+	return s.saveCatalogLocked()
 }
 
 // loadAppCatalogFile 读取有界应用目录，避免配置文件异常增长导致内存占用失控。
@@ -359,6 +437,9 @@ func loadAppCatalogFile(path string) ([]appRecord, appCatalogDocument, os.FileIn
 // refreshCatalogLocked 在目录文件发生变化时刷新缓存，并记录同步元数据。
 // 调用方必须持有 s.mu 写锁；没有配置目录时保留已持久化的 catalog。
 func (s *appStore) refreshCatalogLocked() (bool, error) {
+	if err := s.ensureCatalogLocked(); err != nil {
+		return false, err
+	}
 	path := strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG"))
 	if path == "" {
 		if len(s.state.Catalog) == 0 && len(s.state.Apps) > 0 {
@@ -387,6 +468,9 @@ func (s *appStore) refreshCatalogLocked() (bool, error) {
 	s.state.CatalogSyncing = doc.IsSyncing
 	s.state.CatalogSyncedAt = time.Now().UTC()
 	s.catalogPath, s.catalogSize, s.catalogModTime = path, info.Size(), info.ModTime()
+	if err := s.saveCatalogLocked(); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 

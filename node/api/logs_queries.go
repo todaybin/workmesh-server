@@ -6,7 +6,6 @@ package api
 import (
 	"database/sql"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -157,9 +156,8 @@ func filterTaskLogs(items []taskLogRecord, values map[string]any) []taskLogRecor
 	return filtered
 }
 
-// searchTaskLogs 输出任务分页列表，并在未初始化 SQLite 的单元测试环境回退到内存任务快照。
-func searchTaskLogs(w http.ResponseWriter, values map[string]any, store *domainStore) {
-	var items []taskLogRecord
+// searchTaskLogs 输出 SQLite 中的任务分页列表；任务表是唯一事实来源。
+func searchTaskLogs(w http.ResponseWriter, values map[string]any, _ *domainStore) {
 	if db := sharedDB(); db != nil {
 		page, err := queryTaskLogPage(db, values)
 		if err != nil {
@@ -168,21 +166,15 @@ func searchTaskLogs(w http.ResponseWriter, values map[string]any, store *domainS
 		}
 		success(w, map[string]any{"items": redactTaskLogRecords(page.Items), "total": page.Total, "page": page.Page, "pageSize": page.Size})
 		return
-	} else if store != nil {
-		store.mu.RLock()
-		for _, item := range store.state.Logs {
-			if !strings.EqualFold(item.Type, "task") {
-				continue
-			}
-			logPath := valueString(item.Meta, "path", "logFile")
-			items = append(items, taskLogRecord{ID: item.ID, Name: item.Message, Type: valueString(item.Meta, "scope"), LogFile: logPath, Status: item.Level, CreatedAt: item.CreatedAt})
-		}
-		store.mu.RUnlock()
 	}
-	items = filterTaskLogs(items, values)
-	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
-	pageItems, total, page, size := paginateLogItems(items, values)
-	success(w, map[string]any{"items": redactTaskLogRecords(pageItems), "total": total, "page": page, "pageSize": size})
+	page, size := intValue(values, "page"), intValue(values, "pageSize")
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 || size > 500 {
+		size = 50
+	}
+	success(w, map[string]any{"items": []taskLogRecord{}, "total": 0, "page": page, "pageSize": size})
 }
 
 // normalizeLogItems applies the shared text/status/date filters used by login and operation logs。

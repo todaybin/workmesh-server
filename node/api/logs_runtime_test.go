@@ -26,7 +26,6 @@ func TestSystemLogEndpointsCollectAndRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	store := getDomainStore()
 	registerBackupAlertLogSettingsRoutes(mux)
 	files := httptest.NewRecorder()
 	mux.ServeHTTP(files, httptest.NewRequest(http.MethodGet, "/api/v2/logs/system/files", nil))
@@ -100,22 +99,19 @@ func TestSystemLogEndpointsCollectAndRead(t *testing.T) {
 		t.Fatalf("forbidden status=%d body=%s", forbidden.Code, forbidden.Body.String())
 	}
 
-	store.mu.Lock()
-	store.state.Logs = []logItem{{ID: "task-1", Type: "task", Level: "executing", Message: "running", Meta: map[string]any{"path": logPath}}}
-	store.mu.Unlock()
 	taskRead := httptest.NewRecorder()
-	mux.ServeHTTP(taskRead, httptest.NewRequest(http.MethodPost, "/api/v2/logs/tasks/read", bytes.NewBufferString(`{"id":"task-1","page":2,"pageSize":1}`)))
+	mux.ServeHTTP(taskRead, httptest.NewRequest(http.MethodPost, "/api/v2/logs/tasks/read", bytes.NewBufferString(`{"path":"`+logPath+`","page":2,"pageSize":1}`)))
 	if taskRead.Code != http.StatusOK || !strings.Contains(taskRead.Body.String(), "line two") {
 		t.Fatalf("task read status=%d body=%s", taskRead.Code, taskRead.Body.String())
 	}
 	latestRead := httptest.NewRecorder()
-	mux.ServeHTTP(latestRead, httptest.NewRequest(http.MethodGet, "/api/v2/logs/tasks/read?id=task-1&page=1&pageSize=1&latest=true&operateNode=primary-main", nil))
+	mux.ServeHTTP(latestRead, httptest.NewRequest(http.MethodGet, "/api/v2/logs/tasks/read?path="+logPath+"&page=1&pageSize=1&latest=true&operateNode=primary-main", nil))
 	if latestRead.Code != http.StatusOK || !strings.Contains(latestRead.Body.String(), "line three") {
 		t.Fatalf("latest task read status=%d body=%s", latestRead.Code, latestRead.Body.String())
 	}
 	count := httptest.NewRecorder()
 	mux.ServeHTTP(count, httptest.NewRequest(http.MethodGet, "/api/v2/logs/tasks/executing/count", nil))
-	if count.Code != http.StatusOK || !strings.Contains(count.Body.String(), `"data":1`) {
+	if count.Code != http.StatusOK || !strings.Contains(count.Body.String(), `"data":0`) {
 		t.Fatalf("task count status=%d body=%s", count.Code, count.Body.String())
 	}
 }
@@ -144,14 +140,11 @@ func TestTaskLogFileFallbackUsesBoundedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := getDomainStore()
-	store.mu.Lock()
-	store.state.Logs = []logItem{{ID: "bounded-task", Type: "task", Level: "executing", Meta: map[string]any{"path": logPath}}}
-	store.mu.Unlock()
 	mux := http.NewServeMux()
 	registerLogRoutes(mux, store)
 
 	read := httptest.NewRecorder()
-	mux.ServeHTTP(read, httptest.NewRequest(http.MethodPost, "/api/v2/logs/tasks/read", bytes.NewBufferString(`{"id":"bounded-task","page":2,"pageSize":1}`)))
+	mux.ServeHTTP(read, httptest.NewRequest(http.MethodPost, "/api/v2/logs/tasks/read", bytes.NewBufferString(`{"path":"`+logPath+`","page":2,"pageSize":1}`)))
 	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"second"`) {
 		t.Fatalf("bounded task log read status=%d body=%s", read.Code, read.Body.String())
 	}

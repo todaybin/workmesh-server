@@ -52,6 +52,7 @@ func handleAppInstall(w http.ResponseWriter, s *appStore, r *http.Request, body 
 	} else {
 		var completeErr error
 		item, completeErr = completeRegisteredAppInstall(s, item)
+		releaseManagedSlot(managedRuntimeSlots.tasks, taskID)
 		if completeErr != nil {
 			runtimeErr(w, http.StatusServiceUnavailable, "应用安装状态存储不可用: "+completeErr.Error())
 			return
@@ -84,9 +85,10 @@ func fillAppInstallCatalogDetail(s *appStore, item *appRecord, body map[string]a
 	if detailID == "" {
 		return
 	}
-	s.mu.RLock()
+	s.mu.Lock()
+	_ = s.ensureCatalogLocked()
 	catalogApp, catalogVersion, ok := findCatalogDetail(s.state.Catalog, detailID)
-	s.mu.RUnlock()
+	s.mu.Unlock()
 	if !ok {
 		return
 	}
@@ -122,7 +124,8 @@ func resolveAppInstallSource(s *appStore, item appRecord, body map[string]any) (
 	downloadURL := appValue(body, "downloadUrl", "downloadURL")
 	compose := appValue(body, "dockerCompose", "compose")
 	if downloadURL == "" {
-		s.mu.RLock()
+		s.mu.Lock()
+		_ = s.ensureCatalogLocked()
 		if catalogIndex, catalogItem := findApp(s.state.Catalog, item.Key); catalogIndex >= 0 {
 			for _, version := range catalogItem.Versions {
 				if item.Version == "" || version.Version == item.Version {
@@ -131,7 +134,7 @@ func resolveAppInstallSource(s *appStore, item appRecord, body map[string]any) (
 				}
 			}
 		}
-		s.mu.RUnlock()
+		s.mu.Unlock()
 	}
 	if compose == "" {
 		compose = appValue(body, "docker-compose", "composeContent")

@@ -24,6 +24,7 @@ import (
 
 func runAppInstallTask(store *appStore, item appRecord, downloadURL, compose string) {
 	taskID := appValue(item.Config, "taskID", "taskId")
+	defer releaseManagedSlot(managedRuntimeSlots.tasks, taskID)
 	update := func(status, message string) error {
 		store.mu.Lock()
 		var saveErr error

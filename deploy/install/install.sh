@@ -10,6 +10,7 @@ readonly REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 readonly ROOT_DIR="${WORKMESH_SERVER_ROOT:-/opt/workmesh-server}"
 readonly UNIT_NAME="workmesh-server.service"
 readonly UNIT_SOURCE="$SCRIPT_DIR/../systemd/$UNIT_NAME"
+readonly RESOURCE_DROPIN_SOURCE="$SCRIPT_DIR/../systemd/workmesh-server-resources.conf"
 readonly UPDATE_UNIT_NAME="workmesh-server-update.service"
 readonly UPDATE_UNIT_SOURCE="$SCRIPT_DIR/../systemd/$UPDATE_UNIT_NAME"
 readonly UPDATE_TIMER_NAME="workmesh-server-update.timer"
@@ -87,6 +88,7 @@ validate_root
 command -v systemctl >/dev/null 2>&1 || fail '当前系统未提供 systemctl'
 [[ -x "${WORKMESH_SERVER_BINARY:-}" ]] || log '未指定 WORKMESH_SERVER_BINARY，安装阶段只执行环境预检。'
 [[ -f "$UNIT_SOURCE" ]] || fail "缺少 systemd 模板：$UNIT_SOURCE"
+[[ -f "$RESOURCE_DROPIN_SOURCE" ]] || fail "缺少 systemd 资源限制：$RESOURCE_DROPIN_SOURCE"
 [[ -f "$UPDATE_UNIT_SOURCE" ]] || fail "缺少自动更新 systemd 模板：$UPDATE_UNIT_SOURCE"
 [[ -f "$UPDATE_TIMER_SOURCE" ]] || fail "缺少自动更新 timer 模板：$UPDATE_TIMER_SOURCE"
 [[ -x "$SCRIPT_DIR/activate-release.sh" ]] || fail "缺少发布切换脚本：$SCRIPT_DIR/activate-release.sh"
@@ -110,6 +112,8 @@ install -m 0750 "$SCRIPT_DIR/auto-update.sh" "$ROOT_DIR/bin/workmesh-auto-update
 install_default_config
 install_update_config
 install_rendered_unit "$UNIT_SOURCE" "/etc/systemd/system/$UNIT_NAME"
+install -d -m 0755 "/etc/systemd/system/$UNIT_NAME.d"
+install -m 0644 "$RESOURCE_DROPIN_SOURCE" "/etc/systemd/system/$UNIT_NAME.d/20-resources.conf"
 install_rendered_unit "$UPDATE_UNIT_SOURCE" "/etc/systemd/system/$UPDATE_UNIT_NAME"
 install -m 0644 "$UPDATE_TIMER_SOURCE" "/etc/systemd/system/$UPDATE_TIMER_NAME"
 systemctl daemon-reload

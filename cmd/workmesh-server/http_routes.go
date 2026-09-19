@@ -274,6 +274,15 @@ func registerHealthRoutes(mux *http.ServeMux, readiness *readinessState) {
 
 // registerNodeRoutes 注册节点执行面，并挂载本地鉴权和主次节点透传。
 func registerNodeRoutes(mux *http.ServeMux, cfg config.Config) {
+	if cfg.Limits.MaxConcurrentTasks > 0 {
+		if err := nodeapi.SetRuntimeLimits(nodeapi.RuntimeLimits{
+			MaxConcurrentTasks: cfg.Limits.MaxConcurrentTasks, MaxConcurrentConversions: cfg.Limits.MaxConcurrentConversions,
+			MaxSSEStreams: cfg.Limits.MaxSSEStreams, MaxAIJobs: cfg.Limits.MaxAIJobs,
+			MaxLogBytes: cfg.Limits.MaxLogBytes, CacheTTL: cfg.Limits.CacheTTL,
+		}); err != nil {
+			panic(err)
+		}
+	}
 	nodeMux := http.NewServeMux()
 	nodeapi.Register(nodeMux)
 	securedNodeMux := authenticateNodeAPI(nodeMux)

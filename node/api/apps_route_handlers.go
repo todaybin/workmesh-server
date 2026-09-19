@@ -46,6 +46,8 @@ func (h appRouteHandlers) listInstalled(w http.ResponseWriter, r *http.Request) 
 	if syncRequested, _ := body["sync"].(bool); syncRequested {
 		h.syncInstalledStatuses(r)
 	}
+	// 已安装应用本身不依赖商店可用性；目录刷新失败时仍返回真实安装状态。
+	_ = h.refreshCatalogForSearch("installed")
 	h.store.mu.RLock()
 	catalog := append([]appRecord(nil), h.store.state.Catalog...)
 	items := make([]map[string]any, 0, len(h.store.state.Apps))
@@ -123,11 +125,15 @@ func (h appRouteHandlers) searchCatalog(w http.ResponseWriter, r *http.Request) 
 
 // refreshCatalogForSearch 按本地或远程同步路由刷新应用目录。
 func (h appRouteHandlers) refreshCatalogForSearch(path string) error {
-	if strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG")) != "" || path == "sync/local" {
-		return nil
-	}
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
+	if err := h.store.ensureCatalogLocked(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG")) != "" || path == "sync/local" {
+		_, err := h.store.refreshCatalogLocked()
+		return err
+	}
 	err := h.store.refreshRemoteLocked(path == "sync/remote")
 	if err != nil && len(h.store.state.Catalog) == 0 {
 		return err
@@ -155,7 +161,6 @@ func (h appRouteHandlers) searchCatalogLocked(body map[string]any, locale string
 	total := len(filtered)
 	start, end := appCatalogPageBounds(total, page, pageSize)
 	items := h.catalogSearchItems(filtered[start:end], locale)
-	_ = h.store.saveLocked()
 	return map[string]any{"items": items, "total": total, "page": page, "pageSize": pageSize}, nil
 }
 
@@ -310,19 +315,17 @@ func (h appRouteHandlers) checkUpdate(w http.ResponseWriter, _ *http.Request) {
 func (h appRouteHandlers) loadUpdateSnapshot() (appCatalogUpdateSnapshot, int, error) {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
+	if err := h.store.ensureCatalogLocked(); err != nil {
+		return appCatalogUpdateSnapshot{}, http.StatusInternalServerError, err
+	}
 	if len(h.store.state.Catalog) == 0 && strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG")) == "" {
 		if err := h.store.refreshRemoteLocked(false); err != nil {
 			return appCatalogUpdateSnapshot{}, http.StatusBadGateway, fmt.Errorf("应用商店不可用: %w", err)
 		}
 	}
-	changed, err := h.store.refreshCatalogLocked()
+	_, err := h.store.refreshCatalogLocked()
 	if err != nil {
 		return appCatalogUpdateSnapshot{}, http.StatusBadGateway, err
-	}
-	if changed {
-		if err := h.store.saveLocked(); err != nil {
-			return appCatalogUpdateSnapshot{}, http.StatusInternalServerError, fmt.Errorf("保存应用目录元数据失败: %w", err)
-		}
 	}
 	return appCatalogUpdateSnapshot{
 		catalog: append([]appRecord(nil), h.store.state.Catalog...), installed: append([]appRecord(nil), h.store.state.Apps...),
@@ -351,6 +354,11 @@ func appCatalogUpdates(installed, catalog []appRecord) []map[string]any {
 // listTags 返回当前应用目录中实际存在的本地化标签。
 func (h appRouteHandlers) listTags(w http.ResponseWriter, r *http.Request) {
 	h.store.mu.Lock()
+	if err := h.store.ensureCatalogLocked(); err != nil {
+		h.store.mu.Unlock()
+		runtimeErr(w, 500, err.Error())
+		return
+	}
 	if len(h.store.state.Catalog) == 0 && strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG")) == "" {
 		_ = h.store.refreshRemoteLocked(false)
 	}

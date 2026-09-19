@@ -8,8 +8,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"runtime/pprof"
+	"strconv"
 	"strings"
 	"time"
 
@@ -163,8 +166,68 @@ func writeHostDiagnostics(w http.ResponseWriter, base map[string]any) {
 	runtime.ReadMemStats(&mem)
 	base["heapAlloc"] = mem.HeapAlloc
 	base["heapInuse"] = mem.HeapInuse
+	base["heapSys"] = mem.HeapSys
+	base["heapReleased"] = mem.HeapReleased
+	base["sys"] = mem.Sys
+	base["nextGC"] = mem.NextGC
 	base["numGC"] = mem.NumGC
+	base["goMemoryLimit"] = debug.SetMemoryLimit(-1)
+	if rss, pss, err := processMemoryBytes(); err == nil {
+		base["rss"] = rss
+		base["pss"] = pss
+	}
+	for field, path := range processCgroupMemoryPaths() {
+		if value, err := os.ReadFile(path); err == nil {
+			base[field] = strings.TrimSpace(string(value))
+		}
+	}
 	writeHostJSON(w, http.StatusOK, map[string]any{"code": 200, "data": base})
+}
+
+func processMemoryBytes() (uint64, uint64, error) {
+	payload, err := os.ReadFile("/proc/self/smaps_rollup")
+	if err != nil {
+		return 0, 0, err
+	}
+	var rss, pss uint64
+	for _, line := range strings.Split(string(payload), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		value, parseErr := strconv.ParseUint(fields[1], 10, 64)
+		if parseErr != nil {
+			continue
+		}
+		switch fields[0] {
+		case "Rss:":
+			rss = value << 10
+		case "Pss:":
+			pss = value << 10
+		}
+	}
+	return rss, pss, nil
+}
+
+func processCgroupMemoryPaths() map[string]string {
+	root := "/sys/fs/cgroup"
+	if payload, err := os.ReadFile("/proc/self/cgroup"); err == nil {
+		for _, line := range strings.Split(string(payload), "\n") {
+			parts := strings.SplitN(line, ":", 3)
+			if len(parts) == 3 && parts[0] == "0" && parts[1] == "" {
+				candidate := filepath.Join(root, strings.TrimPrefix(filepath.Clean(parts[2]), string(filepath.Separator)))
+				if rel, relErr := filepath.Rel(root, candidate); relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					root = candidate
+				}
+				break
+			}
+		}
+	}
+	return map[string]string{
+		"cgroupMemoryCurrent": filepath.Join(root, "memory.current"),
+		"cgroupMemoryHigh":    filepath.Join(root, "memory.high"),
+		"cgroupMemoryMax":     filepath.Join(root, "memory.max"),
+	}
 }
 
 // writeHostJSON 输出统一主机接口响应。

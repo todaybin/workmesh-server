@@ -129,14 +129,23 @@ type appCatalogDocument struct {
 
 type appStoreState struct {
 	Apps                []appRecord      `json:"apps"`
-	Catalog             []appRecord      `json:"catalog"`
+	Catalog             []appRecord      `json:"-"`
 	Ignored             []map[string]any `json:"ignored"`
 	StoreConfig         map[string]any   `json:"storeConfig"`
-	CatalogVersion      string           `json:"catalogVersion,omitempty"`
-	CatalogLastModified int64            `json:"catalogLastModified,omitempty"`
-	CatalogSyncing      bool             `json:"catalogSyncing,omitempty"`
-	CatalogSyncedAt     time.Time        `json:"catalogSyncedAt,omitempty"`
-	CatalogTags         []appTagRecord   `json:"catalogTags,omitempty"`
+	CatalogVersion      string           `json:"-"`
+	CatalogLastModified int64            `json:"-"`
+	CatalogSyncing      bool             `json:"-"`
+	CatalogSyncedAt     time.Time        `json:"-"`
+	CatalogTags         []appTagRecord   `json:"-"`
+}
+
+type appCatalogCache struct {
+	Catalog      []appRecord    `json:"catalog"`
+	Version      string         `json:"version,omitempty"`
+	LastModified int64          `json:"lastModified,omitempty"`
+	Syncing      bool           `json:"syncing,omitempty"`
+	SyncedAt     time.Time      `json:"syncedAt,omitempty"`
+	Tags         []appTagRecord `json:"tags,omitempty"`
 }
 
 type appTagRecord struct {
@@ -153,6 +162,9 @@ type appStore struct {
 	catalogPath     string
 	catalogModTime  time.Time
 	catalogSize     int64
+	catalogLoaded   bool
+	catalogExpiry   *time.Timer
+	catalogEpoch    uint64
 	containerStates func(context.Context, []string) (map[string]string, error)
 }
 
@@ -183,9 +195,6 @@ func getAppStore() *appStore {
 	}
 	if state.StoreConfig == nil {
 		state.StoreConfig = map[string]any{}
-	}
-	if state.Catalog == nil {
-		state.Catalog = append([]appRecord(nil), state.Apps...)
 	}
 	if state.Ignored == nil {
 		state.Ignored = make([]map[string]any, 0)

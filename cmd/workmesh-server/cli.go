@@ -46,6 +46,8 @@ func runCLI(args []string, cfgDataDir string) (bool, error) {
 		return true, handleCLIUpdate(normalized, cfgDataDir)
 	case "restore":
 		return true, handleCLIArtifact(normalized[0], normalized[1:], cfgDataDir)
+	case "maintenance":
+		return true, handleCLIMaintenance(normalized[1:], cfgDataDir)
 	default:
 		fmt.Printf("未知命令: %s\n\n", normalized[0])
 		printCLIHelp()

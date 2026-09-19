@@ -19,6 +19,7 @@ func printCLIHelp() {
 	fmt.Println("  completion  Generate the autocompletion script for the specified shell")
 	fmt.Println("  help        Help about any command")
 	fmt.Println("  listen-ip   ")
+	fmt.Println("  maintenance Destructive offline maintenance")
 	fmt.Println("  reset       ")
 	fmt.Println("  restore     ")
 	fmt.Println("  update      ")
@@ -81,6 +82,8 @@ func printCommandHelp(path []string) {
 		} else {
 			printLeafHelp(strings.Join(path, " "), "初始化应用")
 		}
+	case "maintenance":
+		fmt.Println("清理历史运行数据\n\nUsage:\n  wh maintenance reset-history --confirm-delete-history")
 	default:
 		printCLIHelp()
 	}

@@ -33,7 +33,6 @@ type domainState struct {
 	// BackupAccounts 是备份账号配置；账号和记录必须分离，避免账号列表混入任务记录。
 	BackupAccounts []backupAccount   `json:"backupAccounts,omitempty"`
 	Alerts         []alertItem       `json:"alerts"`
-	Logs           []logItem         `json:"logs"`
 	Settings       map[string]any    `json:"settings"`
 	Snapshots      []settingSnapshot `json:"snapshots"`
 }
@@ -311,7 +310,7 @@ var functionalStoreMu sync.Mutex
 var functionalStoreInstance *domainStore
 
 // getDomainStore 在全局锁内按数据目录复用仓库，优先恢复 SQLite，再尝试旧文件导入。
-// 最多合并最近 1000 条操作日志；旧文件仅在导入保存成功后尝试归档。
+// 日志始终由独立 SQLite 表提供，避免把无界历史记录保留在功能域快照中。
 func getDomainStore() *domainStore {
 	dataDir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
 	if dataDir == "" {
@@ -324,32 +323,6 @@ func getDomainStore() *domainStore {
 		return functionalStoreInstance
 	}
 	s := &domainStore{path: path, state: domainState{Settings: map[string]any{"language": "zh", "theme": "system"}}}
-	var persistedOperationLogs []logItem
-	if repository, repositoryErr := SharedRepository(); repositoryErr == nil {
-		if rows, queryErr := repository.Query(`SELECT id,source,user,ip,node,path,method,user_agent,latency,status,message,detail_zh,detail_en,created_at FROM operation_logs ORDER BY id DESC LIMIT 1000`); queryErr == nil {
-			for rows.Next() {
-				var id int64
-				var source, user, ip, node, path, method, userAgent, status, message, detailZH, detailEN, created string
-				var latency int64
-				if rows.Scan(&id, &source, &user, &ip, &node, &path, &method, &userAgent, &latency, &status, &message, &detailZH, &detailEN, &created) == nil {
-					t, _ := time.Parse(time.RFC3339Nano, created)
-					path = normalizeOperationPath(path)
-					method = strings.ToLower(strings.TrimSpace(method))
-					if source == "" || strings.EqualFold(source, "server") {
-						source = operationSource(path)
-					}
-					ip = operationClientIP(ip)
-					if node == "" {
-						node = "local"
-					}
-					status = operationStatus(status)
-					detailZH, detailEN = operationDetails(method, path, detailZH, detailEN)
-					persistedOperationLogs = append(persistedOperationLogs, logItem{ID: strconv.FormatInt(id, 10), Type: "operation", Level: status, Status: status, Source: source, User: user, IP: ip, Node: node, Path: path, Method: method, UserAgent: userAgent, Latency: latency, Message: message, DetailZH: detailZH, DetailEN: detailEN, Meta: map[string]any{"method": method, "path": path}, CreatedAt: t})
-				}
-			}
-			rows.Close()
-		}
-	}
 	if db := sharedDB(); db != nil {
 		if !loadJSONState("functional_domain_state", &s.state) {
 			if content, err := os.ReadFile(path); err == nil && len(content) > 0 && json.Unmarshal(content, &s.state) == nil {
@@ -366,9 +339,6 @@ func getDomainStore() *domainStore {
 		if s.state.Settings == nil {
 			s.state.Settings = map[string]any{}
 		}
-	}
-	if len(persistedOperationLogs) > 0 {
-		s.state.Logs = append(persistedOperationLogs, s.state.Logs...)
 	}
 	functionalStoreInstance = s
 	return functionalStoreInstance

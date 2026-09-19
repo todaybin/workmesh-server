@@ -187,11 +187,22 @@ func operateSandboxTask(w http.ResponseWriter, r *http.Request, provider taskPro
 	defer cancel()
 	switch path {
 	case "start":
+		acquired, ok := acquireManagedSlot(managedRuntimeSlots.aiJobs, id, nodeRuntimeLimits.aiJobs)
+		if !ok {
+			aiError(w, http.StatusTooManyRequests, "AI_JOB_LIMIT_REACHED", "AI 任务并发数已达到上限")
+			return
+		}
 		if err := provider.Start(ctx, id); err != nil {
+			if acquired {
+				releaseManagedSlot(managedRuntimeSlots.aiJobs, id)
+			}
 			taskError(w, "TASK_START_FAILED", err)
 			return
 		}
 		if err := updatePersistedTask(id, "running"); err != nil {
+			if cancelErr := provider.Cancel(ctx, id); cancelErr == nil {
+				releaseManagedSlot(managedRuntimeSlots.aiJobs, id)
+			}
 			aiError(w, http.StatusInternalServerError, "TASK_STATE_SAVE_FAILED", err.Error())
 			return
 		}
@@ -209,30 +220,36 @@ func operateSandboxTask(w http.ResponseWriter, r *http.Request, provider taskPro
 			taskError(w, "TASK_COLLECT_FAILED", err)
 			return
 		}
+		releaseManagedSlot(managedRuntimeSlots.aiJobs, id)
 		if err := updatePersistedTask(id, "completed"); err != nil {
 			aiError(w, http.StatusInternalServerError, "TASK_STATE_SAVE_FAILED", err.Error())
 			return
 		}
+		releaseManagedSlot(managedRuntimeSlots.aiJobs, id)
 		aiOK(w, result)
 	case "cancel":
 		if err := provider.Cancel(ctx, id); err != nil {
 			taskError(w, "TASK_CANCEL_FAILED", err)
 			return
 		}
+		releaseManagedSlot(managedRuntimeSlots.aiJobs, id)
 		if err := updatePersistedTask(id, "cancelled"); err != nil {
 			aiError(w, http.StatusInternalServerError, "TASK_STATE_SAVE_FAILED", err.Error())
 			return
 		}
+		releaseManagedSlot(managedRuntimeSlots.aiJobs, id)
 		aiOK(w, map[string]string{"taskId": id})
 	case "destroy":
 		if err := provider.Destroy(ctx, id); err != nil {
 			taskError(w, "TASK_DESTROY_FAILED", err)
 			return
 		}
+		releaseManagedSlot(managedRuntimeSlots.aiJobs, id)
 		if err := updatePersistedTask(id, "destroyed"); err != nil {
 			aiError(w, http.StatusInternalServerError, "TASK_STATE_SAVE_FAILED", err.Error())
 			return
 		}
+		releaseManagedSlot(managedRuntimeSlots.aiJobs, id)
 		aiOK(w, map[string]string{"taskId": id})
 	default:
 		aiError(w, http.StatusNotFound, "TASK_OPERATION_NOT_FOUND", "未知任务操作: "+path)

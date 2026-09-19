@@ -4,8 +4,10 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/todaybin/workmesh-server/internal/logsource"
 	"github.com/todaybin/workmesh-server/internal/storage"
 )
 
@@ -63,13 +64,14 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 			success(w, map[string]any{"items": redactLogItems(page.Items), "total": page.Total, "page": page.Page, "pageSize": page.Size})
 			return
 		}
-		s.mu.RLock()
-		items := append([]logItem(nil), s.state.Logs...)
-		s.mu.RUnlock()
-		items = normalizeLogItems(items, v)
-		sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
-		pageItems, total, page, size := paginateLogItems(items, v)
-		success(w, map[string]any{"items": redactLogItems(pageItems), "total": total, "page": page, "pageSize": size})
+		page, size := intValue(v, "page"), intValue(v, "pageSize")
+		if page < 1 {
+			page = 1
+		}
+		if size < 1 || size > 500 {
+			size = 50
+		}
+		success(w, map[string]any{"items": []logItem{}, "total": 0, "page": page, "pageSize": size})
 	}
 	for _, path := range []string{"/api/v2/logs/search", "/api/v2/log/search", "/api/v2/logs/tasks/search", "/api/v2/core/logs/login", "/api/v2/core/logs/operation"} {
 		mux.HandleFunc("POST "+path, search)
@@ -82,14 +84,6 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 				domainError(w, http.StatusInternalServerError, "LOG_QUERY", err.Error())
 				return
 			} else if found {
-				success(w, redactLogItem(item))
-				return
-			}
-		}
-		s.mu.RLock()
-		defer s.mu.RUnlock()
-		for _, item := range s.state.Logs {
-			if item.ID == id {
 				success(w, redactLogItem(item))
 				return
 			}
@@ -108,28 +102,6 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 				domainError(w, http.StatusBadRequest, "INVALID_LOG_TYPE", "仅支持清理 login 或 operation 日志")
 				return
 			}
-			s.mu.Lock()
-			previous := append([]logItem(nil), s.state.Logs...)
-			if logType == "" {
-				s.state.Logs = nil
-			} else {
-				kept := s.state.Logs[:0]
-				for _, item := range s.state.Logs {
-					if !strings.EqualFold(item.Type, logType) {
-						kept = append(kept, item)
-					}
-				}
-				s.state.Logs = kept
-			}
-			// Persist the in-memory snapshot before opening the log-table
-			// transaction; both use the shared SQLite connection.
-			if err := s.saveLocked(); err != nil {
-				s.state.Logs = previous
-				_ = s.saveLocked()
-				s.mu.Unlock()
-				domainError(w, http.StatusInternalServerError, "LOG_CLEAR", err.Error())
-				return
-			}
 			if repo, ok := sharedLogStorage(); ok {
 				clearErr := repo.WithTx(r.Context(), func(tx storage.SQLExecutor) error {
 					if logType == "" {
@@ -143,14 +115,10 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 					return err
 				})
 				if clearErr != nil {
-					s.state.Logs = previous
-					_ = s.saveLocked()
-					s.mu.Unlock()
 					domainError(w, http.StatusInternalServerError, "LOG_CLEAR", clearErr.Error())
 					return
 				}
 			}
-			s.mu.Unlock()
 			success(w, nil)
 		})
 	}
@@ -163,10 +131,7 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 				return
 			}
 		}
-		s.mu.RLock()
-		count := len(s.state.Logs)
-		s.mu.RUnlock()
-		success(w, map[string]any{"total": count})
+		success(w, map[string]any{"total": 0})
 	})
 	mux.HandleFunc("POST /api/v2/logs/system/read", func(w http.ResponseWriter, r *http.Request) { readLogFile(w, r) })
 	mux.HandleFunc("POST /api/v2/logs/tasks/read", func(w http.ResponseWriter, r *http.Request) { readTaskLog(w, r, s) })
@@ -184,15 +149,7 @@ func registerLogRoutes(mux *http.ServeMux, s *domainStore) {
 				return
 			}
 		}
-		s.mu.RLock()
-		count := 0
-		for _, item := range s.state.Logs {
-			if strings.EqualFold(item.Type, "task") && (strings.EqualFold(item.Level, "running") || strings.EqualFold(item.Level, "executing")) {
-				count++
-			}
-		}
-		s.mu.RUnlock()
-		success(w, count)
+		success(w, 0)
 	})
 }
 
@@ -402,14 +359,6 @@ func readTaskLog(w http.ResponseWriter, r *http.Request, s *domainStore) {
 		}
 	}
 	taskStatus := ""
-	s.mu.RLock()
-	for _, item := range s.state.Logs {
-		if id != "" && item.ID == id && path == "" && item.Meta != nil {
-			path = valueString(item.Meta, "path", "logFile")
-			taskStatus = item.Level
-		}
-	}
-	s.mu.RUnlock()
 	if path == "" && id != "" {
 		candidate := appTaskLogPath(id)
 		if info, statErr := os.Stat(candidate); statErr == nil && info.Mode().IsRegular() {
@@ -430,26 +379,6 @@ func readTaskLog(w http.ResponseWriter, r *http.Request, s *domainStore) {
 		domainError(w, 403, "PATH_FORBIDDEN", "日志路径不在允许目录内")
 		return
 	}
-	readResult, err := (logsource.FileSource{}).Read(r.Context(), logsource.Request{
-		Paths: []string{path}, MaxBytesPerFile: 64 << 20, MaxLines: 100000, FirstAvailable: true,
-	})
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			domainError(w, http.StatusRequestTimeout, "LOG_READ", err.Error())
-			return
-		}
-		domainError(w, http.StatusInternalServerError, "LOG_READ", err.Error())
-		return
-	}
-	if len(readResult.UsedPaths) == 0 {
-		domainError(w, 404, "LOG_NOT_FOUND", "日志文件不存在")
-		return
-	}
-	lines := make([]string, 0, len(readResult.Lines))
-	for _, line := range readResult.Lines {
-		lines = append(lines, line.Text)
-	}
-	lines = redactTaskLogLines(lines)
 	page, size := intValue(v, "page"), intValue(v, "pageSize")
 	if page < 1 {
 		page = 1
@@ -457,18 +386,57 @@ func readTaskLog(w http.ResponseWriter, r *http.Request, s *domainStore) {
 	if size < 1 || size > 500 {
 		size = 100
 	}
-	if boolValue(v, "latest") && len(lines) > 0 {
-		page = (len(lines) + size - 1) / size
+	lines, totalLines, err := readTaskLogPage(r.Context(), path, page, size, boolValue(v, "latest"), runtimeMaxLogBytes())
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			domainError(w, http.StatusRequestTimeout, "LOG_READ", err.Error())
+			return
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			domainError(w, http.StatusNotFound, "LOG_NOT_FOUND", "日志文件不存在")
+			return
+		}
+		domainError(w, http.StatusInternalServerError, "LOG_READ", err.Error())
+		return
 	}
-	start := (page - 1) * size
-	if start > len(lines) {
-		start = len(lines)
+	lines = redactTaskLogLines(lines)
+	if boolValue(v, "latest") && totalLines > 0 {
+		page = (totalLines + size - 1) / size
 	}
-	end := start + size
-	if end > len(lines) {
-		end = len(lines)
+	success(w, map[string]any{"path": path, "lines": lines, "totalLines": totalLines, "total": (totalLines + size - 1) / size, "end": page*size >= totalLines, "scope": "page", "taskStatus": taskStatus})
+}
+
+func readTaskLogPage(ctx context.Context, path string, page, size int, latest bool, maxBytes int64) ([]string, int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
 	}
-	success(w, map[string]any{"path": path, "lines": lines[start:end], "totalLines": len(lines), "total": (len(lines) + size - 1) / size, "end": end >= len(lines), "scope": "page", "taskStatus": taskStatus})
+	defer file.Close()
+	reader := bufio.NewScanner(&io.LimitedReader{R: file, N: maxBytes})
+	reader.Buffer(make([]byte, 4096), 1<<20)
+	lines := make([]string, 0, size)
+	total := 0
+	start, end := (page-1)*size, page*size
+	for reader.Scan() {
+		if err := ctx.Err(); err != nil {
+			return nil, total, err
+		}
+		if latest {
+			if len(lines) < size {
+				lines = append(lines, reader.Text())
+			} else {
+				copy(lines, lines[1:])
+				lines[len(lines)-1] = reader.Text()
+			}
+		} else if total >= start && total < end {
+			lines = append(lines, reader.Text())
+		}
+		total++
+	}
+	if err := reader.Err(); err != nil {
+		return nil, total, err
+	}
+	return lines, total, nil
 }
 
 // storedTaskLogPath 读取任务表中的日志路径，保证重启后不依赖内存任务快照。

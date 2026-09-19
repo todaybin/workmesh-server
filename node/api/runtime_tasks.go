@@ -221,23 +221,45 @@ func persistRuntimeTaskChecked(item runtimeRecord) error {
 	if item.TaskID == "" {
 		return nil
 	}
-	repository, err := sharedRuntimeRepository()
-	if err != nil {
-		return nil
-	}
 	status := strings.ToLower(strings.TrimSpace(item.TaskStatus))
 	if status == "" {
 		status = "installing"
 	}
+	terminal := isTerminalTaskStatus(status)
+	acquired := false
+	if !terminal {
+		var ok bool
+		acquired, ok = acquireManagedSlot(managedRuntimeSlots.tasks, item.TaskID, nodeRuntimeLimits.tasks)
+		if !ok {
+			return errors.New("并发任务已达到上限")
+		}
+	}
+	repository, err := sharedRuntimeRepository()
+	if err != nil {
+		if acquired {
+			releaseManagedSlot(managedRuntimeSlots.tasks, item.TaskID)
+		}
+		return nil
+	}
 	writer, err := storage.NewSQLiteTaskStateWriter(repository)
 	if err != nil {
+		if acquired {
+			releaseManagedSlot(managedRuntimeSlots.tasks, item.TaskID)
+		}
 		return err
 	}
-	return writer.UpsertRuntime(context.Background(), storage.RuntimeTaskState{
+	err = writer.UpsertRuntime(context.Background(), storage.RuntimeTaskState{
 		ID: item.TaskID, RuntimeID: item.ID, Status: status, Step: status,
 		Progress: appTaskProgress(status), Message: item.Message, Error: item.Error,
 		CreatedAt: item.UpdatedAt, UpdatedAt: item.UpdatedAt,
 	})
+	if err != nil && acquired {
+		releaseManagedSlot(managedRuntimeSlots.tasks, item.TaskID)
+	}
+	if err == nil && terminal {
+		releaseManagedSlot(managedRuntimeSlots.tasks, item.TaskID)
+	}
+	return err
 }
 
 // runtimeDownloadCompose 下载并解压运行时归档，返回待写入的 Compose 内容。

@@ -4,12 +4,15 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/todaybin/workmesh-server/internal/storage"
 )
 
 func registerAlertRoutes(mux *http.ServeMux, s *domainStore) {
@@ -159,22 +162,25 @@ func registerAlertRoutes(mux *http.ServeMux, s *domainStore) {
 		})
 	}
 	mux.HandleFunc("POST /api/v2/alert/logs/search", func(w http.ResponseWriter, _ *http.Request) {
-		s.mu.RLock()
-		items := append([]logItem(nil), s.state.Logs...)
-		s.mu.RUnlock()
-		success(w, map[string]any{"items": items, "total": len(items)})
+		if db, ok := sharedLogStorage(); ok {
+			page, err := queryOperationLogPage(db, map[string]any{"page": 1, "pageSize": 100, "source": "alert"})
+			if err == nil {
+				success(w, map[string]any{"items": redactLogItems(page.Items), "total": page.Total})
+				return
+			}
+		}
+		success(w, map[string]any{"items": []logItem{}, "total": 0})
 	})
 	mux.HandleFunc("POST /api/v2/alert/logs/clean", func(w http.ResponseWriter, _ *http.Request) {
-		s.mu.Lock()
-		previous := cloneDomainState(s.state)
-		s.state.Logs = nil
-		if err := s.saveLocked(); err != nil {
-			s.state = previous
-			s.mu.Unlock()
-			domainError(w, http.StatusInternalServerError, "STATE_SAVE", err.Error())
-			return
+		if repo, ok := sharedLogStorage(); ok {
+			if err := repo.WithTx(context.Background(), func(tx storage.SQLExecutor) error {
+				_, err := tx.ExecContext(context.Background(), `DELETE FROM operation_logs WHERE lower(source)='alert'`)
+				return err
+			}); err != nil {
+				domainError(w, 500, "STATE_SAVE", err.Error())
+				return
+			}
 		}
-		s.mu.Unlock()
 		success(w, nil)
 	})
 }

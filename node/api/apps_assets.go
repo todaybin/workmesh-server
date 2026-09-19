@@ -42,12 +42,13 @@ func handleAppUpdate(w http.ResponseWriter, s *appStore, body map[string]any) {
 
 func appIcon(w http.ResponseWriter, s *appStore, key string) {
 	var source, cacheKey string
-	s.mu.RLock()
+	s.mu.Lock()
+	_ = s.ensureCatalogLocked()
 	_, item := findApp(s.state.Catalog, key)
 	if item.ID == "" {
 		_, item = findApp(s.state.Apps, key)
 	}
-	s.mu.RUnlock()
+	s.mu.Unlock()
 	if item.ID != "" && item.IconURL != "" {
 		source = item.IconURL
 		cacheKey = item.Key

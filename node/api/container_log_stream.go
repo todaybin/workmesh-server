@@ -44,6 +44,12 @@ func handleContainerLogStream(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": nil})
 		return
 	}
+	releaseStream, ok := tryRuntimeSlot(nodeRuntimeLimits.streams)
+	if !ok {
+		wmhttp.JSON(w, http.StatusTooManyRequests, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "SSE_LIMIT_REACHED"}, "message": "日志流并发数已达到上限"})
+		return
+	}
+	defer releaseStream()
 	args, follow, err := containerLogArgs(r)
 	if err != nil {
 		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "CONTAINER_LOG_PARAMETERS_INVALID"}, "message": err.Error()})

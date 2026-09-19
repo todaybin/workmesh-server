@@ -104,6 +104,21 @@ func ensureAppTaskLogChecked(taskID, installID, name, status, message string) er
 	if strings.TrimSpace(taskID) == "" {
 		return errors.New("任务 ID 不能为空")
 	}
+	terminal := isTerminalTaskStatus(status)
+	acquired := false
+	if !terminal {
+		var ok bool
+		acquired, ok = acquireManagedSlot(managedRuntimeSlots.tasks, taskID, nodeRuntimeLimits.tasks)
+		if !ok {
+			return errors.New("并发任务已达到上限")
+		}
+	}
+	committed := false
+	defer func() {
+		if acquired && !committed {
+			releaseManagedSlot(managedRuntimeSlots.tasks, taskID)
+		}
+	}()
 	path := appTaskLogPath(taskID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
@@ -139,23 +154,11 @@ func ensureAppTaskLogChecked(taskID, installID, name, status, message string) er
 		return err
 	}
 
-	store := getDomainStore()
-	store.mu.Lock()
-	found := false
-	for i := range store.state.Logs {
-		if store.state.Logs[i].ID == taskID {
-			store.state.Logs[i].Level = appTaskLevel(status)
-			store.state.Logs[i].Message = message
-			found = true
-			break
-		}
+	committed = true
+	if terminal {
+		releaseManagedSlot(managedRuntimeSlots.tasks, taskID)
 	}
-	if !found {
-		store.state.Logs = append(store.state.Logs, logItem{ID: taskID, Type: "task", Level: appTaskLevel(status), Message: name, Meta: map[string]any{"path": path, "scope": "app", "name": name}, CreatedAt: time.Now().UTC()})
-	}
-	saveErr := store.saveLocked()
-	store.mu.Unlock()
-	return saveErr
+	return nil
 }
 
 func appendAppTaskLog(taskID, message string) {

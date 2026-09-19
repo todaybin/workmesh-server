@@ -63,6 +63,11 @@ func registerExtendedAppRoutes(mux *http.ServeMux, handlers appRouteHandlers) {
 // appCatalogGet 返回指定应用和版本的目录详情。
 func appCatalogGet(w http.ResponseWriter, s *appStore, r *http.Request, id, version string) {
 	s.mu.Lock()
+	if err := s.ensureCatalogLocked(); err != nil {
+		s.mu.Unlock()
+		runtimeErr(w, 500, err.Error())
+		return
+	}
 	if len(s.state.Catalog) == 0 && strings.TrimSpace(os.Getenv("WORKMESH_APP_CATALOG")) == "" {
 		_ = s.refreshRemoteLocked(false)
 	}

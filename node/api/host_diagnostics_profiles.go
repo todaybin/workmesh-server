@@ -4,7 +4,6 @@
 package api
 
 import (
-	"bytes"
 	"compress/gzip"
 	"errors"
 	"fmt"
@@ -41,9 +40,13 @@ func handleRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	if duration > 60 {
 		duration = 60
 	}
-	var raw bytes.Buffer
+	filename := "workmesh-" + typ + "-" + strconv.FormatInt(time.Now().Unix(), 10) + ".prof.gz"
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	zw := gzip.NewWriter(w)
+	defer zw.Close()
 	if typ == "cpu" {
-		if err := pprof.StartCPUProfile(&raw); err != nil {
+		if err := pprof.StartCPUProfile(zw); err != nil {
 			writeHostError(w, http.StatusServiceUnavailable, "PROFILE_UNAVAILABLE", err)
 			return
 		}
@@ -69,18 +72,9 @@ func handleRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		if typ == "goroutine" {
 			debugLevel = 2
 		}
-		if err := profile.WriteTo(&raw, debugLevel); err != nil {
+		if err := profile.WriteTo(zw, debugLevel); err != nil {
 			writeHostError(w, http.StatusInternalServerError, "PROFILE_WRITE_FAILED", err)
 			return
 		}
 	}
-	var compressed bytes.Buffer
-	zw := gzip.NewWriter(&compressed)
-	_, _ = zw.Write(raw.Bytes())
-	_ = zw.Close()
-	filename := "workmesh-" + typ + "-" + strconv.FormatInt(time.Now().Unix(), 10) + ".prof.gz"
-	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(compressed.Bytes())
 }

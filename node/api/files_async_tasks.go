@@ -18,8 +18,9 @@ import (
 )
 
 type fileAsyncTask struct {
-	cancel context.CancelFunc
-	kind   string
+	cancel  context.CancelFunc
+	kind    string
+	release func()
 }
 
 var fileAsyncTasks struct {
@@ -32,6 +33,11 @@ func startFileAsyncTask(taskID, kind, message string) (context.Context, error) {
 	if taskID == "" {
 		return nil, errors.New("任务 ID 不能为空")
 	}
+	releaseConversion, ok := tryRuntimeSlot(nodeRuntimeLimits.conversions)
+	if !ok {
+		return nil, errors.New("并发文件转换已达到上限")
+	}
+	release := releaseConversion
 	ctx, cancel := context.WithCancel(context.Background())
 	fileAsyncTasks.Lock()
 	if fileAsyncTasks.items == nil {
@@ -40,15 +46,17 @@ func startFileAsyncTask(taskID, kind, message string) (context.Context, error) {
 	if _, exists := fileAsyncTasks.items[taskID]; exists {
 		fileAsyncTasks.Unlock()
 		cancel()
+		release()
 		return nil, errors.New("任务已存在")
 	}
-	fileAsyncTasks.items[taskID] = fileAsyncTask{cancel: cancel, kind: kind}
+	fileAsyncTasks.items[taskID] = fileAsyncTask{cancel: cancel, kind: kind, release: release}
 	fileAsyncTasks.Unlock()
 	if err := ensureAppTaskLogChecked(taskID, "", "file-"+kind, "installing", message); err != nil {
 		fileAsyncTasks.Lock()
 		delete(fileAsyncTasks.items, taskID)
 		fileAsyncTasks.Unlock()
 		cancel()
+		release()
 		return nil, err
 	}
 	return ctx, nil
@@ -56,8 +64,12 @@ func startFileAsyncTask(taskID, kind, message string) (context.Context, error) {
 
 func finishFileAsyncTask(taskID, status, message string) {
 	fileAsyncTasks.Lock()
+	task := fileAsyncTasks.items[taskID]
 	delete(fileAsyncTasks.items, taskID)
 	fileAsyncTasks.Unlock()
+	if task.release != nil {
+		task.release()
+	}
 	ensureAppTaskLog(taskID, "", "file-task", status, message)
 	appendAppTaskLog(taskID, "[TASK-END]")
 }
