@@ -17,6 +17,7 @@ import (
 	"time"
 
 	wmhttp "github.com/todaybin/workmesh-server/runtime/http"
+	"github.com/todaybin/workmesh-server/runtime/resources"
 )
 
 // hostRequestTest 处理主机连通性测试路由，返回是否已经写出响应。
@@ -176,6 +177,11 @@ func writeHostDiagnostics(w http.ResponseWriter, base map[string]any) {
 		base["rss"] = rss
 		base["pss"] = pss
 	}
+	resourceSnapshot := resources.Collect(nil)
+	base["cgroupMemoryAnon"] = resourceSnapshot.Cgroup.AnonymousBytes
+	base["cgroupMemoryFile"] = resourceSnapshot.Cgroup.FileBytes
+	base["cgroupMemoryInactiveFile"] = resourceSnapshot.Cgroup.InactiveFileBytes
+	base["cgroupMemorySwap"] = resourceSnapshot.Cgroup.SwapBytes
 	for field, path := range processCgroupMemoryPaths() {
 		if value, err := os.ReadFile(path); err == nil {
 			base[field] = strings.TrimSpace(string(value))

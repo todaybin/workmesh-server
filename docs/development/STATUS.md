@@ -11,6 +11,7 @@
 
 - [x] Gateway 设备已改为“账号 + 当前机器码”绑定，与面板内部主/子节点拓扑分离；镜像复制到不同机器后旧 Token、bindingId 和 Ed25519 身份不可复用。
 - [x] 心跳已携带有界资源快照并接收 `observe/enforce` 软策略，本地 limits 与 systemd/cgroup 始终是硬上限。
+- [x] 资源诊断已拆分 cgroup `anon/file/inactive_file/swap`，可区分匿名常驻内存、可回收文件缓存和实际换出页；未新增后台采样器或主动换页策略。
 - [x] 无启用计划任务时调度器不再创建分钟 ticker，无自动续期证书时不创建证书扫描 goroutine。
 - [x] 已从 `0803bdb` 重新编译并部署到 `/opt/workmesh-server`，systemd、`/health`、`/ready`、9999 端口和前端路由检查通过；部署后空闲 RSS/PSS 约 `31.0 MiB`，较部署前约下降 `1.3 MiB`。
 - [!] 完整 `node/api` 保留两个既有网站代理测试失败；Gateway 迁移、真实登录/心跳和任务峰值采样仍待维护窗口，详情见 [`2026-09-19-machine-resource-governance.md`](progress/2026-09-19-machine-resource-governance.md)。

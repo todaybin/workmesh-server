@@ -44,7 +44,7 @@ control 与 node 不再启动独立 HTTP 服务，也不各自创建 Store、Sch
 
 Gateway 设备关系与本机主/子节点拓扑相互独立。面板使用硬件指纹生成 `sha256:` 机器码，并以“Gateway 账号 + 机器码”绑定平台设备；本机用于负载均衡、数据库集群的 `primary/secondary` 角色不会上传为 Gateway 关系。机器硬件身份变化时旧 Token、bindingId 和 Ed25519 身份立即停用，必须重新登录 Gateway。
 
-资源快照复用 30 秒 Gateway 心跳即时采集 RSS/PSS、Heap、goroutine、线程、FD、cgroup 内存和活动租约，不创建额外采样循环。Gateway 策略默认 `observe/balanced`；切换到 `enforce` 后只允许收紧本地配置，systemd/cgroup 与本地 limits 始终是不可放宽的硬上限。
+资源快照复用 30 秒 Gateway 心跳即时采集 RSS/PSS、匿名/file-backed PSS、Heap、goroutine、线程、FD、cgroup 的 current/high/max、anon/file/inactive_file/swap 和活动租约，不创建额外采样循环。`anon` 用于识别不可直接回收的应用内存，`file`/`inactive_file` 用于识别可回收文件页缓存，`swap` 单独表示 cgroup 已换出的页；诊断只读这些计数，不主动 drop cache、swapoff 或强制换页。Gateway 策略默认 `observe/balanced`；切换到 `enforce` 后只允许收紧本地配置，systemd/cgroup 与本地 limits 始终是不可放宽的硬上限。
 
 ## 前端和节点透传
 

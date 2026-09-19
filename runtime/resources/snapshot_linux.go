@@ -71,11 +71,35 @@ func readCgroupV2() CgroupSnapshot {
 		}
 	}
 	root := filepath.Join("/sys/fs/cgroup", filepath.Clean("/"+path))
+	stat := readCgroupMemoryStat(filepath.Join(root, "memory.stat"))
 	return CgroupSnapshot{
-		CurrentBytes: readCgroupLimit(filepath.Join(root, "memory.current")),
-		HighBytes:    readCgroupLimit(filepath.Join(root, "memory.high")),
-		MaxBytes:     readCgroupLimit(filepath.Join(root, "memory.max")),
+		CurrentBytes:      readCgroupLimit(filepath.Join(root, "memory.current")),
+		HighBytes:         readCgroupLimit(filepath.Join(root, "memory.high")),
+		MaxBytes:          readCgroupLimit(filepath.Join(root, "memory.max")),
+		AnonymousBytes:    stat["anon"],
+		FileBytes:         stat["file"],
+		InactiveFileBytes: stat["inactive_file"],
+		SwapBytes:         readCgroupLimit(filepath.Join(root, "memory.swap.current")),
 	}
+}
+
+func readCgroupMemoryStat(filename string) map[string]int64 {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil
+	}
+	values := make(map[string]int64)
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		value, err := strconv.ParseInt(fields[1], 10, 64)
+		if err == nil && value >= 0 {
+			values[fields[0]] = value
+		}
+	}
+	return values
 }
 
 func readCgroupLimit(filename string) int64 {

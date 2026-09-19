@@ -24,6 +24,17 @@ func TestHostDiagnostics(t *testing.T) {
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"code":200`) {
 		t.Fatalf("unexpected host response: %d %s", res.Code, res.Body.String())
 	}
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode host diagnostics: %v", err)
+	}
+	for _, field := range []string{"cgroupMemoryAnon", "cgroupMemoryFile", "cgroupMemoryInactiveFile", "cgroupMemorySwap"} {
+		if _, ok := envelope.Data[field]; !ok {
+			t.Fatalf("host diagnostics missing %s: %s", field, res.Body.String())
+		}
+	}
 }
 
 func TestRuntimeProfileDownload(t *testing.T) {

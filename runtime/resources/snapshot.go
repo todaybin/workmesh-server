@@ -6,11 +6,15 @@ package resources
 
 import "runtime"
 
-// CgroupSnapshot 是当前进程所在 cgroup 的内存边界。
+// CgroupSnapshot 是当前进程所在 cgroup 的内存边界和内存构成。
 type CgroupSnapshot struct {
-	CurrentBytes int64 `json:"currentBytes,omitempty"`
-	HighBytes    int64 `json:"highBytes,omitempty"`
-	MaxBytes     int64 `json:"maxBytes,omitempty"`
+	CurrentBytes      int64 `json:"currentBytes,omitempty"`
+	HighBytes         int64 `json:"highBytes,omitempty"`
+	MaxBytes          int64 `json:"maxBytes,omitempty"`
+	AnonymousBytes    int64 `json:"anonBytes,omitempty"`
+	FileBytes         int64 `json:"fileBytes,omitempty"`
+	InactiveFileBytes int64 `json:"inactiveFileBytes,omitempty"`
+	SwapBytes         int64 `json:"swapBytes,omitempty"`
 }
 
 // Snapshot 是随既有 Gateway 心跳即时采集的进程资源状态。

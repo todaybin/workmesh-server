@@ -34,3 +34,10 @@
 - `GOWORK=off go test ./runtime/machineid ./runtime/resources ./runtime/gateway ./control/api ./node/service ./cmd/workmesh-server`：通过。
 - `GOWORK=off go test ./node/api`：仅两个既有网站代理断言失败。
 - `git diff --check`：通过。
+
+## 2026-09-19 资源构成诊断增强
+
+- [x] Linux cgroup v2 资源快照新增 `anon`、`file`、`inactive_file` 和 `swap` 字段；仍按请求/心跳即时读取，不创建常驻采样器，也不执行 `drop_caches`、`swapoff` 或强制换页。
+- [x] 主机诊断摘要新增 `cgroupMemoryAnon`、`cgroupMemoryFile`、`cgroupMemoryInactiveFile` 和 `cgroupMemorySwap`，可区分匿名应用内存、可回收文件缓存和实际换出页。
+- [x] 新增 cgroup `memory.stat` 解析边界测试，主机诊断测试增加字段契约断言；资源包定向测试、主机诊断定向测试、全仓编译和 `go vet ./...` 通过。
+- [!] 本次修改尚未部署到 `/opt/workmesh-server`；线上当前仍运行 `480506778d98fa9e28772322979e5cdb2315364cb6c25b093c9b7c6c95f7512b` 对应的已部署版本，需单独确认后再执行发布激活。
