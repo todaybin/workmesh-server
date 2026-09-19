@@ -22,6 +22,15 @@
 - [x] 与部署前同口径基线（RSS/PSS `32.3 MiB`、匿名 PSS `9.2 MiB`、线程 `11`、FD `13`）相比，RSS/PSS 下降约 `1.3 MiB`（`3.9%`），匿名 PSS 下降约 `0.8 MiB`（`8.8%`）；本次为空闲态采样，不代表任务峰值。
 - [!] Gateway PostgreSQL 前向迁移、真实 Gateway 登录/注册/心跳和任务峰值资源采样仍需独立维护窗口完成。
 
+## 2026-09-19 cgroup 诊断版本发布复核
+
+- [x] 提交 `7365810 perf: 完善 cgroup 内存构成诊断` 已在本地仓库完成；发布包 `/www/apps/workmesh-server/release/workmesh-server-linux-amd64` SHA-256 为 `2f23308c0c7d678b8d60d69b2c1dd1ec6f4f7ef1dd89d9cdb58b697960b498df`。
+- [x] 已通过 `deploy/install/activate-release.sh` 原子替换 `/opt/workmesh-server/bin/workmesh-server`，旧版本保留为 `/opt/workmesh-server/bin/workmesh-server.bak.20260919201823-3813745`；新 systemd MainPID 为 `3813845`。
+- [x] 新版本 `/health`、`/ready`、9999 端口归属和 `/advanced/waf` 静态资源检查通过。
+- [x] 部署后稳定空闲采样：WorkMesh RSS/PSS `33.0 MiB`、匿名 `9.5 MiB`、file-backed `23.5 MiB`、Swap `0`、线程 `10`；cgroup `memory.current` `14.8 MiB`、`memory.swap.current` `0`，`anon` `9.5 MiB`、`file` `4.7 MiB`、`inactive_file` `4.7 MiB`。
+- [x] 同一采样口径下 1Panel agent/core 合计 PSS `64.7 MiB`、匿名 `44.3 MiB`、file-backed `20.3 MiB`、Swap `9.7 MiB`、线程 `19`；两服务 cgroup memory current 合计 `87.0 MiB`、swap current 合计 `38.8 MiB`。WorkMesh PSS 约低 `31.7 MiB`（约 `49%`），且未观察到自身换出页。
+- [>] GitHub 远端推送尚未获得确认：本地提交完整保留，`git push`/`git ls-remote` 在当前网络连接上超时；待网络或凭据链路恢复后重试并记录远端分支 SHA。
+
 ## 边界与安全结论
 
 - `site_id` 和账号 UID 仅来自 Gateway 登录 JWT，面板不提交、选择或生成站点归属。
