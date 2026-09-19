@@ -16,16 +16,37 @@ import (
 // Start 启动节点自动注册和周期心跳；未配置云端客户端时不创建后台任务。
 func (s *GatewayStateStore) Start(ctx context.Context, capabilities []string) {
 	s.startMu.Lock()
-	if s.started {
+	s.runCtx = ctx
+	s.runCapabilities = append([]string(nil), capabilities...)
+	s.startMu.Unlock()
+	s.startGatewayLoopIfReady()
+}
+
+func (s *GatewayStateStore) startGatewayLoopIfReady() {
+	s.startMu.Lock()
+	if s.started || s.runCtx == nil {
+		s.startMu.Unlock()
+		return
+	}
+	s.mu.RLock()
+	clientReady := s.client != nil
+	s.mu.RUnlock()
+	if !clientReady || s.machineIdentityError() != nil {
 		s.startMu.Unlock()
 		return
 	}
 	s.started = true
+	ctx := s.runCtx
+	capabilities := append([]string(nil), s.runCapabilities...)
 	s.startMu.Unlock()
-	if s.client == nil {
-		return
-	}
-	go s.runGatewayLoop(ctx, capabilities)
+	go func() {
+		defer func() {
+			s.startMu.Lock()
+			s.started = false
+			s.startMu.Unlock()
+		}()
+		s.runGatewayLoop(ctx, capabilities)
+	}()
 }
 
 // runGatewayLoop 执行首次连接和周期心跳，直到节点上下文被取消。
@@ -47,11 +68,10 @@ func (s *GatewayStateStore) runGatewayLoop(ctx context.Context, capabilities []s
 func (s *GatewayStateStore) connectGateway(ctx context.Context, capabilities []string) {
 	s.mu.RLock()
 	bound := s.status.Registration == gateway.RegistrationRegistered && s.auth.BindingID != ""
-	registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Role: s.status.Role, Registered: bound}
 	s.mu.RUnlock()
 	// 已绑定节点优先恢复心跳，不再次要求账号登录或创建新绑定。
 	if bound {
-		if err := s.client.Heartbeat(ctx, registration); err == nil {
+		if err := s.sendGatewayHeartbeat(ctx); err == nil {
 			s.mu.Lock()
 			previous := s.status
 			s.status.Connected = true
@@ -77,12 +97,11 @@ func (s *GatewayStateStore) connectGateway(ctx context.Context, capabilities []s
 		}
 		return
 	}
-	s.mu.RLock()
-	request := gateway.RegisterRequest{NodeID: s.status.NodeID, Role: s.status.Role, ProtocolVersion: "v2", Capabilities: capabilities}
-	s.mu.RUnlock()
+	request := s.gatewayRegisterRequest(capabilities)
 	auth, err := s.client.Register(ctx, request)
 	s.mu.Lock()
 	previousStatus, previousAuth := s.status, s.auth
+	previousBoundMachineCode, previousIdentityStatus := s.boundMachineCode, s.identityStatus
 	if err != nil {
 		s.status.Registration = gateway.RegistrationPending
 		s.status.Connected = false
@@ -101,9 +120,12 @@ func (s *GatewayStateStore) connectGateway(ctx context.Context, capabilities []s
 	s.status.LastSeenAt = time.Now().UTC().Format(time.RFC3339)
 	s.status.Reason = ""
 	s.auth = auth
+	s.boundMachineCode = s.machineCode
+	s.identityStatus = "ready"
 	if persistErr := s.persistLocked(); persistErr != nil {
 		s.status = previousStatus
 		s.auth = previousAuth
+		s.boundMachineCode, s.identityStatus = previousBoundMachineCode, previousIdentityStatus
 		s.mu.Unlock()
 		log.Printf("gateway: persist registration state failed: %v", persistErr)
 		return
@@ -113,10 +135,7 @@ func (s *GatewayStateStore) connectGateway(ctx context.Context, capabilities []s
 
 // gatewayHeartbeat 发送周期心跳并持久化最新连接状态。
 func (s *GatewayStateStore) gatewayHeartbeat(ctx context.Context) {
-	s.mu.RLock()
-	registration := gateway.Registration{NodeID: s.status.NodeID, BindingID: s.auth.BindingID, Role: s.status.Role, Registered: s.status.Registration == gateway.RegistrationRegistered}
-	s.mu.RUnlock()
-	if err := s.client.Heartbeat(ctx, registration); err != nil {
+	if err := s.sendGatewayHeartbeat(ctx); err != nil {
 		s.mu.Lock()
 		previous := s.status
 		s.status.Connected = false
@@ -146,6 +165,52 @@ func (s *GatewayStateStore) gatewayHeartbeat(ctx context.Context) {
 	if persistErr != nil {
 		log.Printf("gateway: persist heartbeat state failed: %v", persistErr)
 	}
+}
+
+func (s *GatewayStateStore) registrationSnapshot(bindingID string, registered bool) gateway.Registration {
+	s.mu.RLock()
+	provider := s.resourceSnapshot
+	registration := gateway.Registration{
+		NodeID: s.status.NodeID, BindingID: bindingID, Role: "device", Registered: registered,
+		Capabilities: append([]string(nil), gatewayCapabilities...), MachineCode: s.machineCode,
+		FingerprintVersion: s.fingerprintVersion,
+	}
+	s.mu.RUnlock()
+	if provider != nil {
+		registration.ResourceSnapshot = provider()
+	}
+	return registration
+}
+
+func (s *GatewayStateStore) heartbeatClient(ctx context.Context, client gateway.ProtocolClient, registration gateway.Registration) error {
+	if extended, ok := client.(gateway.PolicyProtocolClient); ok {
+		result, err := extended.HeartbeatWithResult(ctx, registration)
+		if err != nil {
+			return err
+		}
+		s.mu.RLock()
+		consumer := s.policyConsumer
+		s.mu.RUnlock()
+		if consumer != nil {
+			return consumer(result.ResourcePolicy, result.PolicyRevision)
+		}
+		return nil
+	}
+	return client.Heartbeat(ctx, registration)
+}
+
+func (s *GatewayStateStore) sendGatewayHeartbeat(ctx context.Context) error {
+	if err := s.machineIdentityError(); err != nil {
+		return err
+	}
+	s.mu.RLock()
+	client, bindingID := s.client, s.auth.BindingID
+	registered := s.status.Registration == gateway.RegistrationRegistered
+	s.mu.RUnlock()
+	if client == nil {
+		return errors.New("Gateway 未配置")
+	}
+	return s.heartbeatClient(ctx, client, s.registrationSnapshot(bindingID, registered))
 }
 
 // markGatewayOffline 标记已绑定节点的心跳恢复失败并保存状态。

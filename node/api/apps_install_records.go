@@ -108,7 +108,7 @@ func ensureAppTaskLogChecked(taskID, installID, name, status, message string) er
 	acquired := false
 	if !terminal {
 		var ok bool
-		acquired, ok = acquireManagedSlot(managedRuntimeSlots.tasks, taskID, nodeRuntimeLimits.tasks)
+		acquired, ok = acquireManagedSlot(managedRuntimeSlots.tasks, taskID, "tasks", nodeRuntimeLimits.tasks)
 		if !ok {
 			return errors.New("并发任务已达到上限")
 		}

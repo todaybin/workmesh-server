@@ -35,6 +35,7 @@ type CronjobService struct {
 	lastTick     map[string]string
 	db           *sql.DB
 	repository   storage.Transactional
+	wake         chan struct{}
 }
 
 // NewCronjobService 创建计划任务服务。
@@ -47,6 +48,7 @@ func NewCronjobService() *CronjobService {
 		items: make(map[string]model.Cronjob), records: make(map[string][]model.CommandResult),
 		path: filepath.Join(dir, "cronjobs.json"), fallbackPath: filepath.Join(dir, "workmesh.db"),
 		running: make(map[string]context.CancelFunc), lastTick: make(map[string]string),
+		wake: make(chan struct{}, 1),
 	}
 }
 
@@ -171,6 +173,7 @@ func (s *CronjobService) Create(ctx context.Context, job model.Cronjob) (model.C
 	if err != nil {
 		return model.Cronjob{}, err
 	}
+	s.wakeScheduler()
 	return job, nil
 }
 
@@ -228,7 +231,15 @@ func (s *CronjobService) Delete(ctx context.Context, id string) error {
 	}
 	delete(s.items, id)
 	delete(s.records, id)
+	s.wakeScheduler()
 	return nil
+}
+
+func (s *CronjobService) wakeScheduler() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
 }
 
 // HandleOnce 立即执行计划任务的命令字段。

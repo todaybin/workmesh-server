@@ -79,6 +79,8 @@ func runHTTPService(cfg config.Config, readiness *readinessState, logger interfa
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	mux, gatewayStore := httpMuxWithReadiness(cfg, readiness)
+	gatewayStore.SetResourceSnapshotProvider(nodeapi.RuntimeResourceSnapshot)
+	gatewayStore.SetResourcePolicyConsumer(nodeapi.ApplyRemoteResourcePolicy)
 	// SSL 自动续期和计划任务需要在没有现存 Cronjob 时也启动扫描器；
 	// 具体任务是否到期由各自的 SQLite 状态决定。
 	if cfg.BackgroundTasks.Enabled {
@@ -156,6 +158,7 @@ func unifiedSchemaMigrations() []storage.Migration {
 		service.DatabaseRuntimeStateSchemaMigration(),
 		service.WebsiteDefaultHTMLMigration(),
 		nodeapi.WebsiteTemplateMigration(),
+		controlapi.GatewayBindingMigration(),
 	}
 }
 

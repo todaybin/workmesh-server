@@ -15,6 +15,7 @@ import (
 	"time"
 
 	linkpkg "github.com/todaybin/workmesh-server/runtime/link"
+	"github.com/todaybin/workmesh-server/runtime/machineid"
 )
 
 func TestGatewayV2RegistrationIdempotenceAuthorizationAndCSRF(t *testing.T) {
@@ -51,32 +52,26 @@ func TestGatewayV2RegistrationIdempotenceAuthorizationAndCSRF(t *testing.T) {
 	assertGatewayError(t, withoutCSRF, http.StatusForbidden, "CSRF_INVALID")
 
 	first := performGatewayRequest(handler, body, true, true)
-	assertGatewayRegistered(t, first, "node-local", "binding-local")
+	fingerprint, err := machineid.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceID := gatewayDeviceID(fingerprint.Code)
+	assertGatewayRegistered(t, first, deviceID, "binding-local")
 	if strings.Contains(first.Body.String(), "must-not-leak") || strings.Contains(first.Body.String(), "registration-local") {
 		t.Fatalf("注册响应泄露 Gateway 凭据: %s", first.Body.String())
 	}
 	second := performGatewayRequest(handler, body, true, true)
-	assertGatewayRegistered(t, second, "node-local", "binding-local")
+	assertGatewayRegistered(t, second, deviceID, "binding-local")
 	if registerCalls.Load() != 1 {
 		t.Fatalf("重复注册调用云端次数=%d, want 1", registerCalls.Load())
 	}
 
 	conflictBody := `{"gatewayUrl":"` + cloud.URL + `","nodeId":"other-node","registrationToken":"registration-local"}`
-	conflict := performGatewayRequest(handler, conflictBody, true, true)
-	if conflict.Code != http.StatusConflict {
-		t.Fatalf("其他节点重复绑定 status=%d body=%s", conflict.Code, conflict.Body.String())
-	}
-	var conflictEnvelope struct {
-		Code    string `json:"code"`
-		Details struct {
-			ErrCode string `json:"errCode"`
-		} `json:"details"`
-	}
-	if err := json.Unmarshal(conflict.Body.Bytes(), &conflictEnvelope); err != nil {
-		t.Fatal(err)
-	}
-	if conflictEnvelope.Code != "ERR" || conflictEnvelope.Details.ErrCode == "" {
-		t.Fatalf("冲突 envelope 不完整: %s", conflict.Body.String())
+	ignoredAlias := performGatewayRequest(handler, conflictBody, true, true)
+	assertGatewayRegistered(t, ignoredAlias, deviceID, "binding-local")
+	if registerCalls.Load() != 1 {
+		t.Fatalf("客户端 nodeId 不应创建第二个 Gateway 设备，调用次数=%d", registerCalls.Load())
 	}
 
 	statusRequest := httptest.NewRequest(http.MethodGet, "/api/v2/workmesh/gateway/status", nil)

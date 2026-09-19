@@ -7,12 +7,16 @@ import "context"
 
 // Registration 描述 Gateway 返回的节点使用凭证状态。
 type Registration struct {
-	NodeID       string   `json:"node_id"`
-	BindingID    string   `json:"binding_id"`
-	Registered   bool     `json:"registered"`
-	Role         string   `json:"role,omitempty"`
-	AccessToken  string   `json:"-"`
-	Capabilities []string `json:"capabilities,omitempty"`
+	NodeID             string   `json:"node_id"`
+	BindingID          string   `json:"binding_id"`
+	Registered         bool     `json:"registered"`
+	Role               string   `json:"role,omitempty"`
+	AccessToken        string   `json:"-"`
+	Capabilities       []string `json:"capabilities,omitempty"`
+	MachineCode        string   `json:"machine_code,omitempty"`
+	FingerprintVersion int      `json:"fingerprint_version,omitempty"`
+	ResourceSnapshot   any      `json:"resource_snapshot,omitempty"`
+	ActiveRuntimeSet   any      `json:"active_runtime_set,omitempty"`
 }
 
 // Client 是 Gateway 对接边界；本机服务可在无 Gateway 时使用 NoopClient 启动。

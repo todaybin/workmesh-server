@@ -26,11 +26,18 @@ func TestHTTPClientRegisterUsesSignedEnvelope(t *testing.T) {
 		if r.URL.Path != "/workmesh/node/register" {
 			t.Fatalf("注册路径错误: %s", r.URL.Path)
 		}
+		var request RegisterRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.MachineCode != "sha256:test" || request.FingerprintVersion != 1 {
+			t.Fatalf("注册请求没有携带本机机器身份: %+v", request)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": Authorization{BindingID: "binding-1", Refreshable: true}})
 	}))
 	defer server.Close()
 	client := NewHTTPClient(server.URL, "gateway-test", "secret")
-	auth, err := client.Register(context.Background(), RegisterRequest{NodeID: "node-test", Role: "secondary", ProtocolVersion: "v2"})
+	auth, err := client.Register(context.Background(), RegisterRequest{NodeID: "node-test", Role: "device", ProtocolVersion: "v2", MachineCode: "sha256:test", FingerprintVersion: 1})
 	if err != nil || auth.BindingID != "binding-1" || !auth.Refreshable {
 		t.Fatalf("Gateway 注册失败: %+v, %v", auth, err)
 	}

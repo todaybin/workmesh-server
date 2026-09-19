@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -20,6 +21,9 @@ func TestGatewayBindingRuntimeUsesRepository(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	if _, err := db.Exec(`CREATE TABLE gateway_binding (id INTEGER PRIMARY KEY CHECK(id=1), status BLOB NOT NULL, auth BLOB NOT NULL, gateway_url TEXT NOT NULL DEFAULT '', account TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureGatewayBindingSchema(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
 	repository, err := storage.NewSQLiteRepository(db)

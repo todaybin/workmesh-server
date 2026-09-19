@@ -38,11 +38,28 @@ var sharedCronjobs = service.NewCronjobService()
 var (
 	backgroundMu      sync.Mutex
 	backgroundStarted bool
+	retentionStarted  bool
 )
 
 // StartBackgroundTasks 启动节点级后台调度任务，调用方应在进程退出时取消 ctx。
 func StartBackgroundTasks(ctx context.Context) {
 	sharedCronjobs.Start(ctx)
+	backgroundMu.Lock()
+	if !retentionStarted {
+		retentionStarted = true
+		go func() {
+			defer func() {
+				backgroundMu.Lock()
+				retentionStarted = false
+				backgroundMu.Unlock()
+			}()
+			startLogRetentionScheduler(ctx)
+		}()
+	}
+	backgroundMu.Unlock()
+	if !certificateRenewalConfigured() {
+		return
+	}
 	backgroundMu.Lock()
 	if backgroundStarted {
 		backgroundMu.Unlock()
@@ -74,7 +91,23 @@ func StartBackgroundTasks(ctx context.Context) {
 			}
 		}
 	}()
-	go startLogRetentionScheduler(ctx)
+}
+
+func certificateRenewalConfigured() bool {
+	repository, err := SharedRepository()
+	if err != nil {
+		return false
+	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM website_ssls WHERE auto_renew=1`,
+		`SELECT COUNT(*) FROM website_ca_ssls WHERE auto_renew=1`,
+	} {
+		var count int
+		if err := repository.QueryRow(query).Scan(&count); err == nil && count > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // RegisterHostContainerCronRoutes 注册主机、容器和计划任务接口。

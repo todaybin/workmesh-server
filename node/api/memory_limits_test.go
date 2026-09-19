@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/todaybin/workmesh-server/node/service/taskruntime"
+	"github.com/todaybin/workmesh-server/runtime/gateway"
 )
 
 type limitTestTaskProvider struct {
@@ -147,5 +148,23 @@ func TestRuntimeLimitExhaustion(t *testing.T) {
 		t.Fatal("released slot unavailable")
 	} else {
 		releaseAgain()
+	}
+}
+
+func TestRemoteResourcePolicyCanOnlyTightenLocalLimit(t *testing.T) {
+	original := nodeRuntimeLimits
+	nodeRuntimeLimits = newRuntimeLimitState(RuntimeLimits{MaxConcurrentTasks: 4, MaxConcurrentConversions: 2, MaxSSEStreams: 8, MaxAIJobs: 3, MaxLogBytes: 1, CacheTTL: time.Second})
+	t.Cleanup(func() { nodeRuntimeLimits = original })
+	if err := ApplyRemoteResourcePolicy(gateway.ResourcePolicy{Mode: "enforce", MaxConcurrentTasks: 2}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := effectiveRuntimeLimit("tasks"); got != 2 {
+		t.Fatalf("Gateway 收紧策略未生效: %d", got)
+	}
+	if err := ApplyRemoteResourcePolicy(gateway.ResourcePolicy{Mode: "enforce", MaxConcurrentTasks: 20}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if got := effectiveRuntimeLimit("tasks"); got != 4 {
+		t.Fatalf("Gateway 不得放宽本地硬上限: %d", got)
 	}
 }

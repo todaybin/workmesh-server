@@ -7,6 +7,13 @@
 
 更新时间：2026-09-19
 
+## 2026-09-19 节点机器身份与资源生命周期治理
+
+- [x] Gateway 设备已改为“账号 + 当前机器码”绑定，与面板内部主/子节点拓扑分离；镜像复制到不同机器后旧 Token、bindingId 和 Ed25519 身份不可复用。
+- [x] 心跳已携带有界资源快照并接收 `observe/enforce` 软策略，本地 limits 与 systemd/cgroup 始终是硬上限。
+- [x] 无启用计划任务时调度器不再创建分钟 ticker，无自动续期证书时不创建证书扫描 goroutine。
+- [!] 定向验证通过；完整 `node/api` 保留两个既有网站代理测试失败，详情见 [`2026-09-19-machine-resource-governance.md`](progress/2026-09-19-machine-resource-governance.md)。
+
 ## 2026-09-19 单进程内存治理
 
 - [x] 已移除功能域快照中的内存日志和启动预加载，任务/操作/登录/告警日志改为 SQLite 有界查询；应用目录已拆为独立懒加载缓存并按 5 分钟空闲 TTL 释放。

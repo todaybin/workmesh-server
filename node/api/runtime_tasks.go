@@ -229,7 +229,7 @@ func persistRuntimeTaskChecked(item runtimeRecord) error {
 	acquired := false
 	if !terminal {
 		var ok bool
-		acquired, ok = acquireManagedSlot(managedRuntimeSlots.tasks, item.TaskID, nodeRuntimeLimits.tasks)
+		acquired, ok = acquireManagedSlot(managedRuntimeSlots.tasks, item.TaskID, "tasks", nodeRuntimeLimits.tasks)
 		if !ok {
 			return errors.New("并发任务已达到上限")
 		}

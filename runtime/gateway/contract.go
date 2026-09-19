@@ -37,6 +37,22 @@ type Status struct {
 	Reason                string            `json:"reason,omitempty"`
 }
 
+// ResourcePolicy 是 Gateway 下发的节点软资源策略；本地硬上限始终优先。
+type ResourcePolicy struct {
+	Mode                     string `json:"mode"`
+	Profile                  string `json:"profile"`
+	MaxConcurrentTasks       int    `json:"maxConcurrentTasks,omitempty"`
+	MaxConcurrentConversions int    `json:"maxConcurrentConversions,omitempty"`
+	MaxSSEStreams            int    `json:"maxSseStreams,omitempty"`
+	MaxAIJobs                int    `json:"maxAiJobs,omitempty"`
+}
+
+// HeartbeatResult 是节点心跳返回的控制面状态和可选软资源策略。
+type HeartbeatResult struct {
+	ResourcePolicy ResourcePolicy `json:"resourcePolicy"`
+	PolicyRevision int64          `json:"policyRevision"`
+}
+
 // LoginRequest 是 Gateway 账号授权请求。密码只允许通过 TLS 传输，不得写入日志。
 type LoginRequest struct {
 	Username   string `json:"username"`
@@ -46,13 +62,18 @@ type LoginRequest struct {
 
 // RegisterRequest 是节点首次注册请求。
 type RegisterRequest struct {
-	NodeID          string            `json:"nodeId"`
-	PublicKey       string            `json:"publicKey,omitempty"`
-	DisplayName     string            `json:"displayName"`
-	Role            string            `json:"role"`
-	ProtocolVersion string            `json:"protocolVersion"`
-	Capabilities    []string          `json:"capabilities"`
-	Metadata        map[string]string `json:"metadata,omitempty"`
+	NodeID             string            `json:"nodeId"`
+	PublicKey          string            `json:"publicKey,omitempty"`
+	DisplayName        string            `json:"displayName"`
+	Role               string            `json:"role"`
+	ProtocolVersion    string            `json:"protocolVersion"`
+	Capabilities       []string          `json:"capabilities"`
+	Metadata           map[string]string `json:"metadata,omitempty"`
+	MachineCode        string            `json:"machineCode"`
+	FingerprintVersion int               `json:"fingerprintVersion"`
+	Platform           string            `json:"platform,omitempty"`
+	Architecture       string            `json:"architecture,omitempty"`
+	RuntimeVersion     string            `json:"runtimeVersion,omitempty"`
 }
 
 // Authorization 包含注册后可缓存的非敏感授权摘要。
@@ -73,6 +94,11 @@ type ProtocolClient interface {
 	Status(context.Context) (Status, error)
 	Refresh(context.Context) (Authorization, error)
 	Revoke(context.Context) error
+}
+
+// PolicyProtocolClient 在兼容 Heartbeat 接口之外返回节点软资源策略。
+type PolicyProtocolClient interface {
+	HeartbeatWithResult(context.Context, Registration) (HeartbeatResult, error)
 }
 
 // CapabilityRouter 统一本机调用和 Gateway 授权调用的能力入口。

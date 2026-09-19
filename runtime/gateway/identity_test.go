@@ -40,3 +40,22 @@ func TestLoadOrCreateIdentityRejectsInvalidFile(t *testing.T) {
 		t.Fatal("无效身份文件应被拒绝")
 	}
 }
+
+func TestRotateIdentityStopsUsingCopiedKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "identity")
+	first, err := LoadOrCreateIdentity(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := RotateIdentity(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ed25519.PublicKey(first.PublicKey).Equal(second.PublicKey) {
+		t.Fatal("机器变化后仍复用了旧 Ed25519 身份")
+	}
+	matches, err := filepath.Glob(path + ".revoked-*")
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("旧身份审计副本数量=%d err=%v", len(matches), err)
+	}
+}

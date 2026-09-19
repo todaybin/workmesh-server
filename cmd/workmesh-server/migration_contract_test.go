@@ -25,6 +25,7 @@ func TestUnifiedSchemaMigrationsKeepDatabaseOrderAndRestartIdempotence(t *testin
 		"0009-database-runtime-states",
 		"0014-website-default-html",
 		"0015-website-template-relational",
+		"0016-gateway-machine-identity",
 	}
 	if len(migrations) != len(wantIDs) {
 		t.Fatalf("migration count = %d, want %d", len(migrations), len(wantIDs))

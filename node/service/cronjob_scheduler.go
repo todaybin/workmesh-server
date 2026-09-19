@@ -6,10 +6,11 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/todaybin/workmesh-server/node/model"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/todaybin/workmesh-server/node/model"
 )
 
 func (s *CronjobService) Start(parent context.Context) {
@@ -26,18 +27,82 @@ func (s *CronjobService) Start(parent context.Context) {
 			s.started = false
 			s.startMu.Unlock()
 		}()
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		s.runDue(parent)
 		for {
+			next, jobIDs, ok := s.nextEnabledRun(time.Now().UTC())
+			if !ok {
+				select {
+				case <-parent.Done():
+					return
+				case <-s.wake:
+					continue
+				}
+			}
+			timer := time.NewTimer(time.Until(next))
 			select {
 			case <-parent.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
 				return
-			case <-ticker.C:
-				s.runDue(parent)
+			case <-s.wake:
+				if !timer.Stop() {
+					<-timer.C
+				}
+			case <-timer.C:
+				s.runScheduled(parent, jobIDs, next)
 			}
 		}
 	}()
+}
+
+func (s *CronjobService) nextEnabledRun(from time.Time) (time.Time, []string, bool) {
+	if err := s.ensureDatabase(context.Background()); err != nil {
+		return time.Time{}, nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var earliest time.Time
+	jobIDs := []string{}
+	for _, job := range s.items {
+		if job.Status != "enabled" {
+			continue
+		}
+		next, ok := nextCronRun(job.Spec, from)
+		if !ok {
+			continue
+		}
+		if earliest.IsZero() || next.Before(earliest) {
+			earliest = next
+			jobIDs = []string{job.ID}
+		} else if next.Equal(earliest) {
+			jobIDs = append(jobIDs, job.ID)
+		}
+	}
+	return earliest, jobIDs, !earliest.IsZero()
+}
+
+func (s *CronjobService) runScheduled(parent context.Context, jobIDs []string, scheduledAt time.Time) {
+	tick := scheduledAt.UTC().Format(time.RFC3339Nano)
+	for _, id := range jobIDs {
+		s.mu.Lock()
+		job, exists := s.items[id]
+		if !exists || job.Status != "enabled" || s.lastTick[id] == tick {
+			s.mu.Unlock()
+			continue
+		}
+		s.lastTick[id] = tick
+		ctx, cancel := context.WithCancel(parent)
+		s.running[id] = cancel
+		s.mu.Unlock()
+		go func(jobID string) {
+			defer func() {
+				s.mu.Lock()
+				delete(s.running, jobID)
+				s.mu.Unlock()
+			}()
+			_, _ = s.HandleOnce(ctx, jobID)
+		}(id)
+	}
 }
 
 // runDue 执行当前分钟到期且尚未执行的启用任务，避免同一分钟重复调度。

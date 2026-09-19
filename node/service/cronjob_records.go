@@ -50,6 +50,7 @@ func (s *CronjobService) Update(ctx context.Context, job model.Cronjob) (model.C
 		s.items[job.ID] = old
 		return model.Cronjob{}, err
 	}
+	s.wakeScheduler()
 	return job, nil
 }
 
@@ -74,6 +75,7 @@ func (s *CronjobService) SetStatus(ctx context.Context, id, status string) error
 		s.items[id] = old
 		return err
 	}
+	s.wakeScheduler()
 	return nil
 }
 

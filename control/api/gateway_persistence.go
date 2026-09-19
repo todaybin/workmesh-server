@@ -18,16 +18,21 @@ import (
 
 // persistedGatewayState 是兼容文件中的绑定快照；正式运行态优先使用 SQLite。
 type persistedGatewayState struct {
-	Status      gateway.Status `json:"status"`
-	BindingID   string         `json:"bindingId,omitempty"`
-	Scopes      []string       `json:"scopes,omitempty"`
-	ExpiresAt   string         `json:"expiresAt,omitempty"`
-	Refreshable bool           `json:"refreshable"`
-	AccessToken string         `json:"accessToken,omitempty"`
-	GatewayURL  string         `json:"gatewayUrl,omitempty"`
-	GatewayID   string         `json:"gatewayId,omitempty"`
-	Account     string         `json:"account,omitempty"`
-	UpdatedAt   string         `json:"updatedAt"`
+	Status             gateway.Status `json:"status"`
+	BindingID          string         `json:"bindingId,omitempty"`
+	Scopes             []string       `json:"scopes,omitempty"`
+	ExpiresAt          string         `json:"expiresAt,omitempty"`
+	Refreshable        bool           `json:"refreshable"`
+	AccessToken        string         `json:"accessToken,omitempty"`
+	GatewayURL         string         `json:"gatewayUrl,omitempty"`
+	GatewayID          string         `json:"gatewayId,omitempty"`
+	Account            string         `json:"account,omitempty"`
+	MachineCode        string         `json:"machineCode,omitempty"`
+	BoundMachineCode   string         `json:"boundMachineCode,omitempty"`
+	FingerprintVersion int            `json:"fingerprintVersion,omitempty"`
+	IdentityStatus     string         `json:"identityStatus,omitempty"`
+	PreviousBindingID  string         `json:"previousBindingId,omitempty"`
+	UpdatedAt          string         `json:"updatedAt"`
 }
 
 // persistedGatewayAuthorization 是仅用于本地存储的授权快照。
@@ -53,8 +58,9 @@ func validateGatewayBaseURL(value string) error {
 func (s *GatewayStateStore) load() {
 	if s.repository != nil {
 		var statusRaw, authRaw []byte
-		var gatewayURL, account string
-		if err := s.repository.QueryRow(`SELECT status,auth,gateway_url,account FROM gateway_binding WHERE id=1`).Scan(&statusRaw, &authRaw, &gatewayURL, &account); err == nil {
+		var gatewayURL, account, savedMachineCode, boundMachineCode, identityStatus, previousBindingID string
+		var fingerprintVersion int
+		if err := s.repository.QueryRow(`SELECT status,auth,gateway_url,account,machine_code,bound_machine_code,fingerprint_version,identity_status,previous_binding_id FROM gateway_binding WHERE id=1`).Scan(&statusRaw, &authRaw, &gatewayURL, &account, &savedMachineCode, &boundMachineCode, &fingerprintVersion, &identityStatus, &previousBindingID); err == nil {
 			var status gateway.Status
 			var savedAuth persistedGatewayAuthorization
 			if json.Unmarshal(statusRaw, &status) == nil && json.Unmarshal(authRaw, &savedAuth) == nil {
@@ -63,6 +69,12 @@ func (s *GatewayStateStore) load() {
 					Refreshable: savedAuth.Refreshable, AccessToken: savedAuth.AccessToken,
 				}
 				s.status, s.auth, s.gatewayURL, s.account = status, auth, gatewayURL, account
+				s.boundMachineCode, s.previousBindingID = boundMachineCode, previousBindingID
+				_ = savedMachineCode
+				_ = fingerprintVersion
+				if identityStatus != "" {
+					s.identityStatus = identityStatus
+				}
 				if s.status.Registration == gateway.RegistrationRegistered && s.auth.BindingID == "" {
 					s.status.Registration, s.status.Connected = gateway.RegistrationPending, false
 				}
@@ -92,6 +104,10 @@ func (s *GatewayStateStore) load() {
 	}
 	s.auth = gateway.Authorization{BindingID: saved.BindingID, Scopes: saved.Scopes, ExpiresAt: saved.ExpiresAt, Refreshable: saved.Refreshable, AccessToken: saved.AccessToken}
 	s.account = saved.Account
+	s.boundMachineCode, s.previousBindingID = saved.BoundMachineCode, saved.PreviousBindingID
+	if saved.IdentityStatus != "" {
+		s.identityStatus = saved.IdentityStatus
+	}
 	if s.status.Registration == gateway.RegistrationRegistered && s.auth.BindingID == "" {
 		s.status.Registration, s.status.Connected = gateway.RegistrationPending, false
 	}
@@ -125,7 +141,7 @@ func (s *GatewayStateStore) persistSnapshot(status gateway.Status, auth gateway.
 		if configuredURL := strings.TrimSpace(os.Getenv("WORKMESH_GATEWAY_URL")); configuredURL != "" {
 			gatewayURL = strings.TrimRight(configuredURL, "/")
 		}
-		_, err = s.repository.Exec(`INSERT INTO gateway_binding(id,status,auth,gateway_url,account,updated_at) VALUES(1,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,auth=excluded.auth,gateway_url=excluded.gateway_url,account=excluded.account,updated_at=excluded.updated_at`, statusRaw, authRaw, gatewayURL, s.account, time.Now().UTC().Format(time.RFC3339Nano))
+		_, err = s.repository.Exec(`INSERT INTO gateway_binding(id,status,auth,gateway_url,account,machine_code,bound_machine_code,fingerprint_version,identity_status,previous_binding_id,updated_at) VALUES(1,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,auth=excluded.auth,gateway_url=excluded.gateway_url,account=excluded.account,machine_code=excluded.machine_code,bound_machine_code=excluded.bound_machine_code,fingerprint_version=excluded.fingerprint_version,identity_status=excluded.identity_status,previous_binding_id=excluded.previous_binding_id,updated_at=excluded.updated_at`, statusRaw, authRaw, gatewayURL, s.account, s.machineCode, s.boundMachineCode, s.fingerprintVersion, s.identityStatus, s.previousBindingID, time.Now().UTC().Format(time.RFC3339Nano))
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(s.statePath), 0o700); err != nil {
@@ -135,7 +151,7 @@ func (s *GatewayStateStore) persistSnapshot(status gateway.Status, auth gateway.
 	if configuredURL := strings.TrimSpace(os.Getenv("WORKMESH_GATEWAY_URL")); configuredURL != "" {
 		gatewayURL = strings.TrimRight(configuredURL, "/")
 	}
-	saved := persistedGatewayState{Status: status, BindingID: auth.BindingID, Scopes: auth.Scopes, ExpiresAt: auth.ExpiresAt, Refreshable: auth.Refreshable, AccessToken: auth.AccessToken, GatewayURL: gatewayURL, GatewayID: status.GatewayID, Account: account, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
+	saved := persistedGatewayState{Status: status, BindingID: auth.BindingID, Scopes: auth.Scopes, ExpiresAt: auth.ExpiresAt, Refreshable: auth.Refreshable, AccessToken: auth.AccessToken, GatewayURL: gatewayURL, GatewayID: status.GatewayID, Account: account, MachineCode: s.machineCode, BoundMachineCode: s.boundMachineCode, FingerprintVersion: s.fingerprintVersion, IdentityStatus: s.identityStatus, PreviousBindingID: s.previousBindingID, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
 	if saved.ExpiresAt != "" {
 		saved.Status.AuthorizationExpireAt = saved.ExpiresAt
 	}

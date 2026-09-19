@@ -23,7 +23,13 @@ func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	request.NodeID = strings.TrimSpace(request.NodeID)
+	if err := s.machineIdentityAvailableError(); err != nil {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	s.mu.RLock()
+	request.NodeID = s.status.NodeID
+	s.mu.RUnlock()
 	if request.NodeID == "" {
 		writeError(w, http.StatusBadRequest, errNodeIDRequired)
 		return
@@ -47,6 +53,7 @@ func (s *GatewayStateStore) registerHandler(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("保存 Gateway 绑定失败: %w", err))
 		return
 	}
+	s.startGatewayLoopIfReady()
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"registered": true, "gatewayUrl": gatewayURL, "nodeId": registerRequest.NodeID, "status": "running", "bindingId": auth.BindingID}})
 }
 
@@ -86,7 +93,11 @@ func (s *GatewayStateStore) prepareRegistrationClient(ctx context.Context, reque
 		if strings.TrimSpace(request.RegistrationToken) == "" {
 			return nil, http.StatusBadRequest, errors.New("Gateway 注册令牌不能为空")
 		}
-		temporary := gateway.NewHTTPClient(baseURL, os.Getenv("WORKMESH_GATEWAY_ID"), os.Getenv("WORKMESH_GATEWAY_SECRET"))
+		identity, err := gateway.LoadOrCreateIdentity(s.identityPath)
+		if err != nil {
+			return nil, http.StatusInternalServerError, fmt.Errorf("加载 Gateway 节点身份失败: %w", err)
+		}
+		temporary := gateway.NewHTTPClientWithIdentity(baseURL, os.Getenv("WORKMESH_GATEWAY_ID"), os.Getenv("WORKMESH_GATEWAY_SECRET"), identity)
 		temporary.AccessToken = strings.TrimSpace(request.RegistrationToken)
 		client = temporary
 	}
@@ -103,17 +114,10 @@ func (s *GatewayStateStore) prepareRegistrationClient(ctx context.Context, reque
 
 // registrationRequest 补齐前端可选字段，生成稳定的 v2 节点注册请求。
 func (s *GatewayStateStore) registrationRequest(request gatewayRegisterRequest) gateway.RegisterRequest {
-	result := gateway.RegisterRequest{NodeID: request.NodeID, PublicKey: request.PublicKey, DisplayName: request.DisplayName, Role: request.Role, ProtocolVersion: request.ProtocolVersion, Capabilities: request.Capabilities, Metadata: request.Metadata}
+	result := s.gatewayRegisterRequest(request.Capabilities)
+	result.Metadata = request.Metadata
 	if result.DisplayName == "" {
-		result.DisplayName = request.NodeID
-	}
-	if result.Role == "" {
-		s.mu.RLock()
-		result.Role = s.status.Role
-		s.mu.RUnlock()
-	}
-	if result.ProtocolVersion == "" {
-		result.ProtocolVersion = "v2"
+		result.DisplayName = request.DisplayName
 	}
 	if len(result.Capabilities) == 0 {
 		result.Capabilities = append([]string(nil), gatewayCapabilities...)
@@ -127,6 +131,7 @@ func (s *GatewayStateStore) saveRegistration(client gateway.ProtocolClient, requ
 	defer s.mu.Unlock()
 	previousStatus, previousAuth := s.status, s.auth
 	previousClient, previousURL := s.client, s.gatewayURL
+	previousBoundMachineCode, previousIdentityStatus := s.boundMachineCode, s.identityStatus
 	s.client = client
 	s.gatewayURL = strings.TrimRight(strings.TrimSpace(requestedURL), "/")
 	if s.gatewayURL == "" {
@@ -140,10 +145,20 @@ func (s *GatewayStateStore) saveRegistration(client gateway.ProtocolClient, requ
 	s.status.AuthorizationExpireAt = auth.ExpiresAt
 	s.status.Reason = ""
 	s.auth = auth
+	s.boundMachineCode = s.machineCode
+	s.identityStatus = "ready"
 	if err := s.persistLocked(); err != nil {
 		s.status, s.auth = previousStatus, previousAuth
 		s.client, s.gatewayURL = previousClient, previousURL
+		s.boundMachineCode, s.identityStatus = previousBoundMachineCode, previousIdentityStatus
 		return "", err
+	}
+	if err := s.persistIdentityMachineMarker(); err != nil {
+		s.status, s.auth = previousStatus, previousAuth
+		s.client, s.gatewayURL = previousClient, previousURL
+		s.boundMachineCode, s.identityStatus = previousBoundMachineCode, previousIdentityStatus
+		_ = s.persistLocked()
+		return "", fmt.Errorf("保存 Gateway 机器身份标记失败: %w", err)
 	}
 	return s.gatewayURL, nil
 }

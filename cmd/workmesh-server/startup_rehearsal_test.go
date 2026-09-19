@@ -118,8 +118,8 @@ func assertMigrationRehearsal(t *testing.T, path, artifactHash string) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&schemaCount); err != nil {
 		t.Fatal(err)
 	}
-	if schemaCount != 16 {
-		t.Fatalf("隔离库迁移数量 = %d, want 16", schemaCount)
+	if schemaCount != 17 {
+		t.Fatalf("隔离库迁移数量 = %d, want 17", schemaCount)
 	}
 	if err := db.QueryRow("SELECT COUNT(*) FROM migration_runs WHERE status='failed'").Scan(&failedRuns); err != nil {
 		t.Fatal(err)
@@ -127,10 +127,11 @@ func assertMigrationRehearsal(t *testing.T, path, artifactHash string) {
 	if failedRuns != 0 {
 		t.Fatalf("隔离迁移不应失败，实际失败数 = %d", failedRuns)
 	}
-	for _, version := range []string{"0001-migration-metadata", "0012-runtime-task-state", "0013-log-audit-v2", "0015-website-template-relational"} {
+	for _, version := range []string{"0001-migration-metadata", "0012-runtime-task-state", "0013-log-audit-v2", "0016-gateway-machine-identity"} {
 		assertMigrationRunCount(t, db, version, "applied", 1)
 		assertMigrationRunCount(t, db, version, "noop", 1)
 	}
+	assertMigrationRunCount(t, db, "0015-website-template-relational", "applied", 1)
 	for _, version := range []string{"0008-database-backup-metadata", "0009-database-runtime-states"} {
 		assertMigrationRunCount(t, db, version, "applied", 1)
 	}

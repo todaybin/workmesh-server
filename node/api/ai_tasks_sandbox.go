@@ -187,7 +187,7 @@ func operateSandboxTask(w http.ResponseWriter, r *http.Request, provider taskPro
 	defer cancel()
 	switch path {
 	case "start":
-		acquired, ok := acquireManagedSlot(managedRuntimeSlots.aiJobs, id, nodeRuntimeLimits.aiJobs)
+		acquired, ok := acquireManagedSlot(managedRuntimeSlots.aiJobs, id, "aiJobs", nodeRuntimeLimits.aiJobs)
 		if !ok {
 			aiError(w, http.StatusTooManyRequests, "AI_JOB_LIMIT_REACHED", "AI 任务并发数已达到上限")
 			return

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -26,6 +27,30 @@ const (
 type Identity struct {
 	PrivateKey ed25519.PrivateKey
 	PublicKey  ed25519.PublicKey
+}
+
+// RotateIdentity 停用当前身份文件并生成新的 Ed25519 身份。
+// 旧文件仅改名为 revoked 审计副本，运行时不会再次加载它。
+func RotateIdentity(filename string) (*Identity, error) {
+	filename = strings.TrimSpace(filename)
+	if filename == "" || strings.ContainsRune(filename, 0) || !filepath.IsAbs(filename) {
+		return nil, errors.New("节点 Gateway 身份路径必须是绝对路径")
+	}
+	if info, err := os.Lstat(filename); err == nil {
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, errors.New("节点 Gateway 身份文件必须是普通文件")
+		}
+		revoked := fmt.Sprintf("%s.revoked-%d", filename, time.Now().UTC().UnixNano())
+		if err := os.Rename(filename, revoked); err != nil {
+			return nil, fmt.Errorf("停用旧节点 Gateway 身份失败: %w", err)
+		}
+		if runtime.GOOS != "windows" {
+			_ = os.Chmod(revoked, identityFileMode)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("检查旧节点 Gateway 身份失败: %w", err)
+	}
+	return LoadOrCreateIdentity(filename)
 }
 
 // NewIdentity 生成新的节点签名身份。

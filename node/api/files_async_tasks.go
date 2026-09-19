@@ -33,7 +33,7 @@ func startFileAsyncTask(taskID, kind, message string) (context.Context, error) {
 	if taskID == "" {
 		return nil, errors.New("任务 ID 不能为空")
 	}
-	releaseConversion, ok := tryRuntimeSlot(nodeRuntimeLimits.conversions)
+	releaseConversion, ok := tryRuntimeSlotFor("conversions", nodeRuntimeLimits.conversions)
 	if !ok {
 		return nil, errors.New("并发文件转换已达到上限")
 	}
