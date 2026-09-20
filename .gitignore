@@ -13,3 +13,4 @@ web/node_modules/
 web/dist/
 internal/webassets/dist/*
 !internal/webassets/dist/.keep
+gcm-diagnose.log

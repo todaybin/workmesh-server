@@ -1,0 +1,20 @@
+syntax = "proto3";
+package workmesh.execution.v1;
+option go_package = "github.com/todaybin/workmesh-server/generated/proto/execution/v1;executionv1";
+
+service ExecutionService {
+  rpc ExecuteTask(TaskRequest) returns (TaskResponse);
+  rpc StreamTaskStatus(TaskID) returns (stream TaskStatusUpdate);
+  rpc CancelTask(TaskID) returns (CancelResponse);
+  rpc ListRuntimeProviders(RuntimeProviderRequest) returns (RuntimeProviderResponse);
+}
+
+message TaskRequest { string task_id = 1; string project_id = 2; string type = 3; string instruction = 4; string git_repo_url = 5; string branch = 6; map<string, string> env = 7; RuntimePolicy runtime_policy = 8; }
+message TaskResponse { string task_id = 1; string status = 2; string execution_node_id = 3; }
+message TaskID { string task_id = 1; }
+message TaskStatusUpdate { string task_id = 1; string status = 2; float progress = 3; string log_chunk = 4; string diff_json = 5; }
+message CancelResponse { bool success = 1; }
+message RuntimePolicy { string sandbox_type = 1; string backend = 2; string isolation_required = 3; string risk_class = 4; string environment = 5; bool allow_remote_dispatch = 6; repeated string allowed_hosts = 7; string workspace_ref = 8; string production_release_approval_id = 9; }
+message ProviderCapability { string sandbox_type = 1; string backend = 2; bool available = 3; bool supports_untrusted_agent = 4; bool supports_production_release = 5; string version = 6; repeated string environment_ids = 7; repeated string reason_codes = 8; }
+message RuntimeProviderRequest {}
+message RuntimeProviderResponse { string default_sandbox_type = 1; repeated ProviderCapability providers = 2; }
