@@ -139,6 +139,11 @@ func mongoDBCLICommand(target MongoDBTarget) ([]string, bool, error) {
 	if port > 65535 {
 		return nil, false, errors.New("MongoDB 端口无效")
 	}
+	// 容器内客户端必须连镜像监听端口，不能使用宿主机映射端口。
+	if target.ContainerName != "" {
+		host = "127.0.0.1"
+		port = 27017
+	}
 	args := []string{bin, "--quiet", "--host", host, "--port", strconv.Itoa(port)}
 	if target.ContainerName != "" {
 		if err := ValidateDockerIdentifier(target.ContainerName); err != nil {

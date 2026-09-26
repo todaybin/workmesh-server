@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -27,14 +26,7 @@ func registerTerminalRoutes(mux *http.ServeMux) {
 // registerSSHRoutes 注册运行时相关 HTTP 路由，并保持请求响应契约。
 func registerSSHRoutes(mux *http.ServeMux, s *runtimeStore) {
 	get := func(w http.ResponseWriter, _ *http.Request) {
-		var v map[string]any
-		if !loadNodeSetting("ssh", &v) || v == nil {
-			v = map[string]any{}
-		}
-		delete(v, "password")
-		delete(v, "privateKey")
-		delete(v, "passPhrase")
-		runtimeOK(w, v)
+		runtimeOK(w, loadSSHConnResponse())
 	}
 	mux.HandleFunc("GET /api/v2/settings/ssh/conn", get)
 	mux.HandleFunc("POST /api/v2/settings/ssh", func(w http.ResponseWriter, r *http.Request) {
@@ -63,11 +55,22 @@ func registerSSHRoutes(mux *http.ServeMux, s *runtimeStore) {
 			runtimeErr(w, 400, "解析默认连接配置失败: "+err.Error())
 			return
 		}
-		if err := saveNodeSetting("ssh.default", v); err != nil {
+		show, ok := normalizeLocalSSHConnShow(runtimeString(v, "defaultConn"))
+		if !ok {
+			runtimeErr(w, 400, "defaultConn 无效")
+			return
+		}
+		if show == "Disable" && hostBoolValue(v["withReset"]) {
+			if err := saveNodeSetting("ssh", map[string]any{}); err != nil {
+				runtimeErr(w, 500, "重置 SSH 连接失败: "+err.Error())
+				return
+			}
+		}
+		if err := setDomainSetting("localSSHConnShow", show); err != nil {
 			runtimeErr(w, 500, "保存默认连接配置失败: "+err.Error())
 			return
 		}
-		runtimeOK(w, v)
+		runtimeOK(w, map[string]any{"defaultConn": show, "localSSHConnShow": show})
 	})
 	mux.HandleFunc("POST /api/v2/settings/ssh/check/info", func(w http.ResponseWriter, r *http.Request) {
 		v, err := runtimeBody(r)
@@ -79,12 +82,47 @@ func registerSSHRoutes(mux *http.ServeMux, s *runtimeStore) {
 	})
 	mux.HandleFunc("POST /api/v2/settings/ssh/check", func(w http.ResponseWriter, r *http.Request) {
 		var v map[string]any
-		if !loadNodeSetting("ssh", &v) {
-			runtimeErr(w, 400, "尚未配置 SSH 连接")
+		if !loadNodeSetting("ssh", &v) || v == nil || runtimeString(v, "host", "addr", "address") == "" {
+			runtimeOK(w, false)
 			return
 		}
 		runtimeSSHCheck(w, v)
 	})
+}
+
+// loadSSHConnResponse 返回本地 SSH 连接的非敏感字段，并带上默认连接开关。
+func loadSSHConnResponse() map[string]any {
+	var stored map[string]any
+	if !loadNodeSetting("ssh", &stored) || stored == nil {
+		stored = map[string]any{}
+	}
+	out := cloneMapRuntime(stored)
+	delete(out, "password")
+	delete(out, "privateKey")
+	delete(out, "passPhrase")
+	if runtimeString(out, "addr") == "" {
+		if host := runtimeString(out, "host", "address"); host != "" {
+			out["addr"] = host
+		}
+	}
+	show := domainSettingString("localSSHConnShow")
+	if show == "" {
+		show = "disable"
+	}
+	out["localSSHConnShow"] = show
+	return out
+}
+
+// normalizeLocalSSHConnShow 把默认连接开关规范为前端比较使用的 Enable/Disable。
+func normalizeLocalSSHConnShow(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "enable":
+		return "Enable", true
+	case "disable":
+		return "Disable", true
+	default:
+		return "", false
+	}
 }
 
 // cloneMapRuntime 复制运行时数据，避免调用方共享可变状态。
@@ -126,16 +164,10 @@ func runtimeSSHCheck(w http.ResponseWriter, v map[string]any) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(host, fmt.Sprint(port)))
-	result := map[string]any{"host": host, "port": port, "connected": err == nil}
 	if conn != nil {
 		_ = conn.Close()
 	}
-	if err != nil {
-		result["error"] = err.Error()
-		runtimeErrData(w, http.StatusBadGateway, "SSH 连接失败", result)
-		return
-	}
-	runtimeOK(w, result)
+	runtimeOK(w, err == nil)
 }
 
 // runtimeIntValue 处理运行时业务规则，并保持 SQLite 与外部资源一致。
@@ -157,30 +189,31 @@ func runtimeIntValue(v any) int {
 func registerToolboxRoutes(mux *http.ServeMux, s *runtimeStore) {
 	// 显式注册查询路由，便于契约扫描和文档准确发现每个功能。
 	mux.HandleFunc("GET /api/v2/toolbox/device/users", func(w http.ResponseWriter, _ *http.Request) {
-		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/device/users"))
+		runtimeOK(w, listHostUsers())
 	})
 	mux.HandleFunc("GET /api/v2/toolbox/device/zone/options", func(w http.ResponseWriter, _ *http.Request) {
-		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/device/zone/options"))
+		runtimeOK(w, listTimeZones())
 	})
-	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/base", func(w http.ResponseWriter, _ *http.Request) {
-		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/fail2ban/base"))
+	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/base", func(w http.ResponseWriter, r *http.Request) {
+		runtimeOK(w, fail2banBaseInfo(r.Context(), s))
 	})
 	mux.HandleFunc("GET /api/v2/toolbox/fail2ban/load/conf", func(w http.ResponseWriter, _ *http.Request) {
-		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/fail2ban/load/conf"))
+		content, err := readFail2banConfig(s)
+		if err != nil {
+			runtimeErr(w, http.StatusInternalServerError, "读取 Fail2ban 配置失败: "+err.Error())
+			return
+		}
+		runtimeOK(w, content)
 	})
-	mux.HandleFunc("GET /api/v2/toolbox/ftp/base", func(w http.ResponseWriter, _ *http.Request) {
-		runtimeOK(w, toolboxGetData(s, "/api/v2/toolbox/ftp/base"))
+	mux.HandleFunc("GET /api/v2/toolbox/ftp/base", func(w http.ResponseWriter, r *http.Request) {
+		runtimeOK(w, ftpBaseInfo(r.Context()))
 	})
 	registerToolboxDeviceRoutes(mux, s)
 	registerToolboxFail2BanRoutes(mux, s)
 	registerToolboxFtpRoutes(mux, s)
+	registerToolboxCleanRoutes(mux)
+	registerToolboxClamRoutes(mux)
 	registerTerminalAIRoutes(mux)
-	for _, p := range []string{"/api/v2/toolbox/clam", "/api/v2/toolbox/clam/base", "/api/v2/toolbox/clam/del", "/api/v2/toolbox/clam/file/search", "/api/v2/toolbox/clam/file/update", "/api/v2/toolbox/clam/handle", "/api/v2/toolbox/clam/operate", "/api/v2/toolbox/clam/record/clean", "/api/v2/toolbox/clam/record/search", "/api/v2/toolbox/clam/search", "/api/v2/toolbox/clam/status/update", "/api/v2/toolbox/clam/update", "/api/v2/toolbox/clean", "/api/v2/toolbox/scan"} {
-		mux.HandleFunc("POST "+p, func(w http.ResponseWriter, r *http.Request) {
-			v, _ := runtimeBody(r)
-			runtimeOK(w, map[string]any{"status": "accepted", "config": v})
-		})
-	}
 	_ = s
 }
 
@@ -218,10 +251,16 @@ func registerTerminalAIRoutes(mux *http.ServeMux) {
 // loadTerminalAISettings 返回前端需要的完整终端 AI 配置，并在缺少记录时使用安全默认值。
 func loadTerminalAISettings() map[string]any {
 	stored := map[string]any{}
-	_ = loadNodeSetting(terminalAISettingKey, &stored)
+	if !loadNodeSetting(terminalAISettingKey, &stored) || len(stored) == 0 {
+		settings := terminalAIDefaultSettings()
+		settings["aiRiskCommands"] = terminalAIDefaultRiskCommands
+		return settings
+	}
 	settings, err := normalizeTerminalAISettings(stored)
 	if err != nil {
-		return terminalAIDefaultSettings()
+		fallback := terminalAIDefaultSettings()
+		fallback["aiRiskCommands"] = terminalAIDefaultRiskCommands
+		return fallback
 	}
 	return settings
 }
@@ -355,75 +394,112 @@ func normalizeTerminalAIRiskCommands(value any) (string, error) {
 
 // registerToolboxDeviceRoutes 注册设备信息、主机配置和 DNS 探测。
 func registerToolboxDeviceRoutes(mux *http.ServeMux, s *runtimeStore) {
-	mux.HandleFunc("POST /api/v2/toolbox/device/base", func(w http.ResponseWriter, _ *http.Request) {
-		host, _ := os.Hostname()
-		runtimeOK(w, map[string]any{"hostname": host, "os": runtime.GOOS, "arch": runtime.GOARCH, "status": "ready"})
+	mux.HandleFunc("POST /api/v2/toolbox/device/base", func(w http.ResponseWriter, r *http.Request) {
+		runtimeOK(w, deviceBaseInfo(r.Context()))
 	})
 	mux.HandleFunc("POST /api/v2/toolbox/device/check/dns", func(w http.ResponseWriter, r *http.Request) {
 		body, err := runtimeBody(r)
 		if err != nil {
-			runtimeErr(w, 400, "解析 DNS 请求失败: "+err.Error())
+			runtimeErr(w, http.StatusBadRequest, "解析 DNS 请求失败: "+err.Error())
 			return
 		}
-		host := runtimeString(body, "host", "domain")
-		if host == "" || len(host) > 253 || strings.ContainsAny(host, "/\\ ") {
-			runtimeErr(w, 400, "DNS 主机名无效")
+		resolved, err := checkDeviceDNS(r.Context(), body)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		defer cancel()
-		ips, lookupErr := net.DefaultResolver.LookupHost(ctx, host)
-		if lookupErr != nil {
-			runtimeErr(w, http.StatusBadGateway, "DNS 查询失败: "+lookupErr.Error())
+		if runtimeString(body, "host", "domain") != "" {
+			runtimeOK(w, map[string]any{"host": runtimeString(body, "host", "domain"), "resolved": resolved})
 			return
 		}
-		runtimeOK(w, map[string]any{"host": host, "addresses": ips, "resolved": true})
+		runtimeOK(w, resolved)
 	})
-	mux.HandleFunc("POST /api/v2/toolbox/device/conf", func(w http.ResponseWriter, _ *http.Request) {
-		s.mu.RLock()
-		value := s.state.Settings["device"]
-		s.mu.RUnlock()
-		if value == nil {
-			value = map[string]any{}
+	mux.HandleFunc("POST /api/v2/toolbox/device/conf", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, "解析设备配置失败: "+err.Error())
+			return
 		}
-		runtimeOK(w, value)
-	})
-	for _, path := range []string{"/api/v2/toolbox/device/update/byconf", "/api/v2/toolbox/device/update/conf", "/api/v2/toolbox/device/update/host", "/api/v2/toolbox/device/update/swap"} {
-		key := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v2/toolbox/device/update/"), "/")
-		mux.HandleFunc("POST "+path, func(w http.ResponseWriter, r *http.Request) {
-			body, err := runtimeBody(r)
-			if err != nil {
-				runtimeErr(w, 400, "解析设备配置失败: "+err.Error())
+		content, err := deviceConfContent(runtimeString(body, "name"))
+		if err != nil {
+			if os.IsNotExist(err) {
+				runtimeOK(w, "")
 				return
 			}
-			if key == "host" {
-				name := runtimeString(body, "hostname", "host")
-				if name == "" || len(name) > 253 || strings.ContainsAny(name, " /\\") {
-					runtimeErr(w, 400, "主机名无效")
-					return
-				}
-			}
-			if key == "swap" {
-				if value, ok := body["size"].(float64); ok && (value < 0 || value > 1<<40) {
-					runtimeErr(w, 400, "交换分区大小超出范围")
-					return
-				}
-			}
-			delete(body, "password")
-			delete(body, "passwd")
-			s.mu.Lock()
-			s.state.Settings["device"] = body
-			saveErr := s.saveLocked()
-			s.mu.Unlock()
-			if saveErr != nil {
-				runtimeErr(w, 500, "保存设备配置失败: "+saveErr.Error())
-				return
-			}
-			runtimeOK(w, map[string]any{"updated": true, "scope": key, "config": body})
-		})
-	}
-	// 密码更新只确认已接收，不把敏感字段写入状态或日志。
+			runtimeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		runtimeOK(w, content)
+	})
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/conf", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, "解析设备配置失败: "+err.Error())
+			return
+		}
+		if err := applyDeviceConf(r.Context(), runtimeString(body, "key"), runtimeString(body, "value")); err != nil {
+			writeHostMutationError(w, err)
+			return
+		}
+		runtimeOK(w, map[string]any{"updated": true})
+	})
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/byconf", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, "解析设备配置失败: "+err.Error())
+			return
+		}
+		name := strings.ToLower(runtimeString(body, "name"))
+		file := runtimeString(body, "file")
+		var applyErr error
+		switch name {
+		case "hosts":
+			applyErr = applyHostsFile(file)
+		case "dns":
+			applyErr = writeNameServers(file)
+		default:
+			applyErr = errors.New("设备配置名称无效")
+		}
+		if applyErr != nil {
+			writeHostMutationError(w, applyErr)
+			return
+		}
+		runtimeOK(w, map[string]any{"updated": true})
+	})
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/host", func(w http.ResponseWriter, r *http.Request) {
+		raw, err := decodeDeviceBody(r.Body)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, "解析 Hosts 失败: "+err.Error())
+			return
+		}
+		if err := applyHostsEntries(r.Context(), raw); err != nil {
+			writeHostMutationError(w, err)
+			return
+		}
+		runtimeOK(w, map[string]any{"updated": true})
+	})
+	mux.HandleFunc("POST /api/v2/toolbox/device/update/swap", func(w http.ResponseWriter, r *http.Request) {
+		body, err := runtimeBody(r)
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, "解析交换分区请求失败: "+err.Error())
+			return
+		}
+		if err := applyDeviceSwap(r.Context(), body); err != nil {
+			writeHostMutationError(w, err)
+			return
+		}
+		runtimeOK(w, map[string]any{"updated": true})
+	})
 	mux.HandleFunc("POST /api/v2/toolbox/device/update/passwd", toolboxDevicePasswordHandler())
+}
+
+func writeHostMutationError(w http.ResponseWriter, err error) {
+	var denied hostMutationDenied
+	if errors.As(err, &denied) {
+		runtimeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	runtimeErr(w, http.StatusBadRequest, err.Error())
 }
 
 // toolboxDevicePasswordHandler 校验密码更新请求且不持久化敏感字段。
@@ -434,11 +510,16 @@ func toolboxDevicePasswordHandler() http.HandlerFunc {
 			runtimeErr(w, 400, "解析密码请求失败: "+err.Error())
 			return
 		}
-		if runtimeString(body, "password", "passwd") == "" {
-			runtimeErr(w, 400, "密码不能为空")
+		encoded := runtimeString(body, "password", "passwd")
+		if encoded == "" {
+			runtimeErr(w, http.StatusBadRequest, "密码不能为空")
 			return
 		}
-		runtimeOK(w, map[string]any{"updated": true, "sensitive": true})
+		if err := applyDevicePassword(r.Context(), runtimeString(body, "user"), encoded); err != nil {
+			writeHostMutationError(w, err)
+			return
+		}
+		runtimeOK(w, map[string]any{"updated": true})
 	}
 }
 

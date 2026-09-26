@@ -4,6 +4,8 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -21,25 +23,33 @@ import (
 
 // aiPersistentData 是 AI 执行面的小型持久化模型，避免为控制配置常驻数据库连接。
 type aiPersistentData struct {
-	Accounts  []map[string]any            `json:"accounts"`
-	Agents    []map[string]any            `json:"agents"`
-	MCP       []map[string]any            `json:"mcp"`
-	Ollama    []map[string]any            `json:"ollama"`
-	TensorRT  []map[string]any            `json:"tensorrt"`
-	Domains   map[string]map[string]any   `json:"domains"`
-	Configs   map[string]map[string]any   `json:"configs"`
-	Sessions  map[string][]map[string]any `json:"sessions"`
-	Plugins   []map[string]any            `json:"plugins"`
-	Skills    []map[string]any            `json:"skills"`
-	Sandboxes []map[string]any            `json:"sandboxes"`
-	Tasks     []map[string]any            `json:"tasks"`
+	Accounts             []map[string]any            `json:"accounts"`
+	Agents               []map[string]any            `json:"agents"`
+	MCP                  []map[string]any            `json:"mcp"`
+	Ollama               []map[string]any            `json:"ollama"`
+	TensorRT             []map[string]any            `json:"tensorrt"`
+	Domains              map[string]map[string]any   `json:"domains"`
+	Configs              map[string]map[string]any   `json:"configs"`
+	Sessions             map[string][]map[string]any `json:"sessions"`
+	Plugins              []map[string]any            `json:"plugins"`
+	Skills               []map[string]any            `json:"skills"`
+	Sandboxes            []map[string]any            `json:"sandboxes"`
+	Tasks                []map[string]any            `json:"tasks"`
+	AgentRuntimes        []map[string]any            `json:"agentRuntimes"`
+	TeamTasks            []map[string]any            `json:"teamTasks"`
+	ArtifactReclaimPlans []map[string]any            `json:"artifactReclaimPlans"`
+	DeploymentPlans      []map[string]any            `json:"deploymentPlans"`
+	AgentCommands        []map[string]any            `json:"agentCommands"`
+	TeamEvents           map[string][]map[string]any `json:"teamEvents"`
+	TeamSequences        map[string]int64            `json:"teamSequences"`
 }
 
 type executionState struct {
-	mu    sync.RWMutex
-	path  string
-	data  aiPersistentData
-	tasks map[string]map[string]any
+	mu     sync.RWMutex
+	path   string
+	data   aiPersistentData
+	tasks  map[string]map[string]any
+	notify chan struct{}
 }
 
 var aiState executionState
@@ -81,25 +91,30 @@ func getTaskProvider() *taskruntime.TaskProvider {
 	if err != nil {
 		return nil
 	}
-	provider, err := taskruntime.NewTaskProvider(backend)
+	provider, err := taskruntime.NewCapabilityCheckedTaskProvider(backend)
 	if err != nil {
 		return nil
 	}
 	taskProviderState.provider = provider
 	taskProviderState.command = command
 	taskProviderState.digest = digest
-	// CLI 后端可复用重启前的沙盒句柄；无效记录由 Provider 的状态校验忽略。
+	// CLI 后端只允许通过只读 inspect 核验重启前的沙盒句柄；没有 inspect
+	// 能力的后端会把句柄标记为 unknown，禁止继续执行或销毁。
 	s := getAIState()
 	s.mu.RLock()
 	handles := make([]taskruntime.TaskHandle, 0, len(s.data.Tasks))
 	for _, item := range s.data.Tasks {
 		handles = append(handles, taskruntime.TaskHandle{
 			TaskID: aiID(item, "taskId", "id"), SandboxID: aiString(item, "sandboxId"), ImageDigest: aiString(item, "imageDigest"),
-			SandboxType: aiString(item, "sandboxType"), Backend: aiString(item, "backend"), State: taskruntime.TaskState(aiString(item, "status")),
+			SandboxType: aiString(item, "sandboxType"), Backend: aiString(item, "backend"), WorkspaceRef: aiString(item, "workspaceRef"), State: taskruntime.TaskState(aiString(item, "status")),
 		})
 	}
 	s.mu.RUnlock()
-	provider.Restore(handles)
+	if inspected, inspectErr := provider.RestoreAndInspect(context.Background(), handles); inspectErr == nil {
+		for _, handle := range inspected {
+			_ = updatePersistedTask(handle.TaskID, string(handle.State))
+		}
+	}
 	return provider
 }
 
@@ -114,7 +129,7 @@ func getAIState() *executionState {
 	if aiState.path == path && aiState.tasks != nil {
 		return &aiState
 	}
-	data := aiPersistentData{Domains: make(map[string]map[string]any), Configs: make(map[string]map[string]any), Sessions: make(map[string][]map[string]any), Sandboxes: make([]map[string]any, 0), Tasks: make([]map[string]any, 0)}
+	data := aiPersistentData{Domains: make(map[string]map[string]any), Configs: make(map[string]map[string]any), Sessions: make(map[string][]map[string]any), Sandboxes: make([]map[string]any, 0), Tasks: make([]map[string]any, 0), AgentRuntimes: make([]map[string]any, 0), TeamTasks: make([]map[string]any, 0), ArtifactReclaimPlans: make([]map[string]any, 0), DeploymentPlans: make([]map[string]any, 0), AgentCommands: make([]map[string]any, 0), TeamEvents: make(map[string][]map[string]any), TeamSequences: make(map[string]int64)}
 	if db := sharedDB(); db != nil {
 		// 公共 SQLite 存在时，ai.json 仅作为一次性迁移输入。
 		if !loadJSONState("ai_state", &data) {
@@ -143,13 +158,34 @@ func getAIState() *executionState {
 	if data.Sandboxes == nil {
 		data.Sandboxes = make([]map[string]any, 0)
 	}
+	if data.AgentRuntimes == nil {
+		data.AgentRuntimes = make([]map[string]any, 0)
+	}
+	if data.TeamTasks == nil {
+		data.TeamTasks = make([]map[string]any, 0)
+	}
+	if data.ArtifactReclaimPlans == nil {
+		data.ArtifactReclaimPlans = make([]map[string]any, 0)
+	}
+	if data.DeploymentPlans == nil {
+		data.DeploymentPlans = make([]map[string]any, 0)
+	}
+	if data.AgentCommands == nil {
+		data.AgentCommands = make([]map[string]any, 0)
+	}
+	if data.TeamEvents == nil {
+		data.TeamEvents = make(map[string][]map[string]any)
+	}
+	if data.TeamSequences == nil {
+		data.TeamSequences = make(map[string]int64)
+	}
 	tasks := make(map[string]map[string]any, len(data.Tasks))
 	for _, item := range data.Tasks {
 		if id := aiID(item, "taskId", "id"); id != "" {
 			tasks[id] = cloneMap(item)
 		}
 	}
-	aiState = executionState{path: path, data: data, tasks: tasks}
+	aiState = executionState{path: path, data: data, tasks: tasks, notify: make(chan struct{})}
 	return &aiState
 }
 
@@ -175,12 +211,28 @@ func aiBody(r *http.Request) (map[string]any, error) {
 	if r.Body == nil {
 		return map[string]any{}, nil
 	}
+	const maxAIRequestBytes = 2 << 20
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxAIRequestBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxAIRequestBytes {
+		return nil, errors.New("JSON 请求超过 2MiB 限制")
+	}
 	var body map[string]any
-	err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&body)
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	err = decoder.Decode(&body)
 	if errors.Is(err, io.EOF) {
 		return map[string]any{}, nil
 	}
 	if err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("JSON 请求不能包含尾随值")
+		}
 		return nil, err
 	}
 	if body == nil {

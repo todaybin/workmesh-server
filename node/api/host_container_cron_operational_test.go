@@ -45,10 +45,10 @@ func TestHostOperationalRoutesExposeLocalState(t *testing.T) {
 }
 
 func TestHostMonitorSettingsPersistAndValidate(t *testing.T) {
-	t.Setenv("WORKMESH_DATA_DIR", filepath.Join(".tmp", "host-operational-persist"))
+	t.Setenv("WORKMESH_DATA_DIR", filepath.Join(t.TempDir(), "host-operational-persist"))
 	mux := http.NewServeMux()
 	RegisterHostContainerCronRoutes(mux)
-	body := bytes.NewBufferString(`{"enabled":false,"interval":30}`)
+	body := bytes.NewBufferString(`{"key":"MonitorStatus","value":"Disable"}`)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/api/v2/hosts/monitor/setting/update", body))
 	if res.Code != http.StatusOK {
@@ -57,13 +57,16 @@ func TestHostMonitorSettingsPersistAndValidate(t *testing.T) {
 	get := httptest.NewRecorder()
 	mux.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/v2/hosts/monitor/setting", nil))
 	var envelope struct {
-		Data map[string]any `json:"data"`
+		Data hostMonitorSettings `json:"data"`
 	}
-	if err := json.Unmarshal(get.Body.Bytes(), &envelope); err != nil || envelope.Data["enabled"] != false {
+	if err := json.Unmarshal(get.Body.Bytes(), &envelope); err != nil || envelope.Data.MonitorStatus != "Disable" {
 		t.Fatalf("settings were not persisted: %s", get.Body.String())
 	}
+	if envelope.Data.MonitorInterval == "" || envelope.Data.DefaultNetwork == "" || envelope.Data.DefaultIO == "" {
+		t.Fatalf("monitor setting contract missing fields: %s", get.Body.String())
+	}
 	bad := httptest.NewRecorder()
-	mux.ServeHTTP(bad, httptest.NewRequest(http.MethodPost, "/api/v2/hosts/monitor/setting/update", bytes.NewBufferString(`{"interval":0}`)))
+	mux.ServeHTTP(bad, httptest.NewRequest(http.MethodPost, "/api/v2/hosts/monitor/setting/update", bytes.NewBufferString(`{"key":"MonitorInterval","value":"0"}`)))
 	if bad.Code != http.StatusBadRequest {
 		t.Fatalf("invalid interval status=%d body=%s", bad.Code, bad.Body.String())
 	}

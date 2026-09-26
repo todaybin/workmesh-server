@@ -46,6 +46,40 @@ func TestSecurityMiddlewareSessionAndCSRF(t *testing.T) {
 	}
 }
 
+func TestSecurityMiddlewareAllowsAgentRuntimeSelfAuthentication(t *testing.T) {
+	called := false
+	handler := NewSecurityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}), SecurityMiddlewareOptions{
+		Authorize: func(*http.Request) bool { return false },
+		SelfAuthenticated: func(r *http.Request) bool {
+			return r.Method == http.MethodPost && r.URL.Path == "/api/v2/agent-runtime/events"
+		},
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/agent-runtime/events", strings.NewReader(`{}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || !called {
+		t.Fatalf("Agent runtime 自认证入口未放行: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestSecurityMiddlewarePreservesAuthenticatedSSEFlush(t *testing.T) {
+	handler := NewSecurityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: ready\ndata: {}\n\n"))
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Errorf("SSE flush 被安全中间件包装器阻断: %v", err)
+		}
+	}), SecurityMiddlewareOptions{Authorize: func(*http.Request) bool { return true }})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v2/projects/project-a/events/stream", nil))
+	if response.Code != http.StatusOK || !response.Flushed || !strings.Contains(response.Body.String(), "event: ready") {
+		t.Fatalf("SSE 未正确写出: status=%d flushed=%v body=%s", response.Code, response.Flushed, response.Body.String())
+	}
+}
+
 func TestSecurityMiddlewareAllowsSignedRelayToReachNodeRelay(t *testing.T) {
 	authorizedCalled := false
 	handler := NewSecurityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

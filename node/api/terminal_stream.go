@@ -29,9 +29,16 @@ import (
 type terminalClientMessage struct {
 	Type      string `json:"type"`
 	Data      string `json:"data"`
+	Line      string `json:"line,omitempty"`
 	Cols      int    `json:"cols,omitempty"`
 	Rows      int    `json:"rows,omitempty"`
 	Timestamp string `json:"timestamp,omitempty"`
+}
+
+type terminalAINotice struct {
+	Type    string `json:"type"`
+	Level   string `json:"level,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 type terminalServerMessage struct {
@@ -96,6 +103,11 @@ func handleTerminalStream(w http.ResponseWriter, r *http.Request) {
 	if credential, ok := terminalCommandCredentials.LoadAndDelete(command); ok {
 		if err := primeTerminalCredential(r.Context(), session, credential.(terminalCommandCredential)); err != nil {
 			_ = writeTerminalError(ws, errors.New("数据库终端认证初始化失败"))
+			return
+		}
+	}
+	if isLocalInteractiveTerminal(r) {
+		if err := writeTerminalText(ws, localTerminalWelcome()); err != nil {
 			return
 		}
 	}
@@ -205,7 +217,13 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 		}
 		command := r.URL.Query().Get("command")
 		if command == "" {
-			return exec.CommandContext(ctx, shell), nil
+			cmd := exec.CommandContext(ctx, shell)
+			if runtime.GOOS != "windows" {
+				// 登录交互 shell 才会读取系统 profile，并给出与 1Panel SSH 会话相近的提示符。
+				cmd = exec.CommandContext(ctx, shell, "-il")
+			}
+			cmd.Env = terminalShellEnvironment()
+			return cmd, nil
 		}
 		if len(command) > 4096 || strings.IndexByte(command, 0) >= 0 {
 			return nil, errors.New("command 参数无效")
@@ -215,8 +233,11 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 		}
 		return exec.CommandContext(ctx, shell, "-c", command), nil
 	case strings.HasSuffix(path, "/container"):
-		if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("source")), "database") {
+		switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source"))) {
+		case "database", "mysql", "mysql-cluster", "mariadb", "mongodb", "mongo", "postgres", "postgresql", "postgresql-cluster":
 			return databaseTerminalCommand(ctx, r)
+		case "redis", "redis-cluster":
+			return redisTerminalCommand(ctx, r)
 		}
 		containerID := strings.TrimSpace(r.URL.Query().Get("containerid"))
 		program := strings.TrimSpace(r.URL.Query().Get("command"))
@@ -310,6 +331,109 @@ func terminalCommand(r *http.Request) (*exec.Cmd, error) {
 	}
 }
 
+func redisTerminalCommand(ctx context.Context, r *http.Request) (*exec.Cmd, error) {
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" {
+		name = strings.TrimSpace(r.URL.Query().Get("database"))
+	}
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	databaseType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("source")))
+	if databaseType == "" {
+		databaseType = "redis"
+	}
+	var connection service.Database
+	found := false
+	for _, typ := range []string{"redis", "redis-cluster"} {
+		if item, ok := databaseService.FindConnection(ctx, typ, name); ok {
+			connection, found = item, true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("未找到 Redis 实例 %s", name)
+	}
+	if from == "" {
+		from = connection.From
+	}
+	if !databaseSourceIsLocal(from) {
+		return hostDatabaseTerminalCommand(ctx, "redis", connection)
+	}
+	containerName := strings.TrimSpace(connection.ContainerName)
+	if containerName == "" {
+		if install, ok := findDatabaseInstall(getAppStore(), databaseType, name); ok {
+			if names := appContainerNames(install); len(names) > 0 {
+				containerName = names[0]
+			}
+		}
+	}
+	if !validDockerIdentifier(containerName) {
+		return nil, fmt.Errorf("Redis %s 没有关联可用容器", name)
+	}
+	args := []string{"exec", "-i", "-t", containerName, "sh", "-c", terminalDatabasePasswordScript, "--", "redis-cli", "--raw"}
+	return terminalCommandWithPassword(ctx, service.DockerBinary(), args, connection.Password)
+}
+
+func hostDatabaseTerminalCommand(ctx context.Context, databaseType string, connection service.Database) (*exec.Cmd, error) {
+	host := strings.TrimSpace(connection.Host)
+	if host == "" || strings.ContainsAny(host, "\x00\r\n \t") {
+		return nil, errors.New("远程数据库地址无效")
+	}
+	port := connection.Port
+	if port <= 0 {
+		port = databasePort(databaseType, 0)
+	}
+	if port < 1 || port > 65535 {
+		return nil, errors.New("远程数据库端口无效")
+	}
+	username := strings.TrimSpace(connection.Username)
+	if username == "" {
+		username = "root"
+	}
+	portText := strconv.Itoa(port)
+	var program string
+	var clientArgs []string
+	switch strings.ToLower(databaseType) {
+	case "mysql", "mysql-cluster":
+		program, clientArgs = "mysql", []string{"-h", host, "-P", portText, "-u" + username}
+	case "mariadb":
+		program, clientArgs = "mariadb", []string{"-h", host, "-P", portText, "-u" + username}
+	case "mongodb", "mongo":
+		if username == "root" && connection.Username == "" {
+			username = ""
+		}
+		program = "mongosh"
+		clientArgs = []string{"--host", host, "--port", portText}
+		if username != "" {
+			clientArgs = append(clientArgs, "--username", username, "--password", "--authenticationDatabase", "admin")
+		}
+	case "postgres", "postgresql", "postgresql-cluster":
+		if username == "root" {
+			username = "postgres"
+		}
+		program, clientArgs = "psql", []string{"-h", host, "-p", portText, "-U", username}
+	case "redis", "redis-cluster":
+		program, clientArgs = "redis-cli", []string{"--raw", "-h", host, "-p", portText}
+	default:
+		return nil, fmt.Errorf("不支持的远程数据库终端类型: %s", databaseType)
+	}
+	args := append([]string{"-c", terminalDatabasePasswordScript, "--", program}, clientArgs...)
+	return terminalCommandWithPassword(ctx, "sh", args, connection.Password)
+}
+
+func terminalCommandWithPassword(ctx context.Context, program string, args []string, password string) (*exec.Cmd, error) {
+	command := exec.CommandContext(ctx, program, args...)
+	command.Env = terminalDatabaseCommandEnvironment()
+	payload, err := terminalCredentialPayload(password)
+	if err != nil {
+		return nil, err
+	}
+	terminalCommandCredentials.Store(command, terminalCommandCredential{
+		payload: payload,
+		marker:  []byte(terminalCredentialReadyMarker),
+	})
+	return command, nil
+}
+
 // databaseTerminalCommand 按原版规则从数据库资源和应用安装记录解析容器及客户端命令。
 func databaseTerminalCommand(ctx context.Context, r *http.Request) (*exec.Cmd, error) {
 	databaseType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("databaseType")))
@@ -364,11 +488,26 @@ func databaseTerminalCommand(ctx context.Context, r *http.Request) (*exec.Cmd, e
 		}
 	}
 	store.mu.RUnlock()
-	containerNames := appContainerNames(install)
-	if len(containerNames) == 0 || !validDockerIdentifier(containerNames[0]) {
+	if install.ID == "" {
+		if loaded, ok := findDatabaseInstall(store, databaseType, databaseName); ok {
+			install = loaded
+		}
+	}
+	containerName := strings.TrimSpace(connection.ContainerName)
+	if containerName == "" {
+		containerName = legacyDatabaseContainerName(connection.From, connection.Host)
+	}
+	if containerName == "" {
+		if names := appContainerNames(install); len(names) > 0 {
+			containerName = names[0]
+		}
+	}
+	if !validDockerIdentifier(containerName) {
+		if foundConnection && !databaseSourceIsLocal(connection.From) {
+			return hostDatabaseTerminalCommand(ctx, databaseType, connection)
+		}
 		return nil, fmt.Errorf("数据库 %s 没有关联可用容器", databaseName)
 	}
-	containerName := containerNames[0]
 	username, password := connection.Username, connection.Password
 	if username == "" {
 		username = appValue(install.Config, "username", "user", "PANEL_DB_ROOT_USER")
@@ -610,6 +749,19 @@ func handleTerminalInputWithResize(ws *streamWebSocket, stdin io.Writer, payload
 		}
 		if stdin == nil {
 			return writeTerminalError(ws, errors.New("终端输入通道不可用"))
+		}
+		if isTerminalEnter(decoded) {
+			handled, input, aiErr := handleTerminalAIEnter(ws, message.Line)
+			if aiErr != nil {
+				return aiErr
+			}
+			if handled {
+				if len(input) == 0 {
+					return nil
+				}
+				_, err = stdin.Write(input)
+				return err
+			}
 		}
 		_, err = stdin.Write(decoded)
 		return err

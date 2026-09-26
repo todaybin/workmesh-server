@@ -55,7 +55,7 @@ func TestScriptSyncUsesConfiguredRemoteAndSQLite(t *testing.T) {
 		t.Fatalf("script sync failed: %d %s", res.Code, res.Body.String())
 	}
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM script_library`).Scan(&count); err != nil || count != 1 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM script_library`).Scan(&count); err != nil || count != 10 {
 		t.Fatalf("script sync persistence failed: count=%d err=%v", count, err)
 	}
 }
@@ -98,7 +98,7 @@ func TestScriptLibraryPersistsInSQLiteWithoutJSON(t *testing.T) {
 		t.Fatalf("创建脚本失败: status=%d body=%s", created.Code, created.Body.String())
 	}
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM script_library`).Scan(&count); err != nil || count != 1 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM script_library`).Scan(&count); err != nil || count != 10 {
 		t.Fatalf("SQLite 脚本数量异常: count=%d err=%v", count, err)
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "scripts.json")); !os.IsNotExist(err) {
@@ -114,5 +114,64 @@ func TestScriptLibraryPersistsInSQLiteWithoutJSON(t *testing.T) {
 	}
 	if err := json.Unmarshal(searched.Body.Bytes(), &response); err != nil || response.Data.Total != 1 {
 		t.Fatalf("查询脚本失败: total=%d err=%v body=%s", response.Data.Total, err, searched.Body.String())
+	}
+}
+
+func TestScriptSearchMatchesPanelShape(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("WORKMESH_DATA_DIR", dataDir)
+	db, err := sql.Open("sqlite", filepath.Join(dataDir, "workmesh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureControlTables(db); err != nil {
+		t.Fatal(err)
+	}
+	controlStoreMu.Lock()
+	controlStoreDB = db
+	controlStoreMu.Unlock()
+	defer resetSharedStoreForTest()
+	scriptStoreMu.Lock()
+	scriptStore = nil
+	scriptStoreMu.Unlock()
+
+	mux := http.NewServeMux()
+	registerCoreResourceRoutes(mux)
+	searched := httptest.NewRecorder()
+	mux.ServeHTTP(searched, httptest.NewRequest(http.MethodPost, "/api/v2/core/script/search", bytes.NewBufferString(`{"page":1,"pageSize":20}`)))
+	var response struct {
+		Data struct {
+			Total int `json:"total"`
+			Items []struct {
+				ID            uint     `json:"id"`
+				Name          string   `json:"name"`
+				IsInteractive bool     `json:"isInteractive"`
+				Lable         string   `json:"lable"`
+				Script        string   `json:"script"`
+				GroupList     []uint   `json:"groupList"`
+				GroupBelong   []string `json:"groupBelong"`
+				IsSystem      bool     `json:"isSystem"`
+				Description   string   `json:"description"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(searched.Body.Bytes(), &response); err != nil {
+		t.Fatalf("解析脚本搜索失败: %v body=%s", err, searched.Body.String())
+	}
+	if response.Data.Total != 9 || len(response.Data.Items) != 9 {
+		t.Fatalf("系统脚本数量应为 9: total=%d len=%d body=%s", response.Data.Total, len(response.Data.Items), searched.Body.String())
+	}
+	if !strings.Contains(searched.Body.String(), `"groupList":null`) || !strings.Contains(searched.Body.String(), `"lable":""`) {
+		t.Fatalf("脚本字段未按 1Panel 返回 null 分组: %s", searched.Body.String())
+	}
+	first := response.Data.Items[0]
+	if first.ID != 10 || first.Name != "安装 Docker" || !first.IsInteractive || !first.IsSystem || first.Description != "安装 Docker" || !strings.Contains(first.Script, "get.docker.com") {
+		t.Fatalf("第一条系统脚本不匹配: %+v", first)
+	}
+	deleted := httptest.NewRecorder()
+	mux.ServeHTTP(deleted, httptest.NewRequest(http.MethodPost, "/api/v2/core/script/del", bytes.NewBufferString(`{"ids":[10]}`)))
+	if deleted.Code != http.StatusBadRequest || !strings.Contains(deleted.Body.String(), "系统脚本不能删除") {
+		t.Fatalf("系统脚本删除应拒绝: %d %s", deleted.Code, deleted.Body.String())
 	}
 }

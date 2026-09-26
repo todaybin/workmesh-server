@@ -17,8 +17,20 @@ import (
 
 func handleAppUpdate(w http.ResponseWriter, s *appStore, body map[string]any) {
 	id := appValue(body, "installID", "installId", "appInstallId", "id")
+	key, name := appValue(body, "key", "appKey", "type"), appValue(body, "name", "database")
+	if id == "" && canonicalDatabaseAppType(key) != "" {
+		if install, ok := ensureDatabaseInstallLoaded(s, key, name); ok {
+			id = install.ID
+		}
+	}
 	s.mu.Lock()
 	index, item := findApp(s.state.Apps, id)
+	if index < 0 {
+		if install, ok := matchDatabaseInstall(s.state.Apps, appValue(body, "key", "appKey", "type"), appValue(body, "name", "database")); ok {
+			item = install
+			index, _ = findApp(s.state.Apps, install.ID)
+		}
+	}
 	if index >= 0 {
 		if port, ok := body["port"]; ok {
 			if item.Config == nil {
@@ -37,6 +49,13 @@ func handleAppUpdate(w http.ResponseWriter, s *appStore, body map[string]any) {
 	}
 	_ = s.saveLocked()
 	s.mu.Unlock()
+	if index >= 0 {
+		if port := appConfiguredInt(body, 0, "port"); port > 0 && canonicalDatabaseAppType(item.Key) != "" {
+			updateDatabaseInstancePort(context.Background(), item.Key, item.Name, port)
+			_ = writeDatabaseEnvPort(item, port)
+			_ = restartDatabaseCompose(item)
+		}
+	}
 	appOK(w, map[string]any{"id": id, "updated": index >= 0})
 }
 

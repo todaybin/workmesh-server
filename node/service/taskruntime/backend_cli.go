@@ -80,7 +80,7 @@ func verifyFileDigest(path, expected string) error {
 // execute 使用受控 CLI 完成一次任务操作，并限制上下文、输出和错误信息。
 func (b *CLITaskBackend) execute(ctx context.Context, operation string, payload any, result any) error {
 	switch operation {
-	case "create", "start", "exec", "collect", "cancel", "destroy":
+	case "capabilities", "inspect", "create", "start", "exec", "collect", "cancel", "destroy":
 	default:
 		return errors.New("任务 CLI 操作不在白名单中")
 	}
@@ -124,16 +124,47 @@ func (b *CLITaskBackend) execute(ctx context.Context, operation string, payload 
 	return nil
 }
 
+// Inspect 只读查询 Sandbox 句柄，不启动、取消或销毁任务。
+func (b *CLITaskBackend) Inspect(ctx context.Context, id string) (TaskInspection, error) {
+	if strings.TrimSpace(id) == "" {
+		return TaskInspection{}, errors.New("任务 CLI inspect 需要 sandboxId")
+	}
+	var response TaskInspection
+	if err := b.execute(ctx, "inspect", map[string]string{"sandboxId": id}, &response); err != nil {
+		return TaskInspection{}, err
+	}
+	if !response.Found {
+		return response, nil
+	}
+	if !validInspectedState(response.State) {
+		return TaskInspection{}, errors.New("任务 CLI inspect 返回了未知状态")
+	}
+	return response, nil
+}
+
+// Capabilities 查询 CLI 后端的真实隔离和资源硬限制能力。
+func (b *CLITaskBackend) Capabilities(ctx context.Context) (SandboxCapabilities, error) {
+	var capabilities SandboxCapabilities
+	if err := b.execute(ctx, "capabilities", map[string]any{}, &capabilities); err != nil {
+		return SandboxCapabilities{}, err
+	}
+	return capabilities, nil
+}
+
 // Create 将任务规格提交给外部沙箱 CLI，并返回其持久化任务 ID。
 func (b *CLITaskBackend) Create(ctx context.Context, spec TaskSpec) (string, error) {
 	var response struct {
-		SandboxID string `json:"sandboxId"`
+		SandboxID   string                    `json:"sandboxId"`
+		Enforcement SandboxEnforcementReceipt `json:"enforcement"`
 	}
 	if err := b.execute(ctx, "create", spec, &response); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(response.SandboxID) == "" {
 		return "", errors.New("任务 CLI create 未返回 sandboxId")
+	}
+	if err := ValidateSandboxEnforcementReceipt(response.Enforcement, spec); err != nil {
+		return "", fmt.Errorf("任务 CLI create 回执无效: %w", err)
 	}
 	return response.SandboxID, nil
 }
@@ -172,24 +203,70 @@ func (b *CLITaskBackend) Destroy(ctx context.Context, id string) error {
 
 // runCLI 以参数数组启动 CLI，设置上下文取消和输出上限，禁止 shell 拼接。
 func runCLI(ctx context.Context, command string, args []string, outputLimit int) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, command, args...)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.Command(command, args...)
+	configureCLIProcess(cmd)
 	cmd.Env = restrictedEnvironment(os.Environ())
 	var stdout, stderr limitedOutput
 	stdout.limit, stderr.limit = outputLimit, outputLimit
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	done := make(chan error, 1)
+	go func() { done <- cmd.Run() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return nil, errors.New("任务 CLI 操作超时")
+			}
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil, errors.New("任务 CLI 操作已取消")
+			}
+			if strings.TrimSpace(stderr.String()) != "" {
+				return nil, errors.New(sanitizeCLIMessage(stderr.String()))
+			}
+			return nil, errors.New(sanitizeCLIMessage(err.Error()))
+		}
+	case <-ctx.Done():
+		// CommandContext 只终止 CLI 主进程，不能保证其子进程退出。这里显式
+		// 回收进程组，避免 Sandbox CLI 派生的 helper 留在宿主机上。
+		_ = terminateCLIProcess(cmd, false)
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-done:
+			stopTimer(timer)
+		case <-timer.C:
+			_ = terminateCLIProcess(cmd, true)
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				// 进程组回收失败时，不能让请求 goroutine 无限等待；平台适配器
+				// 会再尝试终止主进程，并把失败交给上层任务清理门禁。
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+			}
+		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, errors.New("任务 CLI 操作超时")
 		}
-		if strings.TrimSpace(stderr.String()) != "" {
-			return nil, errors.New(sanitizeCLIMessage(stderr.String()))
-		}
-		return nil, errors.New(sanitizeCLIMessage(err.Error()))
+		return nil, errors.New("任务 CLI 操作已取消")
 	}
 	if stdout.exceeded || stderr.exceeded {
 		return nil, errors.New("任务 CLI 输出超过限制")
 	}
 	return stdout.Bytes(), nil
+}
+
+func stopTimer(timer *time.Timer) {
+	if timer == nil || timer.Stop() {
+		return
+	}
+	select {
+	case <-timer.C:
+	default:
+	}
 }
 
 type limitedOutput struct {

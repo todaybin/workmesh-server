@@ -4,12 +4,13 @@
 package api
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -594,7 +595,11 @@ func dbCommonInfo(w http.ResponseWriter, r *http.Request) {
 	if typ == "" {
 		typ = "mysql"
 	}
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"type": typ, "database": strField(b, "database"), "host": defaultHost(strField(b, "host")), "port": databasePort(typ, int(intField(b, "port"))), "configurable": true}})
+	name := strField(b, "name")
+	if name == "" {
+		name = strField(b, "database")
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": loadDatabaseBaseInfo(r.Context(), typ, name)})
 }
 
 // dbCommonFile 读取数据库通用配置文件内容。
@@ -604,8 +609,34 @@ func dbCommonFile(w http.ResponseWriter, r *http.Request) {
 		dbAdminError(w, 400, e)
 		return
 	}
-	content := databaseAdmin.Config(r.Context(), strField(b, "database"))
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": content})
+	typ := strField(b, "type")
+	name := strField(b, "name")
+	if name == "" {
+		name = strField(b, "database")
+	}
+	if !knownDatabaseConf(typ) {
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": databaseAdmin.Config(r.Context(), name)})
+		return
+	}
+	version := ""
+	if install, ok := findDatabaseInstall(nil, strings.TrimSuffix(typ, "-conf"), name); ok {
+		version = install.Version
+	}
+	path, err := databaseConfPath(typ, name, version)
+	if err != nil {
+		dbAdminError(w, http.StatusNotFound, errors.New("数据库配置文件不存在"))
+		return
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		dbAdminError(w, http.StatusNotFound, errors.New("数据库配置文件不存在"))
+		return
+	}
+	if len(content) > 1<<20 {
+		dbAdminError(w, http.StatusBadRequest, errors.New("数据库配置文件超过 1MB"))
+		return
+	}
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": string(content)})
 }
 
 // dbCommonUpdate 写入数据库通用配置文件内容。
@@ -615,20 +646,55 @@ func dbCommonUpdate(w http.ResponseWriter, r *http.Request) {
 		dbAdminError(w, 400, e)
 		return
 	}
-	content := strField(b, "content")
-	if content == "" {
-		if encoded := strField(b, "file"); encoded != "" {
-			raw, er := base64.StdEncoding.DecodeString(encoded)
-			if er != nil {
-				dbAdminError(w, 400, er)
-				return
-			}
-			content = string(raw)
-		}
-	}
-	if e = databaseAdmin.SetConfig(r.Context(), strField(b, "database"), content); e != nil {
-		dbAdminError(w, 400, e)
+	content := databaseConfigText(b)
+	if strings.TrimSpace(content) == "" {
+		dbAdminError(w, http.StatusBadRequest, errors.New("数据库配置不能为空"))
 		return
+	}
+	if len(content) > 1<<20 {
+		dbAdminError(w, http.StatusBadRequest, errors.New("数据库配置文件超过 1MB"))
+		return
+	}
+	typ := strField(b, "type")
+	name := strField(b, "database")
+	if name == "" {
+		name = strField(b, "name")
+	}
+	if !knownDatabaseConf(typ) {
+		if e = databaseAdmin.SetConfig(r.Context(), name, content); e != nil {
+			dbAdminError(w, 400, e)
+			return
+		}
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"saved": true}})
+		return
+	}
+	version := ""
+	var install appRecord
+	if found, ok := findDatabaseInstall(nil, typ, name); ok {
+		install, version = found, found.Version
+	}
+	path, pathErr := databaseConfPath(typ, name, version)
+	if pathErr != nil && !errors.Is(pathErr, os.ErrNotExist) {
+		dbAdminError(w, http.StatusBadRequest, pathErr)
+		return
+	}
+	if path == "" {
+		dbAdminError(w, http.StatusNotFound, errors.New("数据库配置文件不存在"))
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		dbAdminError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := os.WriteFile(path, []byte(content), 0o640); err != nil {
+		dbAdminError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if install.ID != "" {
+		if err := restartDatabaseCompose(install); err != nil {
+			dbAdminError(w, http.StatusBadGateway, err)
+			return
+		}
 	}
 	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"saved": true}})
 }

@@ -6,7 +6,6 @@ package api
 import (
 	"bufio"
 	"context"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,7 +67,10 @@ func dashboardCurrent(_ context.Context, options ...string) map[string]any {
 	}
 	network := dashboardNetwork(netOption)
 	cpuInfo := dashboardCPUInfo()
-	cpuUsage := numberOrZero(cpuInfo["usedPercent"])
+	cpuUsage, _ := cpuInfo["usedPercent"].(float64)
+	if cpuUsage < 0 || cpuUsage > 100 {
+		cpuUsage = 0
+	}
 	cpuPercent, _ := cpuInfo["perCore"].([]float64)
 	if len(cpuPercent) == 0 {
 		cpuPercent = []float64{cpuUsage}
@@ -84,16 +86,16 @@ func dashboardCurrent(_ context.Context, options ...string) map[string]any {
 	}
 	uptime := dashboardUptime()
 	return map[string]any{
-		"uptime": uptime, "procs": runtime.NumGoroutine(), "load1": load1, "load5": load5, "load15": load15,
-		// 前端契约要求 runningTime 为拆分后的时分秒对象，不能直接返回 uptime 整数。
-		"timeSinceUptime": time.Now().Add(-time.Duration(uptime) * time.Second).UTC().Format(time.RFC3339),
+		"uptime": uptime, "procs": dashboardProcessCount(), "load1": load1, "load5": load5, "load15": load15,
+		// 前端直接展示启动时间字符串，格式与 1Panel 的本地 DateTimeLayout 一致。
+		"timeSinceUptime": time.Unix(time.Now().Unix()-int64(uptime), 0).Format("2006-01-02 15:04:05"),
 		"runningTime": map[string]uint64{
 			"days":    uptime / 86400,
 			"hours":   (uptime % 86400) / 3600,
 			"minutes": (uptime % 3600) / 60,
 			"seconds": uptime % 60,
 		},
-		"loadUsagePercent": cpuUsage, "cpuPercent": cpuPercent, "cpuUsedPercent": cpuUsage,
+		"loadUsagePercent": dashboardLoadUsage(load1, runtime.NumCPU()), "cpuPercent": cpuPercent, "cpuUsedPercent": cpuUsage,
 		"cpuDetailedPercent": detailed, "cpuUsed": cpuUsage / 100 * float64(runtime.NumCPU()), "cpuTotal": runtime.NumCPU(),
 		"memoryTotal": memTotal, "memoryAvailable": memAvail, "memoryUsed": used, "memoryFree": memFree,
 		"memoryShard": uint64(0), "memoryCache": memCache,
@@ -177,7 +179,7 @@ func dashboardDisks() []map[string]any {
 		if len(disks) >= 64 {
 			break
 		}
-		device, filesystem, mount := fields[0], fields[2], fields[1]
+		device, filesystem, mount := unescapeProcField(fields[0]), fields[2], unescapeProcField(fields[1])
 		if !dashboardShouldIncludeMount(device, filesystem, mount) {
 			continue
 		}
@@ -192,15 +194,11 @@ func dashboardDisks() []map[string]any {
 		seen[mount] = struct{}{}
 		seenDevice[device] = struct{}{}
 		// 前端契约使用 path/usedPercent；mount 作为兼容字段保留。无法跨平台读取磁盘用量时明确返回 0，避免 NaN/undefined 传播。
-		total, free, available := dashboardDiskUsage(mount)
-		used := uint64(0)
-		if total > free {
-			used = total - free
-		}
+		usage := dashboardDiskUsage(mount)
 		disks = append(disks, map[string]any{
 			"path": mount, "mount": mount, "type": filesystem, "device": device, "filesystem": filesystem,
-			"available": available, "usedPercent": percent(used, total), "free": free, "total": total, "used": used,
-			"inodesTotal": uint64(0), "inodesUsed": uint64(0), "inodesFree": uint64(0), "inodesUsedPercent": float64(0),
+			"available": usage.Available, "usedPercent": usage.UsedPercent, "free": usage.Free, "total": usage.Total, "used": usage.Used,
+			"inodesTotal": usage.InodesTotal, "inodesUsed": usage.InodesUsed, "inodesFree": usage.InodesFree, "inodesUsedPercent": usage.InodesUsedPercent,
 		})
 	}
 	return disks
@@ -291,8 +289,21 @@ func dashboardProcesses() []map[string]any {
 	return []map[string]any{{"name": filepath.Base(os.Args[0]), "pid": os.Getpid(), "percent": 0.0, "memory": memory, "cmd": strings.Join(os.Args, " "), "user": ""}}
 }
 
+// dashboardDiskUsageResult 是首页磁盘卡片使用的容量和 inode 快照。
+type dashboardDiskUsageResult struct {
+	Total             uint64
+	Free              uint64
+	Used              uint64
+	UsedPercent       float64
+	InodesTotal       uint64
+	InodesUsed        uint64
+	InodesFree        uint64
+	InodesUsedPercent float64
+	Available         bool
+}
+
 // dashboardDiskUsage 由平台实现，用于读取挂载点容量；失败时返回明确的不可用状态。
-func dashboardDiskUsage(path string) (total, free uint64, available bool) {
+func dashboardDiskUsage(path string) dashboardDiskUsageResult {
 	return dashboardDiskUsagePlatform(path)
 }
 
@@ -318,52 +329,8 @@ func numberOrZero(value any) float64 {
 
 // dashboardCPUInfo 读取 Linux /proc/stat；无该接口的系统返回稳定的零值数组。
 func dashboardCPUInfo() map[string]any {
-	result := map[string]any{"perCore": []float64{}, "detailed": []float64{0, 0, 0, 100, 0, 0, 0, 0}, "usedPercent": 0.0, "model": "", "mhz": 0.0, "prettyDistro": ""}
-	data, err := os.ReadFile("/proc/stat")
-	if err != nil {
-		return result
-	}
-	var aggregate [8]uint64
-	var totalAll uint64
-	perCore := make([]float64, 0, runtime.NumCPU())
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 5 || fields[0] != "cpu" && !strings.HasPrefix(fields[0], "cpu") {
-			continue
-		}
-		if fields[0] != "cpu" && (len(fields[0]) == 3 || strings.Trim(fields[0][3:], "0123456789") != "") {
-			continue
-		}
-		var values [8]uint64
-		for i := 0; i < len(values) && i+1 < len(fields); i++ {
-			values[i], _ = strconv.ParseUint(fields[i+1], 10, 64)
-			// /proc/stat 首行 cpu 已经是所有核心的汇总；不能再把每个核心重复累加。
-			if fields[0] == "cpu" {
-				aggregate[i] = values[i]
-				totalAll += values[i]
-			}
-		}
-		if fields[0] != "cpu" {
-			total := uint64(0)
-			for _, value := range values {
-				total += value
-			}
-			idle := values[3] + values[4]
-			if total > 0 {
-				perCore = append(perCore, percent(total-idle, total))
-			}
-		}
-	}
-	if totalAll > 0 {
-		idle := aggregate[3] + aggregate[4]
-		result["usedPercent"] = percent(totalAll-idle, totalAll)
-		detailed := make([]float64, 8)
-		for i, value := range aggregate {
-			detailed[i] = percent(value, totalAll)
-		}
-		result["detailed"] = detailed
-	}
-	result["perCore"] = perCore
+	used, perCore, detailed := dashboardCPUUsage()
+	result := map[string]any{"perCore": perCore, "detailed": detailed, "usedPercent": used, "model": "", "mhz": 0.0, "prettyDistro": ""}
 	if data, err := os.ReadFile("/proc/cpuinfo"); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			key, value, found := strings.Cut(line, ":")
@@ -414,7 +381,9 @@ func dashboardIO(selected ...string) map[string]any {
 		if option != "all" && option != name {
 			continue
 		}
-		if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "ram") || dashboardIsPartition(name) {
+		// 指定设备时保留分区，否则首页选择 sda1 这类分区会一直得到 0。
+		// all 仍跳过分区，避免和整盘重复累加。
+		if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "ram") || (option == "all" && dashboardIsPartition(name)) {
 			continue
 		}
 		parse := func(index int) uint64 { value, _ := strconv.ParseUint(fields[index], 10, 64); return value }
@@ -454,25 +423,6 @@ func allDigits(value string) bool {
 	return true
 }
 
-func dashboardIPv4() string {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, _ := iface.Addrs()
-		for _, addr := range addrs {
-			ip, _, err := net.ParseCIDR(addr.String())
-			if err == nil && ip.To4() != nil {
-				return ip.To4().String()
-			}
-		}
-	}
-	return ""
-}
 func percent(value, total uint64) float64 {
 	if total == 0 {
 		return 0

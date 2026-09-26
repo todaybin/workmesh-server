@@ -6,7 +6,6 @@ package api
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -16,7 +15,7 @@ import (
 )
 
 func mongoResource(item service.Database) map[string]any {
-	return map[string]any{"id": item.ID, "createdAt": item.CreatedAt, "name": item.Name, "mongodbName": item.Name, "from": item.From, "username": item.Username, "isDelete": false, "description": item.Description}
+	return map[string]any{"id": item.ID, "createdAt": item.CreatedAt, "name": item.Name, "mongodbName": item.Name, "from": item.From, "username": item.Username, "password": item.Password, "isDelete": false, "description": item.Description}
 }
 
 func mongoDatabaseForRequest(ctx context.Context, server, database string) (service.Database, bool) {
@@ -32,12 +31,10 @@ func mongoTargetForRequest(ctx context.Context, name string) (service.MongoDBTar
 	name = strings.TrimSpace(name)
 	for _, typ := range []string{"mongodb", "mongo"} {
 		if item, ok := databaseService.FindByName(ctx, typ, name); ok {
-			target := service.MongoDBTarget{Type: item.Type, Host: item.Host, Port: item.Port, Username: item.Username, Password: item.Password, AuthDatabase: item.InitialDB}
+			host, containerName := normalizedDatabaseItemTarget(item)
+			target := service.MongoDBTarget{Type: item.Type, Host: host, Port: item.Port, Username: item.Username, Password: item.Password, AuthDatabase: item.InitialDB, ContainerName: containerName}
 			if target.AuthDatabase == "" {
 				target.AuthDatabase = "admin"
-			}
-			if strings.EqualFold(item.From, "local") && net.ParseIP(strings.Trim(item.Host, "[]")) == nil && !strings.EqualFold(item.Host, "localhost") {
-				target.ContainerName, target.Host = item.Host, "127.0.0.1"
 			}
 			return target, true
 		}
@@ -158,13 +155,14 @@ func handleMongoSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	server := strField(b, "database")
-	items := make([]map[string]any, 0)
-	for _, item := range databaseService.Search(r.Context(), "mongodb", "") {
-		if server == "" || strings.EqualFold(item.InitialDB, server) {
-			items = append(items, mongoResource(item))
-		}
+	live := syncMongoLiveDatabases(r.Context(), server)
+	children := visibleChildDatabases(databasesForTypes(r.Context(), databaseTypeFamily("mongodb")), server, strField(b, "info"), live)
+	paged, total, page, pageSize := pageDatabaseSlice(children, int(intField(b, "page")), int(intField(b, "pageSize")))
+	items := make([]map[string]any, 0, len(paged))
+	for _, item := range paged {
+		items = append(items, mongoResource(item))
 	}
-	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items), "page": 1, "pageSize": len(items)}})
+	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": total, "page": page, "pageSize": pageSize}})
 }
 
 // handleMongoLoadRemote 从真实实例同步非系统数据库；远端只读，新增的
@@ -204,6 +202,9 @@ func handleMongoLoadRemote(w http.ResponseWriter, r *http.Request) {
 		}
 		item, createErr := databaseService.Create(r.Context(), service.Database{Name: name, Type: "mongodb", From: from, Host: target.Host, Port: target.Port, InitialDB: server})
 		if createErr != nil {
+			if _, exists := databaseService.FindByName(r.Context(), "mongodb", name); exists {
+				continue
+			}
 			for index := len(created) - 1; index >= 0; index-- {
 				_ = databaseService.Delete(r.Context(), created[index].ID)
 			}

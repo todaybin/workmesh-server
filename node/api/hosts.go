@@ -254,9 +254,7 @@ func handleHostMutation(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	item := hostRecord{ID: stringValue(in, "id"), Name: stringValue(in, "name"), Address: stringValue(in, "address", "addr"), Port: hostIntValue(in["port"]), User: stringValue(in, "user"), GroupID: uint(hostIntValue(in["groupID"])), GroupBelong: stringValue(in, "groupBelong"), AuthMode: stringValue(in, "authMode"), Description: stringValue(in, "description"), Password: credentialStringValue(in, "password"), PrivateKey: credentialStringValue(in, "privateKey"), PassPhrase: credentialStringValue(in, "passPhrase"), RememberPassword: hostBoolValue(in["rememberPassword"])}
-	_, passwordProvided := in["password"]
-	_, privateKeyProvided := in["privateKey"]
-	_, passPhraseProvided := in["passPhrase"]
+	preservedCipher := ""
 	if item.Name == "" {
 		item.Name = item.Address
 	}
@@ -285,9 +283,13 @@ func handleHostMutation(w http.ResponseWriter, r *http.Request, path string) {
 			item.GroupID = uint(hostIntValue(in["groupID"]))
 			item.Updated = time.Now().UTC().Format(time.RFC3339Nano)
 		}
-		if err := preserveHostCredentials(&item, passwordProvided || privateKeyProvided || passPhraseProvided); err != nil {
-			wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "message": "读取主机凭据失败: " + err.Error()})
-			return
+		if !hostHasNewCredential(item) {
+			cipher, err := storedHostCredentialCipher(item.ID)
+			if err != nil {
+				wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "message": "读取主机凭据失败: " + err.Error()})
+				return
+			}
+			preservedCipher = cipher
 		}
 	} else if path == "del" {
 		if err := deleteHost(item.ID); err != nil {
@@ -317,7 +319,7 @@ func handleHostMutation(w http.ResponseWriter, r *http.Request, path string) {
 		wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": err.Error()})
 		return
 	}
-	payload, err := hostPayload(item)
+	payload, err := hostPayload(item, preservedCipher)
 	if err != nil {
 		wmhttp.JSON(w, http.StatusUnauthorized, map[string]any{"code": "ERR", "details": map[string]string{"errCode": "HOST_CREDENTIAL_KEY_UNAVAILABLE"}, "message": err.Error()})
 		return
@@ -385,20 +387,30 @@ func credentialStringValue(m map[string]any, key string) string {
 	return value
 }
 
-// preserveHostCredentials 保留元数据更新中未显式替换的加密凭据。
-func preserveHostCredentials(item *hostRecord, credentialsProvided bool) error {
-	if credentialsProvided {
-		return nil
+// hostHasNewCredential 判断本次更新是否提交了新的认证材料。
+func hostHasNewCredential(item hostRecord) bool {
+	return item.Password != "" || item.PrivateKey != "" || item.PassPhrase != ""
+}
+
+// storedHostCredentialCipher 读取已保存的凭据密文，更新元数据时不解密也不清空。
+func storedHostCredentialCipher(id string) (string, error) {
+	repository, err := hostRepository()
+	if err != nil {
+		return "", err
 	}
-	credentials, err := hostWithCredentials(item.ID)
-	if err == nil {
-		item.Password, item.PrivateKey, item.PassPhrase = credentials.Password, credentials.PrivateKey, credentials.PassPhrase
-		return nil
+	var payload []byte
+	err = repository.QueryRow(`SELECT payload FROM node_hosts WHERE id=?`, strings.TrimSpace(id)).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("主机不存在: %s", id)
 	}
-	if strings.Contains(err.Error(), "未保存可用认证凭据") {
-		return nil
+	if err != nil {
+		return "", err
 	}
-	return err
+	var stored storedHostPayload
+	if json.Unmarshal(payload, &stored) != nil {
+		return "", nil
+	}
+	return stored.Credentials, nil
 }
 
 // hostIntValue 将 JSON 中的数字或数字字符串统一转换为整数。

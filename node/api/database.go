@@ -34,6 +34,7 @@ type databaseRequest struct {
 	Timeout       int    `json:"timeout"`
 	Page          int    `json:"page"`
 	PageSize      int    `json:"pageSize"`
+	Info          string `json:"info"`
 }
 
 func decodeDatabase(r *http.Request) (databaseRequest, error) {
@@ -62,23 +63,17 @@ func handleDatabaseSearch(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
 		return
 	}
-	items := databaseService.Search(r.Context(), req.Type, req.Name)
-	page, pageSize := req.Page, req.PageSize
-	if page < 1 {
-		page = 1
+	filter := req.Name
+	if filter == "" {
+		filter = req.Info
 	}
-	if pageSize < 1 {
-		pageSize = 50
+	items := remoteDatabaseServers(r.Context(), req.Type, filter)
+	paged, total, page, pageSize := pageDatabaseSlice(items, req.Page, req.PageSize)
+	out := make([]map[string]any, 0, len(paged))
+	for _, item := range paged {
+		out = append(out, databasePublicInfo(item))
 	}
-	start := (page - 1) * pageSize
-	if start > len(items) {
-		start = len(items)
-	}
-	end := start + pageSize
-	if end > len(items) {
-		end = len(items)
-	}
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": items[start:end], "total": len(items), "page": page, "pageSize": pageSize}})
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": out, "total": total, "page": page, "pageSize": pageSize}})
 }
 func handleDatabaseCreate(w http.ResponseWriter, r *http.Request) {
 	req, err := decodeDatabase(r)

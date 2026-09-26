@@ -44,6 +44,7 @@ var (
 // StartBackgroundTasks 启动节点级后台调度任务，调用方应在进程退出时取消 ctx。
 func StartBackgroundTasks(ctx context.Context) {
 	sharedCronjobs.Start(ctx)
+	StartHostMonitor(ctx)
 	backgroundMu.Lock()
 	if !retentionStarted {
 		retentionStarted = true
@@ -240,23 +241,29 @@ func registerHostOperationalRoutes(mux *http.ServeMux) {
 	registerHostMonitorInterfaces(mux)
 	registerHostMonitorSettings(mux)
 	mux.HandleFunc("POST /api/v2/hosts/monitor/search", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-		data := hostRuntimeMetrics(ctx)
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": data})
-	})
-	mux.HandleFunc("POST /api/v2/hosts/monitor/clean", func(w http.ResponseWriter, r *http.Request) {
-		_ = r
-		hostOperationalMu.Lock()
-		state := loadHostOperationalStateLocked()
-		state.Monitor["lastCleanAt"] = time.Now().UTC()
-		err := saveHostOperationalStateLocked(state)
-		hostOperationalMu.Unlock()
-		if err != nil {
-			wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": "清理监控记录失败: " + err.Error()})
+		var request hostMonitorSearch
+		if err := decodeJSON(r, &request); err != nil {
+			wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": err.Error()})
 			return
 		}
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"cleaned": true}})
+		data, err := searchHostMonitor(request)
+		if err != nil {
+			var input monitorInputError
+			if errors.As(err, &input) {
+				wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": err.Error()})
+				return
+			}
+			wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": err.Error()})
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": data})
+	})
+	mux.HandleFunc("POST /api/v2/hosts/monitor/clean", func(w http.ResponseWriter, r *http.Request) {
+		if err := cleanHostMonitor(); err != nil {
+			wmhttp.JSON(w, http.StatusInternalServerError, map[string]any{"code": "ERR", "message": "清理监控记录失败: " + err.Error()})
+			return
+		}
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"cleaned": true}})
 	})
 	mux.HandleFunc("GET /api/v2/hosts/disks", func(w http.ResponseWriter, _ *http.Request) {
 		data, err := hostDiskInfo()

@@ -47,6 +47,11 @@ func handleAppOperation(w http.ResponseWriter, s *appStore, body map[string]any)
 	_, item := findApp(s.state.Apps, id)
 	s.mu.RUnlock()
 	if item.ID == "" {
+		if install, ok := ensureDatabaseInstallLoaded(s, "", id); ok {
+			item = install
+		}
+	}
+	if item.ID == "" {
 		runtimeErr(w, http.StatusNotFound, "应用不存在: "+id)
 		return
 	}
@@ -177,6 +182,7 @@ func handleAppOperation(w http.ResponseWriter, s *appStore, body map[string]any)
 	item = s.state.Apps[index]
 	item.UpdatedAt = time.Now().UTC()
 	if remove {
+		removeInstalledDatabaseServer(context.Background(), item)
 		s.state.Apps = append(s.state.Apps[:index], s.state.Apps[index+1:]...)
 	} else {
 		s.state.Apps[index] = item

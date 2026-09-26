@@ -3,9 +3,117 @@
 
 # WorkMesh Server 开发状态
 
+## 2026-09-26 Firecracker Provider 接入边界
+
+- [x] 增加 Firecracker 固定资产/路径/资源参数校验、单任务 machine-config 生成、参数数组启动计划和有界 guest 帧编解码；guest/vsock/network/disk quota/inspect/reaper 尚未接线时不声明可执行能力。
+- [>] 定向测试、`go vet` 和文档/台账结果见 [`2026-09-26-firecracker-provider-boundary.md`](progress/2026-09-26-firecracker-provider-boundary.md)。未改现有 CLI 默认策略、未接入生产装配。
+- [!] 本机没有 `/dev/kvm`；Firecracker/gVisor 真实隔离黑盒测试、生产 `9999` 发布和网站服务操作均未执行。实施说明见 [`sandbox-runtime-providers.md`](../architecture/sandbox-runtime-providers.md)。
+
+## 2026-09-26 Sandbox CLI 严格执行回执协议
+
+- [x] 固定 CLI 能力协议为 `workmesh.sandbox.v1`；能力准入要求启动前资源限制、进程树约束和独立网络 allowlist 能力声明，`create` 必须返回逐任务回执，精确匹配隔离类型、工作区、CPU/内存/PID/磁盘限制和网络 allowlist。旧版或不完整 CLI 在任务创建阶段失败关闭。
+- [x] 新增旧协议/缺失回执/资源与工作区不匹配回归；更新 [`ai-tasks.md`](../api/ai-tasks.md)。定向测试与 `go vet` 结果记入项目进度文件。
+- [!] 这只建立受固定摘要信任的 CLI 接入契约，回执来自 CLI 自述；不等同于真实 ForgeVM/gVisor 运行器、cgroup/Job Object、磁盘 quota、网络 allowlist 的黑盒证据。Q1 保持进行中；未触碰生产 `9999`、网站进程或 Docker Socket。
+
+## 2026-09-26 Agent 租约离线事件 SSE 闭环
+
+- [x] 项目事件 SSE 在建连和每次等待后检查 Agent 租约；租约过期时先将 runtime 持久化为 `offline` 并追加一次 `runtime.offline`，再回放给客户端。常规轮询只扫描 runtime 列表，只有发现过期项才复制/保存完整团队状态。
+- [x] 新增过期租约 SSE 回归，并通过 `TestAgentTeamRuntimeStatusPersistsExpiredLeaseAndEmitsEvent`、`TestAgentTeamSSEEmitsExpiredRuntimeOfflineEvent`、`TestAgentTeamRuntimeTaskEventsAndSSE`、`go vet ./node/api` 与 `git diff --check`。
+- [!] 本切片只覆盖 Server 控制面状态与事件反馈；不会启动定时后台 worker，也未验收真实 Agent/Sandbox、Gateway relay 或生产 `9999`。
+
+## 2026-09-26 Sandbox inspect 与重启恢复
+
+- [x] 新增只读 `TaskBackendInspector`/CLI `inspect` 契约和 `POST /api/v2/workmesh/tasks/recover`；启动恢复会重新核验未销毁句柄，句柄不存在进入 `awaiting_human`，无 inspect 或探测失败保持 `unknown`，禁止继续执行或销毁未知任务。
+- [x] 补充 CLI 无效 envelope、未知状态、后端无 inspect、真实状态恢复和句柄丢失回归测试；定向 `go test`、`go vet` 与 `git diff --check` 作为本切片门禁。
+- [!] 该切片仍未接线真实 ForgeVM/gVisor inspect、cgroup/磁盘/网络隔离，也未执行生产 `9999` 发布或网站切换。
+
+## 2026-09-26 Sandbox 控制面写盘失败补强
+
+- [>] 补齐任务动作完成后 `ai_state` 写盘失败语义：`start` 先补偿取消并按结果释放 `aiJobs`，`collect/cancel/destroy` 保留 Provider 真实终态、释放资源槽位并登记 `stateSyncRequired`；新增受保护 `sync` 操作读取 Provider 真状态并修复持久化。定向路由回归覆盖失败后对账恢复；真实 Sandbox 等高风险后端仍未验收。
+- [!] 该切片只覆盖 Server 控制面一致性；真实 Sandbox、磁盘 quota、网络隔离、Windows Job Object、Deployment Broker 和生产 `9999` 发布仍未完成。
+
 这是开发恢复的唯一快速入口。先看本页，再打开对应任务详情；不要默认重新扫描全部迁移文档。
 
-更新时间：2026-09-19
+更新时间：2026-09-26
+
+## 2026-09-26 计划恢复与完整需求矩阵
+
+- [x] 已恢复并核对前序多 Agent 需求：面板/Gateway/Server/Agent/Sandbox 分层、`apps/workmesh` 与 `dist/workmesh` 构建关系、项目目录和语言环境隔离、A/B/C Session 身份、Server 权威在线状态、长轮询/SSE 流式反馈、Artifact/缓存回收、资源硬限制、Deployment Broker 以及 `9999` 隔离升级均已在主计划的“完整需求矩阵”逐项登记。
+- [x] 已固定恢复后的可执行队列 Q1–Q6：Sandbox 最小闭环、项目凭据生命周期、Artifact 引用回收、非生产 Deployment Broker、`9999` 在线升级演练、真实端到端验收。每项均明确依赖、完成判据和回滚边界。
+- [!] 本次只恢复计划和台账，没有执行生产 `9999` 重启、网站切换、Docker Socket 操作或真实 Sandbox 接线；RuntimeProvider、凭据、网络、权限和生产发布仍按高风险门禁保持 `in_progress/blocked`。
+- [x] 文档校验：主计划与状态文件使用 UTF-8，目标文件 `git diff --check` 通过；完整代码回归仍受既有网站代理夹具缺失 `nginx/proxy/root.conf` 和当前环境无 Bun/生产依赖影响，未将其误记为本轮完成。
+
+## 2026-09-25 项目级多 Agent 并行开发与进程治理
+
+- [>] 已落地首个 Agent 团队控制面切片：新增 runtime 注册/心跳/注销、项目唯一活动 runtime 与 fencing、任务创建/查询/取消/重试/完成、下行 `task.start` command queue、command ack、Agent 上行 sequence 幂等事件和项目/任务 SSE 回放；数据暂存现有 `ai_state`。`apps/workmesh` Relay 已在完整显式配置下接入项目服务启动，并通过 Server→Session→SSE→Server 协议联调；Sandbox 和部署 Broker 仍未接入。详情见 [`agent-team.md`](../api/agent-team.md) 和 [`agent_team_test.go`](../../node/api/agent_team_test.go)。
+- [>] Agent runtime 认证改为 Server 主密钥按项目派生令牌，跨项目令牌和主密钥不能直接调用 runtime；团队写入失败回滚内存状态，SSE 通知延后至持久化成功。项目 secret 自动发放与轮换仍未实现，当前只能通过受控人工装配显式配置启用 Agent。
+- [>] 用户直接完成任务已记录人工来源与原因，待处理旧命令失效，在线 Agent 收到取消命令；晚到事件不再覆盖人工完成状态。Relay 已接入 `service foreground` 的显式环境配置路径：完整配置才注册，半配置拒绝启动，未配置保持离线；真实 Sandbox、凭据发放/轮换和 9999 发布仍待验收。
+- [>] 用户取消任务现在同样先将旧 `task.start` 等未确认命令标记为 `superseded`，再派发 `task.cancel`，避免 Agent 断线重连后启动已取消任务；重复取消幂等，晚到 Agent 状态/完成报告只留审计，队列满但本任务有可替代旧命令时仍允许取消。定向测试覆盖这些路径。
+- [>] `retry` 已改为同任务递增 `attempt`：旧命令失效，旧轮次先收到 `task.cancel`，新轮次收到 `task.start`；Relay 回传轮次并对取消命令校验轮次，Server 保留旧轮次事件审计但不让其覆盖新快照。Server 和 Relay 定向测试已通过；跨进程 Server→Relay 重试联调与 fork 类型检查仍待完成，不能把接口 200 当成 Session 已重新执行。
+- [>] Desktop Server adapter 已接入：`packages/frontend/src/features/agent-team/server-client.ts` 通过同源 `/api/v2` 请求任务 REST 和带 Authorization 的 SSE，使用 `Last-Event-ID/cursor` 断线重连并在 `EVENT_CURSOR_EXPIRED` 时停止；`AgentMonitor.vue` 已增加 Server 任务创建、快照、增量事件和 attempt 状态区域。浏览器不接触节点真实地址，`nodeId` 只作为 `operateNode` relay 参数。前端类型检查已通过；真实登录会话、Gateway→Server relay 和生产页面冒烟仍待验收。旧 Gateway 工作流和静态 TeamBoard 区域保持兼容，不作为 Server 团队状态来源。
+- [>] Agent 命令读取支持 `waitSeconds=1..10` 长轮询，任务入队后事件通知唤醒，超时或断开不创建后台 worker；定向测试已通过。
+- [>] Server 侧资源准入已补齐：按 `small=1`、`medium=2`、`large=4` 统计项目活动任务，`WORKMESH_AGENT_MAX_RESOURCE_UNITS` 默认 4、范围 1-512；超限任务进入 `waiting_resource`，资源释放后自动入队。同步修复 command queue 未提供 `limit` 时默认值错误导致只返回一条命令的问题。
+- [>] Command queue 生命周期已增加项目级终态历史压缩：每项目最多保留 2000 条 `acked/superseded`，始终保留活动 `queued/delivered` 命令及其他项目记录；定向测试已覆盖活动命令不被删除。
+- [>] 历史状态输出脱敏已补齐：团队任务、命令列表和 SSE 写出统一递归屏蔽嵌套凭据字段，重启后遗留的 `ai_state` 也不会通过回放泄露；保留 runtime 注册所需的 fencing 响应字段，定向测试覆盖历史 payload。
+- [>] Agent/AI JSON 输入边界已收紧：统一请求体最多 2MiB，拒绝尾随 JSON 值；避免事件、任务和控制接口接受拼接请求或无界输入，定向测试覆盖超限和尾随值。
+- [>] command queue 增加 30 秒 delivery lease 和 attempt 计数：未 ack 不重复，过期后按原 commandId 重投；Relay 按 commandId 幂等接收，并将 Session 事件按 sequence 上行。
+- [>] 项目任务列表支持有界分页和项目内 total；命令 ack 只接受 delivered 状态，重复确认不重复计数。
+- [>] SSE 对超出 2000 条保留窗口的旧 cursor 返回 `EVENT_CURSOR_EXPIRED`，客户端需先刷新快照。
+- [>] 任务支持最多 32 个同项目依赖，未完成依赖等待、失败依赖阻塞、全部完成后自动入队；定向 DAG 测试已通过。
+- [>] P2 交接闭环已落地：Agent sequence 事件支持 `task.handoff` 与 `task.completion_report`，保存负责人/Session、报告历史、验证摘要和 Artifact 标识；完成/失败/阻塞报告会触发任务状态与后置依赖判断。Artifact 文件闭环见下一条 P3 记录。
+- [>] P3 Artifact 闭环已落地：支持 `artifact.created` 事件、sha256/大小/kind 白名单、任务级 `/artifacts` 与 `/evidence` 有界分页、8MiB 顺序分块上传、最终摘要校验、HTTP Range 下载、只读完整性核验和目录对账；核验/下载不会创建目录，对账最多读取 513 个目录条目、返回前 512 个结果并报告残留 `.part`、未登记文件和完成文件缺少元数据。团队事件和命令 payload 现在按字段递归脱敏（token、password、secret、apiKey、credential、privateKey、authorization），并有流式事件回归测试。文件只写入 `WORKMESH_DATA_DIR/workmesh-artifacts`，引用回收和 Sandbox 挂载仍待实现。定向回归覆盖缺失文件、残留分块、未登记完成文件、对账截断和事件凭据泄露。
+- [x] 2026-09-26 项目级 Artifact dry-run 对账：新增 `GET /api/v2/projects/{projectId}/artifacts/reconcile`，只读扫描项目下最多 512 个任务和 2048 个文件，按任务/Artifact 汇总已登记完成、残留分块、未登记文件、元数据未完成、符号链接拒绝和未知文件，并返回状态条数/字节数与 `truncated`。不会创建目录、计算摘要或删除文件；定向 `TestProjectArtifactReconcileIsReadOnlyAndProjectScoped`、`TestProjectArtifactReconcileIsBounded`、Agent Team 全套定向测试和 `go vet ./node/api` 已通过。
+- [x] 2026-09-26 项目级 Artifact 引用与保留期 dry-run：对账收集任务 `artifacts`、`completionReport.artifactIds` 和历史 `completionReports.artifactIds`，区分元数据/完成报告来源、重复引用、跨任务引用、未知引用和缺失文件；返回最多 4096 条引用、30 天默认保留期、`retentionState` 和 `reclaimCandidate`，过期且无引用仅作为只读候选，不删除文件。新增 `TestProjectArtifactReconcileCollectsCompletionReferences`，Agent Team Artifact 定向测试通过。
+- [x] 2026-09-26 Artifact 人工回收计划控制面：新增项目级 `POST /artifacts/reclaim-plan`、分页查询和单计划详情接口；基于完整对账只登记过期、完整、无外部引用的 `.bin` 文件，计划状态为 `awaiting_approval` 且固定 `destructive=false`，支持项目内 `idempotencyKey`，不删除文件、不创建生产目录。新增回收计划幂等、详情项目隔离、重载回读和文件保留测试；人工批准删除与失败审计仍未实现。
+- [x] 2026-09-26 非生产 Deployment Broker dry-run 控制面：新增项目级 `POST /deployments/dry-run`、`GET /deployments/plans` 与计划详情查询；仅接受 staging 等非生产安全环境、当前项目已完成 Artifact 和有界健康检查定义，计划固定为 `awaiting_approval`、`dryRun=true`、`destructive=false`、`deploymentStarted=false`，支持幂等、项目隔离和 100 份计划上限。dry-run 不执行健康检查、不调用 `deployment_runtime`、不改变 `localDeployment`，不触碰生产 `9999`；真实批准、部署、回滚和失败审计仍待高风险确认。
+- [x] 2026-09-26 Sandbox 控制面失败回滚与计划重载证据：任务句柄或状态写入 `ai_state` 失败时恢复内存状态，并主动销毁刚创建的隔离句柄，避免孤儿任务；Artifact 回收计划和 Deployment Plan 均补充审批态不变量与重启后按项目回读测试。定向 `node/api`、`taskruntime` 测试和 `go vet` 通过。真实 Sandbox 后端、凭据/网络隔离和生产 `9999` 仍未接线。
+- [>] 进行中：已建立[实施进度](progress/2026-09-25-multi-agent-parallel-implementation.md)、[执行架构](../architecture/multi-agent-execution.md)和[并行开发手册](../operations/multi-agent-development-runbook.md)。目标是一个项目一个组长 Agent Service、多 Session、SSE 实时事件、任务交接、资源预算和 `9999` 在线升级。
+- [>] 进程治理基础已增强：`scripts/process-session.mjs` 现在记录 PID starttime/PGID，识别 Unix zombie，按进程树执行 SIGTERM 等待和 SIGKILL 升级，并在端口、临时目录或子孙进程未释放时保留 `awaiting_human` 登记；`verify-changed.mjs` 收到 SIGINT/SIGTERM 也会释放 lease 并执行清理。任务 CLI 现在显式创建独立进程组，取消/超时先终止进程组，250ms 后升级强制终止；Windows 使用固定参数 `taskkill /T /F` 回收进程树，并有 Unix 派生进程回归测试。cgroup/Windows Job Object 和跨平台资源硬上限仍待 P4/P5。
+- [x] 定向证据：`process-lifecycle-check.mjs`、`development-paths-check.mjs` 通过；`dev-shared-reuse-check.mjs` 仍受环境缺少 `@clack/prompts` 阻断。当前主机存在一个非 WorkMesh 归属的 `[sh] <defunct>`，仅只读告警，禁止 Agent 自动清理。
+- [>] 前序需求恢复索引已补入主项目 [`docs/internal/agent-team-realtime-implementation-plan.md`](../../../../docs/internal/agent-team-realtime-implementation-plan.md)：补齐源码与 `dist/workmesh` 关系、项目运行目录、部署 Broker、缓存清理、资源硬隔离、A/B/C Session 身份、在线状态、长轮询/SSE、桌面反馈和 `9999` 隔离升级的逐项状态；这些条目明确区分已实现控制面与待完成 Sandbox、凭据生命周期、Artifact/Evidence、Handoff 和发布演练。
+- [x] 2026-09-26 Sandbox 路径与资源契约定向回归：`TaskSpec` 已携带 `resourceProfile/resourceLimits`，Server 只接受 `small/medium/large` 及 profile 内的正数上限；未配置 `WORKMESH_AGENT_WORKSPACE_ROOT`、越界路径、禁止宿主目录和符号链接逃逸均被拒绝。使用 `/opt` 受控临时 workspace 修复测试环境误落 `/www` 的问题后，`go test ./node/service/taskruntime ./node/api -run 'TestProvider|TestWorkMeshTaskRoutesUseIsolatedProvider|TestTaskExecRequiresToken'` 与对应 `go vet` 通过。当前 CLI 仍只是摘要校验和结构化参数传递，cgroup v2/Windows Job Object/ForgeVM 硬限制后端尚未实现或验收，生产 `9999` 未切换。
+- [x] 2026-09-26 Sandbox 能力证明契约：生产 Provider 现在要求固定摘要 CLI 支持 `--json task capabilities '{}'`，并验证 `forgevm/gvisor`、工作区/网络隔离、CPU/内存/PID/磁盘硬限制及 `maxResourceLimits`；能力缺失通过 `TASK_PROVIDER_UNAVAILABLE` 返回 503，不降级到宿主执行。新增 CLI 能力解析、能力不足路由 503 和 Provider 准入回归测试；真实 ForgeVM/gVisor/cgroup v2/Windows Job Object 后端仍未实现或隔离验收。
+- [x] 2026-09-26 Linux cgroup v2 资源控制器适配层：新增 `CgroupV2Controller`，在受控 cgroup root 下写入 `cpu.max`、`memory.max`、`memory.swap.max`、`pids.max`，支持 PID 归属、符号链接防护和残留进程拒绝回收；缺少 `cpu/memory/pids` controller 或仅依赖 cgroup 提供磁盘容量时明确拒绝。伪 cgroup 文件系统定向测试和 `go vet` 通过；该控制器尚未接入外部 Sandbox CLI，磁盘 quota、网络隔离和生产 cgroup delegation 仍待隔离黑盒验收。
+- [x] 2026-09-26 项目工作区派生：任务创建请求支持 `projectId`，Server 派生 `WORKMESH_AGENT_WORKSPACE_ROOT/<projectId>/worktrees/<taskId>` 并写入 `RuntimePolicy.WorkspaceRef`；项目模式拒绝客户端同时提交 `worktree`，旧 legacy 路径继续经过 root、敏感目录和符号链接校验。新增路由回归测试，未修改生产 `9999`。
+- [x] 2026-09-26 任务临时目录回收：`WorkspaceLayout` 固定项目 `worktrees/tmp/cache/artifacts` 边界，`TaskProvider.Destroy` 仅清理当前任务 `tmp/<taskId>`，保留源码、共享 cache 和 Artifact；清理失败返回 `TASK_CLEANUP_REQUIRED` 并进入 `awaiting_human`，新增符号链接、保留目录和 Destroy 回归测试。
+- [x] 2026-09-26 任务状态恢复补强：`TaskProvider.State` 作为只读状态源，取消后执行 `collect` 仍持久化为 `cancelled`，清理失败在 Provider 和 `ai_state` 中保持 `awaiting_human`，重启恢复不会把人工处理任务误还原为 `created`；定向 `go test` 与 `go vet` 通过。
+- [x] 2026-09-26 任务清理重试与后端失败恢复：`awaiting_human` 在 Sandbox 已销毁后只重试任务 `tmp/<taskId>` 清理，不重复调用后端 `destroy`；人工修复目录后可再次销毁并转为 `destroyed`。启动/取消后端暂时失败时保留原状态，允许安全重试；新增 Provider/API 回归测试，定向测试通过。
+- [x] 2026-09-26 固定摘要 CLI 生命周期契约回归：新增隔离测试后端闭环，验证 `capabilities → create → start → exec/collect`、`cancel`、`destroy` 顺序、项目 workspace 引用和 `medium` 资源限制均按结构化参数传递；该测试不等同于真实 ForgeVM/gVisor 隔离验收。
+- [x] 2026-09-26 单任务超时契约：项目任务接受 `timeoutSeconds`（1-1800），随 `task.start` 下发；Relay 将其写入 Session metadata，并限制在本地 `WORKMESH_AGENT_TASK_TIMEOUT_MS` 上限内，旧请求不提供时继续使用本地默认值。
+- [x] 2026-09-26 项目任务目录物化：任务创建时在受控 workspace root 内建立 `worktrees/<taskId>`、`tmp/<taskId>`、共享 `cache` 和 `artifacts/<taskId>`，逐级拒绝符号链接并新增目录创建回归；这不等同于 Git worktree 创建或真实 Sandbox 挂载。
+- [x] 2026-09-26 workspace 物化路径加固：目录创建改为逐级 `Lstat/Mkdir/Lstat`，不使用会穿过符号链接的 `MkdirAll`；新增创建阶段符号链接逃逸回归。
+- [x] 2026-09-26 跨平台编译修复：将通用 `contextError` 从 Linux cgroup 文件移到平台无关实现，`GOOS=windows GOARCH=amd64 go test ./node/service/taskruntime -c` 通过；完整 `node/api` 回归中本轮相关测试通过，仍有既有网站代理夹具缺失 `nginx/proxy/root.conf` 的失败，未归因于本切片。
+- [x] 本轮恢复验证：`apps/workmesh` Relay 定向测试 `7 pass / 0 fail`；`GOWORK=off go test ./node/api -run 'TestAgentTeam'` 通过；`git diff --check` 在 Agent fork 和 Server 相关目标文件范围通过。根仓库全量 diff check 仍受既有 `apps/README.md` EOF 空行影响，未将其误记为本轮问题。
+
+## 2026-09-23 首页概览与主机监控
+
+- [x] 首页系统信息改为内核发行号和 `uname -m`；CPU、负载、磁盘 inode 按实时差值采集。主机监控设置改为 1Panel 的五个字段，并按间隔写入 `monitor_bases`、`monitor_ios`、`monitor_networks`。
+- [x] `GOWORK=off go test ./node/api -count=1 -timeout 180s -run 'TestHostMonitor|TestDashboard|TestHostOperationalRoutes|TestHostMonitorSettings'` 和 `GOWORK=off go test ./cmd/workmesh-server -count=1 -timeout 180s -run 'TestUnifiedSchemaMigrationsKeepDatabaseOrder'` 通过。已于 2026-09-24 00:23 发布，SHA256 `9de8aaf57fdaadacdaba4db674efc4f7b75163f581e037eaba946270dfbc6094`，MainPID `231623`。详情见 [`2026-09-23-dashboard-monitor.md`](progress/2026-09-23-dashboard-monitor.md)。
+- [x] `POST /api/v2/databases/pg/search` 会返回实例里尚未登记的库。`znmp_sopvip_com` 在 `WorkMesh-postgresql-ZNMP`（实例名 `postgresql`），不在 `postgresql-sp`。同名安装优先使用 Running 容器。定向测试 `TestDatabaseDiscoveryHelpers`、`TestListPostgresDatabasesParsesRows` 通过。尚未发布。
+- [x] 计划任务数据库下拉会同步各实例真实库，因此同时列出 `znmp_sopvip_com` 和 `sp_sopvip_com`。`database`、`directory`、`log`、`website`、`app`、`snapshot`、`cutWebsiteLog`、`ntp`、`syncIpGroup` 改为真实执行。测试 `TestDatabaseItemListSyncsBothPostgresInstances`、`TestCronjobDatabaseBackupSelectsRegisteredChildren`、`TestCronjobDirectoryArchiveAndIPGroup` 通过。已随 2026-09-24 00:23 发布。
+
+## 2026-09-23 缓存清理与脚本库
+
+- [x] 缓存扫描改为数据目录真实路径，并只读合并旧 `/opt/1panel` 缓存；Docker 按 `docker system df` 字节数统计未使用镜像和构建缓存。已登记备份只展示、不默认可删。
+- [x] `POST /api/v2/core/script/search` 返回数字 `id`、`lable`、`isSystem` 和 `null` 分组，并补齐 9 条系统脚本。系统脚本不能修改或删除。
+- [x] `GOWORK=off go test ./node/api -count=1 -timeout 180s -run 'TestToolboxScanUsesDataAndPanelLayout|TestParseDockerSystemDF|TestToolboxDeviceDNSAndFTPState|TestScriptLibraryPersistsInSQLiteWithoutJSON|TestScriptSyncUsesConfiguredRemoteAndSQLite|TestScriptSearchMatchesPanelShape'` 通过。已于 2026-09-23 17:35 发布，SHA256 `4a7da796e6b121103f9168ace8bff63251907a4731633398a966ce4da4aa1180`，MainPID `4104426`。
+
+## 2026-09-22 数据库实例列表
+
+- [x] `GET /api/v2/databases/db/list/:type` 按逗号和同族别名返回实例数组；已安装的 PostgreSQL、Redis、MySQL/MariaDB、MongoDB 会补登记为本地实例。实例内的库不再被当成未安装。
+- [x] PostgreSQL、MySQL、MongoDB 的库内搜索只返回当前实例下的库。
+- [x] 停止、重启、设置、建库、连接信息和从服务器同步改为使用已安装实例：检查接口返回安装 ID，配置读写真实 conf，连接信息返回端口、容器和密码。
+- [x] 远程服务器列表返回地址和密码；本地终端进入已登记容器，远程终端使用本机客户端连接实例地址。
+- [x] `GOWORK=off go test ./node/api -count=1 -timeout 180s -run 'TestDatabase|TestPostgres|TestMongo|TestRedis|TestAppInstall|TestAppOperation|TestRemote'` 通过。
+
+## 2026-09-22 sp.sopvip.com 独立站点 provisioning
+
+- [!] 正式部署入口已完成，但本会话无法访问生产面板 API，尚未执行真实写入；按 `znmp.sopvip.com` 的宿主机 Go + Supervisor 模式，通过 workmesh-server API 创建独立 PostgreSQL、标准 `type=proxy` 反向站点和 `mode=host` Go runtime；由面板服务负责 SQLite、nginx 和 Supervisor 管理数据。两个站点目录和全部运行资源严格隔离。
+- [x] 应用文件改为通过面板文件 API 写入 `/www/wwwroot/sp.sopvip.com/app`，不再在站点根目录生成备份/secret 临时目录；`znmp` 只提供受控的代码资源基线，不复制其数据库、日志、证书或运行态文件。
+- [x] SQLite 关系表写入、幂等回读和 dry-run 已在临时副本通过；反向站点域名和代理菜单配置可读；密码、AccessSecret 不写入仓库或普通日志。Docker status 继续保持通用节点工具箱语义，不绑定站点域名。
+- [!] 2026-09-22 复核确认：生产 SQLite 只读快照中 `websites` 仅有 `znmp.sopvip.com`，`runtime_records` 仅有 `znmp.sopvip.com-gateway`，PostgreSQL 面板表为空；生产标准目录 `/www/wwwroot/sp.sopvip.com` 不存在，Supervisor 仅有 znmp 配置。当前沙盒不能访问生产 `9999`、Supervisor/Docker socket、PostgreSQL 或外部 DNS/公网，因此不能在此执行真实写入或安全切换。
+- [>] 公网仍能访问 `sp.sopvip.com` 只能说明存在当前面板之外的旧入口、其他命名空间或外部代理；维护主机需先核验该入口归属，再执行正式 API 部署，避免覆盖仍在服务的旧实例。
+- [x] 详情见 [`2026-09-22-sp-site-provisioning.md`](progress/2026-09-22-sp-site-provisioning.md)。
 
 ## 2026-09-19 节点机器身份与资源生命周期治理
 

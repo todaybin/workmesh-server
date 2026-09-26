@@ -89,11 +89,12 @@ func decodeSupervisorBody(r *http.Request) (map[string]any, error) {
 func handleHostSupervisorStatus(w http.ResponseWriter, r *http.Request) {
 	ctlErr := supervisorDependencyError("supervisorctl")
 	daemonErr := supervisorDependencyError("supervisord")
+	result := map[string]any{"type": "supervisord", "configPath": supervisorConfigPath(), "includeDir": supervisorIncludeDir(), "logPath": filepath.Join(filepath.Dir(supervisorConfigPath()), "supervisord.log"), "serviceName": supervisorServiceName(), "ctlExist": ctlErr == nil, "isExist": daemonErr == nil, "init": false, "status": "stopped", "isRunning": false, "version": "", "msg": ""}
 	if ctlErr != nil && daemonErr != nil {
-		writeSupervisorError(w, http.StatusServiceUnavailable, ctlErr)
+		result["msg"] = ctlErr.Error()
+		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": result})
 		return
 	}
-	result := map[string]any{"type": "supervisord", "configPath": supervisorConfigPath(), "includeDir": supervisorIncludeDir(), "logPath": filepath.Join(filepath.Dir(supervisorConfigPath()), "supervisord.log"), "serviceName": supervisorServiceName(), "ctlExist": ctlErr == nil, "isExist": daemonErr == nil, "init": false, "status": "unknown", "isRunning": false, "version": "", "msg": ""}
 	if _, err := os.Stat(supervisorConfigPath()); err == nil {
 		result["init"] = true
 	}
@@ -105,10 +106,10 @@ func handleHostSupervisorStatus(w http.ResponseWriter, r *http.Request) {
 	if ctlErr == nil {
 		status, err := supervisorCommand(r, "supervisorctl", "-c", supervisorConfigPath(), "status")
 		if err == nil && status.ExitCode == 0 {
-			result["status"] = "active"
+			result["status"] = "running"
 			result["isRunning"] = true
 		} else {
-			result["status"] = "inactive"
+			result["status"] = "stopped"
 			result["msg"] = strings.TrimSpace(status.Stderr)
 		}
 	}

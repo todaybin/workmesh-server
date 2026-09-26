@@ -92,6 +92,7 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 		case "/api/v2/core/settings/memo":
 			success(w, copy["memo"])
 		default:
+			overlayHostMonitorOnSettings(copy)
 			success(w, copy)
 		}
 	}
@@ -157,6 +158,7 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 			copy[k] = val
 		}
 		s.mu.Unlock()
+		overlayHostMonitorOnSettings(copy)
 		if r.URL.Path == "/api/v2/core/settings/memo" {
 			success(w, nil)
 			return
@@ -303,11 +305,9 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 				}
 				result["items"] = menu
 			case "/api/v2/core/settings/terminal/search":
-				var term map[string]any
-				if !loadNodeSetting("terminal", &term) || term == nil {
-					term = map[string]any{}
-				}
-				result["config"] = term
+				s.mu.Unlock()
+				success(w, loadTerminalInfo())
+				return
 			case "/api/v2/core/settings/ssl/download":
 				result["config"] = s.state.Settings["ssl"]
 			case "/api/v2/core/settings/ssl/reload":
@@ -487,6 +487,64 @@ func registerSettingsRoutes(mux *http.ServeMux, s *domainStore) {
 		s.mu.Unlock()
 		domainError(w, 404, "NOT_FOUND", "设置快照不存在")
 	})
+}
+
+// loadTerminalInfo 返回前端 TerminalInfo 所需的顶层字段，已保存配置覆盖内置默认值。
+func loadTerminalInfo() map[string]any {
+	info := map[string]any{
+		"lineHeight":        "1.2",
+		"letterSpacing":     "0",
+		"fontSize":          "12",
+		"fontFamily":        "Monaco, Menlo, Consolas, 'Courier New', monospace",
+		"backgroundColor":   "#000000",
+		"foregroundColor":   "#f5f5f5",
+		"cursorBlink":       "Enable",
+		"cursorStyle":       "block",
+		"scrollback":        "1000",
+		"scrollSensitivity": "6",
+	}
+	var saved map[string]any
+	if !loadNodeSetting("terminal", &saved) || saved == nil {
+		return info
+	}
+	for key := range info {
+		value, ok := saved[key]
+		if !ok || value == nil {
+			continue
+		}
+		if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
+			continue
+		}
+		info[key] = value
+	}
+	return info
+}
+
+// domainSettingString 读取功能域设置中的字符串值。
+func domainSettingString(key string) string {
+	store := getDomainStore()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	if store.state.Settings == nil {
+		return ""
+	}
+	value, ok := store.state.Settings[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+// setDomainSetting 写入功能域设置，供 /settings/search 与终端默认连接读取同一份状态。
+func setDomainSetting(key string, value any) error {
+	store := getDomainStore()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.state.Settings == nil {
+		store.state.Settings = map[string]any{}
+	}
+	store.state.Settings[key] = value
+	return store.saveLocked()
 }
 
 // settingJSONKey 将旧接口的 PascalCase 配置键转换为前端使用的 lowerCamelCase。

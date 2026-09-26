@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -18,6 +19,35 @@ import (
 )
 
 type routeTaskBackend struct{}
+
+type routeCapabilityBackend struct {
+	routeTaskBackend
+	caps taskruntime.SandboxCapabilities
+}
+
+type recordingRouteBackend struct {
+	routeTaskBackend
+	spec taskruntime.TaskSpec
+}
+
+func (b *recordingRouteBackend) Create(_ context.Context, spec taskruntime.TaskSpec) (string, error) {
+	b.spec = spec
+	return "sandbox-derived", nil
+}
+
+func (b routeCapabilityBackend) Capabilities(context.Context) (taskruntime.SandboxCapabilities, error) {
+	return b.caps, nil
+}
+
+func testTaskWorkspaceRoot(t *testing.T) string {
+	t.Helper()
+	root, err := os.MkdirTemp("/opt", ".workmesh-api-task-test-")
+	if err != nil {
+		t.Fatalf("创建受控测试 workspace root 失败: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	return root
+}
 
 // Create 返回测试用沙箱任务标识，验证路由不会绕过任务提供器。
 func (routeTaskBackend) Create(context.Context, taskruntime.TaskSpec) (string, error) {
@@ -446,6 +476,8 @@ func TestAIResourceOperationsRequireExistingResource(t *testing.T) {
 // TestWorkMeshTaskRoutesUseIsolatedProvider 验证 WorkMesh 任务路由使用隔离任务提供器。
 func TestWorkMeshTaskRoutesUseIsolatedProvider(t *testing.T) {
 	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	workspaceRoot := testTaskWorkspaceRoot(t)
+	t.Setenv("WORKMESH_AGENT_WORKSPACE_ROOT", workspaceRoot)
 	t.Setenv("WORKMESH_TASK_TOKEN", "task-token")
 	provider, err := taskruntime.NewTaskProvider(routeTaskBackend{})
 	if err != nil {
@@ -455,7 +487,7 @@ func TestWorkMeshTaskRoutesUseIsolatedProvider(t *testing.T) {
 	t.Cleanup(func() { SetTaskProvider(nil) })
 	mux := http.NewServeMux()
 	registerAIExecutionRoutes(mux)
-	valid := `{"taskId":"route-task","imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","worktree":"/srv/workmesh/project","entrypoint":["/opt/workmesh/task-bootstrap"]}`
+	valid := fmt.Sprintf(`{"taskId":"route-task","imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","worktree":%q,"entrypoint":["/opt/workmesh/task-bootstrap"]}`, workspaceRoot+"/project")
 	unauthorized := httptest.NewRecorder()
 	mux.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/create", strings.NewReader(valid)))
 	if unauthorized.Code != http.StatusUnauthorized {
@@ -484,12 +516,353 @@ func TestWorkMeshTaskRoutesUseIsolatedProvider(t *testing.T) {
 	if executed.Code != http.StatusOK || !strings.Contains(executed.Body.String(), "ok") {
 		t.Fatalf("exec = %d %s", executed.Code, executed.Body.String())
 	}
+	destroyRunning := request("destroy", `{"taskId":"route-task"}`)
+	if destroyRunning.Code != http.StatusBadRequest || !strings.Contains(destroyRunning.Body.String(), "必须先取消或收集") {
+		t.Fatalf("运行中任务直接销毁必须拒绝: %d %s", destroyRunning.Code, destroyRunning.Body.String())
+	}
 	collected := request("collect", `{"taskId":"route-task"}`)
 	if collected.Code != http.StatusOK || !strings.Contains(collected.Body.String(), "collected") {
 		t.Fatalf("collect = %d %s", collected.Code, collected.Body.String())
 	}
+	destroyed := request("destroy", `{"taskId":"route-task"}`)
+	if destroyed.Code != http.StatusOK || !strings.Contains(destroyed.Body.String(), "route-task") {
+		t.Fatalf("完成任务销毁失败: %d %s", destroyed.Code, destroyed.Body.String())
+	}
 	unknown := request("start", `{"taskId":"missing"}`)
 	if unknown.Code != http.StatusNotFound {
 		t.Fatalf("unknown task status = %d", unknown.Code)
+	}
+}
+
+func TestWorkMeshTaskCollectAfterCancelPersistsCancelledState(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	workspaceRoot := testTaskWorkspaceRoot(t)
+	t.Setenv("WORKMESH_AGENT_WORKSPACE_ROOT", workspaceRoot)
+	t.Setenv("WORKMESH_TASK_TOKEN", "task-token")
+	provider, err := taskruntime.NewTaskProvider(routeTaskBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetTaskProvider(provider)
+	t.Cleanup(func() { SetTaskProvider(nil) })
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	request := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/"+path, strings.NewReader(body))
+		req.Header.Set("X-WorkMesh-Token", "task-token")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, req)
+		return response
+	}
+	created := request("create", `{"projectId":"cancel-project","taskId":"cancel-task","imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","entrypoint":["/opt/workmesh/task-bootstrap"]}`)
+	if created.Code != http.StatusOK {
+		t.Fatalf("create = %d %s", created.Code, created.Body.String())
+	}
+	for _, operation := range []string{"start", "cancel", "collect"} {
+		response := request(operation, `{"taskId":"cancel-task"}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", operation, response.Code, response.Body.String())
+		}
+	}
+	state := getAIState()
+	state.mu.RLock()
+	status := aiString(state.tasks["cancel-task"], "status")
+	state.mu.RUnlock()
+	if status != string(taskruntime.TaskCancelled) {
+		t.Fatalf("取消后 collect 不得把持久化状态改为 completed: %s", status)
+	}
+}
+
+func TestWorkMeshTaskRouteReturnsUnavailableWhenSandboxCapabilitiesAreInsufficient(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	workspaceRoot := testTaskWorkspaceRoot(t)
+	t.Setenv("WORKMESH_AGENT_WORKSPACE_ROOT", workspaceRoot)
+	t.Setenv("WORKMESH_TASK_TOKEN", "task-token")
+	provider, err := taskruntime.NewCapabilityCheckedTaskProvider(routeCapabilityBackend{caps: taskruntime.SandboxCapabilities{
+		ProtocolVersion: taskruntime.SandboxProtocolVersion, SandboxType: "forgevm", Backend: "gvisor", Isolation: "container", WorkspaceIsolation: true,
+		NetworkIsolation: true, HardCPU: true, HardMemory: false, HardPIDs: true, HardDisk: true,
+		MaxResourceLimits: taskruntime.ResourceLimits{CPUQuotaMicros: 100_000, MemoryBytes: 1 << 30, PIDsMax: 256, DiskBytes: 4 << 30},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetTaskProvider(provider)
+	t.Cleanup(func() { SetTaskProvider(nil) })
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	body := fmt.Sprintf(`{"taskId":"capability-task","imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","worktree":%q,"entrypoint":["/opt/workmesh/task-bootstrap"]}`, workspaceRoot+"/project")
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/create", strings.NewReader(body))
+	req.Header.Set("X-WorkMesh-Token", "task-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, req)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "TASK_PROVIDER_UNAVAILABLE") {
+		t.Fatalf("能力不足应返回 503: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestWorkMeshTaskRouteDerivesProjectWorkspace(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	workspaceRoot := testTaskWorkspaceRoot(t)
+	t.Setenv("WORKMESH_AGENT_WORKSPACE_ROOT", workspaceRoot)
+	t.Setenv("WORKMESH_TASK_TOKEN", "task-token")
+	backend := &recordingRouteBackend{}
+	provider, err := taskruntime.NewTaskProvider(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetTaskProvider(provider)
+	t.Cleanup(func() { SetTaskProvider(nil) })
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	request := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/create", strings.NewReader(body))
+		req.Header.Set("X-WorkMesh-Token", "task-token")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, req)
+		return response
+	}
+	derived := request(`{"projectId":"project-a","taskId":"derived-task","imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","entrypoint":["/opt/workmesh/task-bootstrap"]}`)
+	if derived.Code != http.StatusOK || !strings.Contains(derived.Body.String(), `"workspaceRef":"project-a"`) {
+		t.Fatalf("项目模式创建失败: %d %s", derived.Code, derived.Body.String())
+	}
+	expected := filepath.Join(workspaceRoot, "project-a", "worktrees", "derived-task")
+	if backend.spec.Worktree != expected || backend.spec.RuntimePolicy.WorkspaceRef != "project-a" {
+		t.Fatalf("项目工作区派生错误: worktree=%q workspaceRef=%q", backend.spec.Worktree, backend.spec.RuntimePolicy.WorkspaceRef)
+	}
+	for _, path := range []string{
+		expected,
+		filepath.Join(workspaceRoot, "project-a", "tmp", "derived-task"),
+		filepath.Join(workspaceRoot, "project-a", "cache"),
+		filepath.Join(workspaceRoot, "project-a", "artifacts", "derived-task"),
+	} {
+		info, statErr := os.Stat(path)
+		if statErr != nil || !info.IsDir() {
+			t.Fatalf("项目任务目录未物化: %s (%v)", path, statErr)
+		}
+	}
+	mixed := request(fmt.Sprintf(`{"projectId":"project-b","taskId":"mixed-task","worktree":%q,"imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","entrypoint":["/opt/workmesh/task-bootstrap"]}`, expected))
+	if mixed.Code != http.StatusBadRequest || !strings.Contains(mixed.Body.String(), "TASK_WORKSPACE_INVALID") {
+		t.Fatalf("项目模式混用 worktree 必须拒绝: %d %s", mixed.Code, mixed.Body.String())
+	}
+}
+
+func TestWorkMeshTaskDestroyReportsCleanupRequired(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	workspaceRoot := testTaskWorkspaceRoot(t)
+	t.Setenv("WORKMESH_AGENT_WORKSPACE_ROOT", workspaceRoot)
+	t.Setenv("WORKMESH_TASK_TOKEN", "task-token")
+	provider, err := taskruntime.NewTaskProvider(&routeTaskBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetTaskProvider(provider)
+	t.Cleanup(func() { SetTaskProvider(nil) })
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	create := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/create", strings.NewReader(`{"projectId":"cleanup-project","taskId":"cleanup-task","imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","entrypoint":["/opt/workmesh/task-bootstrap"]}`))
+	create.Header.Set("X-WorkMesh-Token", "task-token")
+	created := httptest.NewRecorder()
+	mux.ServeHTTP(created, create)
+	if created.Code != http.StatusOK {
+		t.Fatalf("创建清理测试任务失败: %d %s", created.Code, created.Body.String())
+	}
+	// 取消请求上下文会让后端销毁成功后，临时目录清理被安全中止，
+	// 从而构造“Sandbox 已销毁、目录待人工处理”的可重试状态。
+	destroy := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/destroy", strings.NewReader(`{"taskId":"cleanup-task"}`))
+	destroy.Header.Set("X-WorkMesh-Token", "task-token")
+	destroyCtx, cancel := context.WithCancel(destroy.Context())
+	cancel()
+	destroy = destroy.WithContext(destroyCtx)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, destroy)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "TASK_CLEANUP_REQUIRED") {
+		t.Fatalf("清理失败应进入人工处理: %d %s", response.Code, response.Body.String())
+	}
+	state, stateErr := provider.State("cleanup-task")
+	if stateErr != nil || state != taskruntime.TaskAwaitingHuman {
+		t.Fatalf("清理失败后 Provider 状态必须保留 awaiting_human: state=%s err=%v", state, stateErr)
+	}
+	// 人工修复后再次 destroy 只重试工作区清理，不重复销毁已经不存在的 Sandbox。
+	retry := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/destroy", strings.NewReader(`{"taskId":"cleanup-task"}`))
+	retry.Header.Set("X-WorkMesh-Token", "task-token")
+	retryResponse := httptest.NewRecorder()
+	mux.ServeHTTP(retryResponse, retry)
+	if retryResponse.Code != http.StatusOK {
+		t.Fatalf("清理重试应成功: %d %s", retryResponse.Code, retryResponse.Body.String())
+	}
+	state, stateErr = provider.State("cleanup-task")
+	if stateErr != nil || state != taskruntime.TaskDestroyed {
+		t.Fatalf("清理重试后任务必须销毁: state=%s err=%v", state, stateErr)
+	}
+}
+
+func TestWorkMeshTaskStateSaveFailureRollsBackMemory(t *testing.T) {
+	blockedParent := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blockedParent, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKMESH_DATA_DIR", blockedParent)
+	t.Setenv("WORKMESH_TASK_TOKEN", "task-token")
+	workspaceRoot := testTaskWorkspaceRoot(t)
+	t.Setenv("WORKMESH_AGENT_WORKSPACE_ROOT", workspaceRoot)
+	provider, err := taskruntime.NewTaskProvider(&routeTaskBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetTaskProvider(provider)
+	t.Cleanup(func() { SetTaskProvider(nil) })
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/create", strings.NewReader(`{"projectId":"rollback-project","taskId":"rollback-task","imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","entrypoint":["/opt/workmesh/task-bootstrap"]}`))
+	req.Header.Set("X-WorkMesh-Token", "task-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, req)
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), "TASK_STATE_SAVE_FAILED") {
+		t.Fatalf("状态写入失败响应错误: %d %s", response.Code, response.Body.String())
+	}
+	if providerState, stateErr := provider.State("rollback-task"); stateErr != nil || providerState != taskruntime.TaskDestroyed {
+		t.Fatalf("状态写入失败后已创建沙盒必须被回收: state=%s err=%v", providerState, stateErr)
+	}
+	state := getAIState()
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	if len(state.data.Tasks) != 0 || len(state.tasks) != 0 {
+		t.Fatalf("状态写入失败后任务集合未回滚: tasks=%d index=%d", len(state.data.Tasks), len(state.tasks))
+	}
+}
+
+func blockAIStatePersistence(t *testing.T) string {
+	t.Helper()
+	// 确保测试走 ai.json 路径，不受其他用例注入的共享 SQLite 影响。
+	resetSharedStoreForTest()
+	aiState = executionState{}
+	t.Cleanup(func() { aiState = executionState{} })
+	blockedParent := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blockedParent, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKMESH_DATA_DIR", blockedParent)
+	aiState = executionState{}
+	_ = getAIState()
+	return blockedParent
+}
+
+func managedAIJobCount() int {
+	managedRuntimeSlots.Lock()
+	defer managedRuntimeSlots.Unlock()
+	return len(managedRuntimeSlots.aiJobs)
+}
+
+func TestWorkMeshTaskStartSaveFailureCompensatesExternalRuntime(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	workspaceRoot := testTaskWorkspaceRoot(t)
+	t.Setenv("WORKMESH_AGENT_WORKSPACE_ROOT", workspaceRoot)
+	t.Setenv("WORKMESH_TASK_TOKEN", "task-token")
+	provider, err := taskruntime.NewTaskProvider(&routeTaskBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetTaskProvider(provider)
+	t.Cleanup(func() { SetTaskProvider(nil) })
+	mux := http.NewServeMux()
+	registerAIExecutionRoutes(mux)
+	request := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/"+path, strings.NewReader(body))
+		req.Header.Set("X-WorkMesh-Token", "task-token")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, req)
+		return response
+	}
+	if response := request("create", `{"projectId":"start-save-project","taskId":"start-save-task","imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","entrypoint":["/opt/workmesh/task-bootstrap"]}`); response.Code != http.StatusOK {
+		t.Fatalf("create = %d %s", response.Code, response.Body.String())
+	}
+	blockAIStatePersistence(t)
+	response := request("start", `{"taskId":"start-save-task"}`)
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), "TASK_STATE_SAVE_FAILED") {
+		t.Fatalf("start 状态写盘失败响应错误: %d %s", response.Code, response.Body.String())
+	}
+	state, stateErr := provider.State("start-save-task")
+	if stateErr != nil || state != taskruntime.TaskCancelled {
+		t.Fatalf("启动写盘失败且补偿取消后状态错误: %s (%v)", state, stateErr)
+	}
+	if count := managedAIJobCount(); count != 0 {
+		t.Fatalf("启动补偿成功后 aiJobs 槽位未释放: %d", count)
+	}
+}
+
+func TestWorkMeshTaskTerminalActionSaveFailureKeepsStateAndReleasesSlot(t *testing.T) {
+	for _, operation := range []string{"collect", "cancel", "destroy"} {
+		t.Run(operation, func(t *testing.T) {
+			t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+			workspaceRoot := testTaskWorkspaceRoot(t)
+			t.Setenv("WORKMESH_AGENT_WORKSPACE_ROOT", workspaceRoot)
+			t.Setenv("WORKMESH_TASK_TOKEN", "task-token")
+			provider, err := taskruntime.NewTaskProvider(&routeTaskBackend{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			SetTaskProvider(provider)
+			t.Cleanup(func() { SetTaskProvider(nil) })
+			mux := http.NewServeMux()
+			registerAIExecutionRoutes(mux)
+			request := func(path, body string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodPost, "/api/v2/workmesh/tasks/"+path, strings.NewReader(body))
+				req.Header.Set("X-WorkMesh-Token", "task-token")
+				response := httptest.NewRecorder()
+				mux.ServeHTTP(response, req)
+				return response
+			}
+			if response := request("create", fmt.Sprintf(`{"projectId":"terminal-save-%s","taskId":"terminal-save-%s","imageDigest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","entrypoint":["/opt/workmesh/task-bootstrap"]}`, operation, operation)); response.Code != http.StatusOK {
+				t.Fatalf("create = %d %s", response.Code, response.Body.String())
+			}
+			if response := request("start", fmt.Sprintf(`{"taskId":"terminal-save-%s"}`, operation)); response.Code != http.StatusOK {
+				t.Fatalf("start = %d %s", response.Code, response.Body.String())
+			}
+			if operation == "destroy" {
+				if response := request("cancel", fmt.Sprintf(`{"taskId":"terminal-save-%s"}`, operation)); response.Code != http.StatusOK {
+					t.Fatalf("cancel = %d %s", response.Code, response.Body.String())
+				}
+			}
+			if response := request("sync", fmt.Sprintf(`{"taskId":"terminal-save-%s"}`, operation)); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "TASK_STATE_SYNC_NOT_REQUIRED") {
+				t.Fatalf("无写盘失败标记时必须拒绝缓存状态对账: %d %s", response.Code, response.Body.String())
+			}
+			blockedParent := blockAIStatePersistence(t)
+			response := request(operation, fmt.Sprintf(`{"taskId":"terminal-save-%s"}`, operation))
+			if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), "TASK_STATE_SAVE_FAILED") {
+				t.Fatalf("%s 状态写盘失败响应错误: %d %s", operation, response.Code, response.Body.String())
+			}
+			state, stateErr := provider.State("terminal-save-" + operation)
+			if stateErr != nil {
+				t.Fatal(stateErr)
+			}
+			want := taskruntime.TaskCompleted
+			if operation == "cancel" {
+				want = taskruntime.TaskCancelled
+			} else if operation == "destroy" {
+				want = taskruntime.TaskDestroyed
+			}
+			if state != want {
+				t.Fatalf("%s 外部动作完成后 Provider 状态错误: got=%s want=%s", operation, state, want)
+			}
+			if count := managedAIJobCount(); count != 0 {
+				t.Fatalf("%s 状态写盘失败后 aiJobs 槽位未释放: %d", operation, count)
+			}
+			if err := os.Remove(blockedParent); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(blockedParent, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if response := request("sync", fmt.Sprintf(`{"taskId":"terminal-save-%s"}`, operation)); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), string(want)) {
+				t.Fatalf("%s 状态对账失败: %d %s", operation, response.Code, response.Body.String())
+			}
+			persistedState := getAIState()
+			persistedState.mu.RLock()
+			_, syncRequired := persistedState.tasks["terminal-save-"+operation]["stateSyncRequired"]
+			persistedState.mu.RUnlock()
+			if syncRequired {
+				t.Fatalf("%s 对账成功后同步标记未清除", operation)
+			}
+		})
 	}
 }

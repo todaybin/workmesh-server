@@ -1,6 +1,6 @@
 <template>
     <div>
-        <LayoutContent v-loading="loading" :title="$t('logs.login')">
+        <LayoutContent v-loading="loading" :title="$t('cronjob.library.library')">
             <template #leftToolBar>
                 <el-button v-permission v-node-admin type="primary" @click="onOpenDialog('create')">
                     {{ $t('commons.button.create') }}

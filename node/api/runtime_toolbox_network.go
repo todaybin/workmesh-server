@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -32,7 +31,63 @@ func fail2banConfigPath(s *runtimeStore) string {
 	if value := strings.TrimSpace(os.Getenv("WORKMESH_FAIL2BAN_CONFIG")); value != "" {
 		return filepath.Clean(value)
 	}
-	return filepath.Join(filepath.Dir(s.path), "fail2ban.local")
+	_ = s
+	if _, err := os.Stat("/etc/fail2ban/jail.local"); err == nil {
+		return "/etc/fail2ban/jail.local"
+	}
+	if _, err := os.Stat("/etc/fail2ban/jail.conf"); err == nil {
+		return "/etc/fail2ban/jail.conf"
+	}
+	return "/etc/fail2ban/jail.local"
+}
+
+func fail2banBaseInfo(ctx context.Context, s *runtimeStore) map[string]any {
+	content, _ := readFail2banConfig(s)
+	section := parseFail2banSection(content, "sshd")
+	port, _ := strconv.Atoi(section["port"])
+	maxRetry, _ := strconv.Atoi(section["maxretry"])
+	if port == 0 {
+		port = 22
+	}
+	if maxRetry == 0 {
+		maxRetry = 5
+	}
+	enabled := strings.EqualFold(section["enabled"], "true")
+	exist := hostBinaryExists("fail2ban-client")
+	return map[string]any{
+		"isExist": exist, "isActive": exist && systemdUnitActive(ctx, "fail2ban"), "isEnable": enabled,
+		"version": commandVersion(ctx, "fail2ban-client", "version"), "port": port, "maxRetry": maxRetry,
+		"banTime": section["bantime"], "findTime": section["findtime"], "banAction": section["banaction"], "logPath": section["logpath"],
+	}
+}
+
+func hostBinaryExists(name string) bool {
+	_, err := hostBinary(name)
+	return err == nil
+}
+
+func parseFail2banSection(content, name string) map[string]string {
+	values := map[string]string{}
+	active := false
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			active = strings.EqualFold(strings.Trim(line, "[]"), name)
+			continue
+		}
+		if !active {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		values[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(value)
+	}
+	return values
 }
 
 // readFail2banConfig 读取受大小限制的真实 Fail2ban 配置。
@@ -63,6 +118,10 @@ func fail2banSearchHandler(s *runtimeStore) http.HandlerFunc {
 			runtimeErr(w, 500, "读取 Fail2ban 配置失败: "+err.Error())
 			return
 		}
+		if status := runtimeString(body, "status"); status != "" {
+			runtimeOK(w, fail2banStatusAddresses(r.Context(), status))
+			return
+		}
 		keyword := runtimeString(body, "keyword", "name")
 		lines := make([]string, 0, 100)
 		for _, line := range strings.Split(content, "\n") {
@@ -75,7 +134,7 @@ func fail2banSearchHandler(s *runtimeStore) http.HandlerFunc {
 				}
 			}
 		}
-		runtimeOK(w, map[string]any{"items": lines, "total": len(lines), "path": fail2banConfigPath(s)})
+		runtimeOK(w, lines)
 	}
 }
 
@@ -87,12 +146,24 @@ func fail2banUpdateHandler(s *runtimeStore) http.HandlerFunc {
 			runtimeErr(w, 400, err.Error())
 			return
 		}
-		content := runtimeString(body, "content", "conf")
+		content := runtimeString(body, "content", "conf", "file")
+		if content == "" && runtimeString(body, "key") != "" {
+			current, readErr := readFail2banConfig(s)
+			if readErr != nil {
+				runtimeErr(w, 500, "读取 Fail2ban 配置失败: "+readErr.Error())
+				return
+			}
+			content = upsertFail2banValue(current, runtimeString(body, "key"), runtimeString(body, "value"))
+		}
 		if content == "" || len(content) > 1<<20 {
 			runtimeErr(w, 400, "Fail2ban 配置内容无效")
 			return
 		}
 		file := fail2banConfigPath(s)
+		if strings.HasPrefix(file, "/etc/") && !hostMutationAllowed() {
+			runtimeErr(w, http.StatusServiceUnavailable, "修改 Fail2ban 需要 WORKMESH_ALLOW_HOST_MUTATION=1")
+			return
+		}
 		if err := os.MkdirAll(filepath.Dir(file), 0o750); err != nil {
 			runtimeErr(w, 500, "创建 Fail2ban 配置目录失败: "+err.Error())
 			return
@@ -119,29 +190,103 @@ func fail2banOperateHandler() http.HandlerFunc {
 			runtimeErr(w, 400, err.Error())
 			return
 		}
-		action := strings.ToLower(runtimeString(body, "operate", "action"))
-		if action != "start" && action != "stop" && action != "restart" {
-			runtimeErr(w, 400, "Fail2ban 操作必须是 start、stop 或 restart")
+		action := strings.ToLower(runtimeString(body, "operation", "operate", "action"))
+		if action != "start" && action != "stop" && action != "restart" && action != "enable" && action != "disable" {
+			runtimeErr(w, 400, "Fail2ban 操作无效")
 			return
 		}
-		binary, lookErr := exec.LookPath("fail2ban-client")
-		if lookErr != nil {
-			runtimeErr(w, http.StatusServiceUnavailable, "fail2ban-client 未安装")
+		if !hostMutationAllowed() {
+			runtimeErr(w, http.StatusServiceUnavailable, "修改 Fail2ban 需要 WORKMESH_ALLOW_HOST_MUTATION=1")
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, binary, action)
-		output, runErr := cmd.CombinedOutput()
-		if runErr != nil {
-			runtimeErr(w, http.StatusBadGateway, "执行 Fail2ban 操作失败: "+strings.TrimSpace(string(output)))
+		if _, err := hostBinary("systemctl"); err != nil || !hostBinaryExists("fail2ban-client") {
+			runtimeErr(w, http.StatusServiceUnavailable, "fail2ban 未安装")
 			return
 		}
-		runtimeOK(w, map[string]any{"operation": action, "output": strings.TrimSpace(string(output))})
+		command := action
+		if action == "enable" || action == "disable" {
+			command = action
+		}
+		if _, err := hostCommand(r.Context(), 20*time.Second, "systemctl", command, "fail2ban"); err != nil {
+			runtimeErr(w, http.StatusBadGateway, "执行 Fail2ban 操作失败")
+			return
+		}
+		runtimeOK(w, map[string]any{"operation": action})
 	}
 }
 
-// registerToolboxFtpRoutes 管理本地 FTP 连接配置，密码永不回传。
+func fail2banStatusAddresses(ctx context.Context, status string) []string {
+	if !hostBinaryExists("fail2ban-client") {
+		return []string{}
+	}
+	result, err := hostCommand(ctx, 8*time.Second, "fail2ban-client", "status", "sshd")
+	if err != nil && strings.TrimSpace(result.Stdout) == "" {
+		return []string{}
+	}
+	marker := "Banned IP list:"
+	if status == "ignore" {
+		marker = "Ignored IP list:"
+	}
+	addresses := make([]string, 0)
+	for _, line := range strings.Split(result.Stdout, "\n") {
+		if !strings.Contains(line, marker) {
+			continue
+		}
+		_, value, ok := strings.Cut(line, marker)
+		if !ok {
+			continue
+		}
+		for _, item := range strings.Fields(value) {
+			item = strings.Trim(item, ",")
+			if item != "" {
+				addresses = append(addresses, item)
+			}
+		}
+	}
+	return addresses
+}
+
+func upsertFail2banValue(content, key, value string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	value = strings.TrimSpace(value)
+	if key == "" || strings.ContainsAny(key, "\r\n#;[]=") || strings.ContainsAny(value, "\r\n") {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	if strings.TrimSpace(content) == "" {
+		lines = []string{"[sshd]"}
+	}
+	active := false
+	replaced := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			if active && !replaced {
+				lines = append(lines[:i], append([]string{key + " = " + value}, lines[i:]...)...)
+				replaced = true
+			}
+			active = strings.EqualFold(strings.Trim(trimmed, "[]"), "sshd")
+			continue
+		}
+		if !active {
+			continue
+		}
+		current, _, ok := strings.Cut(trimmed, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(current), key) {
+			lines[i] = key + " = " + value
+			replaced = true
+		}
+	}
+	if !replaced {
+		if !strings.Contains(content, "[sshd]") {
+			lines = append(lines, "[sshd]")
+		}
+		lines = append(lines, key+" = "+value)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// registerToolboxFtpRoutes 管理本机 pure-ftpd 用户，不回传密码。
 func registerToolboxFtpRoutes(mux *http.ServeMux, s *runtimeStore) {
 	mux.HandleFunc("POST /api/v2/toolbox/ftp/search", ftpSearchHandler(s))
 	for _, path := range []string{"/api/v2/toolbox/ftp", "/api/v2/toolbox/ftp/update"} {
@@ -183,20 +328,53 @@ func ftpEntries(s *runtimeStore) []map[string]any {
 }
 
 // ftpSearchHandler 搜索真实持久化的 FTP 配置。
+func ftpBaseInfo(ctx context.Context) map[string]any {
+	exist := hostBinaryExists("pure-ftpd") || hostBinaryExists("pure-pw")
+	return map[string]any{"isExist": exist, "isActive": exist && systemdUnitActive(ctx, "pure-ftpd", "pure-ftpd-mysql")}
+}
+
+func pureFTPDPasswdPath() string {
+	if value := strings.TrimSpace(os.Getenv("WORKMESH_PURE_FTPD_PASSWD")); value != "" {
+		return filepath.Clean(value)
+	}
+	return "/etc/pure-ftpd/pureftpd.passwd"
+}
+
+func listPureFTPUsers(keyword string) []map[string]any {
+	content, err := os.ReadFile(pureFTPDPasswdPath())
+	if err != nil {
+		return []map[string]any{}
+	}
+	items := make([]map[string]any, 0)
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	for index, line := range strings.Split(string(content), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) < 6 || fields[0] == "" || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		userName := fields[0]
+		if keyword != "" && !strings.Contains(strings.ToLower(userName), keyword) {
+			continue
+		}
+		path := fields[5]
+		items = append(items, map[string]any{"id": index + 1, "user": userName, "password": "", "status": "Enable", "path": path, "description": ""})
+		if len(items) >= 500 {
+			break
+		}
+	}
+	return items
+}
+
 func ftpSearchHandler(s *runtimeStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, _ := runtimeBody(r)
-		keyword := strings.ToLower(runtimeString(body, "keyword", "name", "host"))
-		s.mu.RLock()
-		all := ftpEntries(s)
-		s.mu.RUnlock()
-		filtered := make([]map[string]any, 0, len(all))
-		for _, item := range all {
-			if keyword == "" || strings.Contains(strings.ToLower(fmt.Sprint(item["name"])+" "+fmt.Sprint(item["host"])), keyword) {
-				filtered = append(filtered, item)
-			}
+		_ = s
+		if !ftpBaseInfo(r.Context())["isExist"].(bool) {
+			runtimeOK(w, pageRecordsGeneric([]map[string]any{}, body))
+			return
 		}
-		runtimeOK(w, pageRecordsGeneric(filtered, body))
+		keyword := runtimeString(body, "info", "keyword", "user", "name")
+		runtimeOK(w, pageRecordsGeneric(listPureFTPUsers(keyword), body))
 	}
 }
 
@@ -208,51 +386,52 @@ func ftpSaveHandler(s *runtimeStore, path string) http.HandlerFunc {
 			runtimeErr(w, 400, err.Error())
 			return
 		}
-		host := runtimeString(body, "host", "hostname")
-		user := runtimeString(body, "username", "user")
-		if host == "" || user == "" || len(host) > 253 || strings.ContainsAny(host, " /\\") {
-			runtimeErr(w, 400, "FTP 主机和用户名不能为空")
+		if !ftpBaseInfo(r.Context())["isExist"].(bool) {
+			runtimeErr(w, http.StatusServiceUnavailable, "pure-ftpd 未安装")
 			return
 		}
-		body["host"], body["username"] = host, user
+		if !hostMutationAllowed() {
+			runtimeErr(w, http.StatusServiceUnavailable, "修改 FTP 需要 WORKMESH_ALLOW_HOST_MUTATION=1")
+			return
+		}
+		user := runtimeString(body, "user", "username")
+		if !validHostUser(user) {
+			runtimeErr(w, http.StatusBadRequest, "FTP 用户名无效")
+			return
+		}
+		directory := filepath.Clean(runtimeString(body, "path"))
+		if !filepath.IsAbs(directory) || strings.Contains(directory, "..") {
+			runtimeErr(w, http.StatusBadRequest, "FTP 目录无效")
+			return
+		}
+		if _, err := hostBinary("pure-pw"); err != nil {
+			runtimeErr(w, http.StatusServiceUnavailable, "pure-pw 未安装")
+			return
+		}
+		password, err := decodePanelSecret(runtimeString(body, "password"))
+		if err != nil {
+			runtimeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		args := []string{"useradd", user, "-u", "ftpuser", "-d", directory, "-f", pureFTPDPasswdPath(), "-m"}
+		if strings.HasSuffix(path, "/update") {
+			args = []string{"passwd", user, "-f", pureFTPDPasswdPath(), "-m"}
+		}
+		commandCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		command := hostExec(commandCtx, "pure-pw", args...)
+		command.Stdin = strings.NewReader(password + "\n" + password + "\n")
+		output, runErr := command.CombinedOutput()
+		if runErr != nil {
+			runtimeErr(w, http.StatusBadGateway, "执行 pure-pw 失败: "+trimCommandOutput(output))
+			return
+		}
 		delete(body, "password")
 		s.mu.Lock()
-		value, _ := s.state.Settings["ftp.entries"].([]any)
-		id := runtimeString(body, "id")
-		if id == "" {
-			id = "ftp-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-			body["id"] = id
-			value = append(value, body)
-		} else {
-			found := false
-			for i, item := range value {
-				if typed, ok := item.(map[string]any); ok && fmt.Sprint(typed["id"]) == id {
-					value[i] = body
-					found = true
-				}
-			}
-			if !found {
-				value = append(value, body)
-			}
-		}
-		s.state.Settings["ftp.entries"] = value
-		logs, _ := s.state.Settings["ftp.logs"].([]any)
-		logs = append(logs, map[string]any{"id": "ftp-log-" + strconv.FormatInt(time.Now().UnixNano(), 10), "action": path[strings.LastIndex(path, "/")+1:], "resourceId": id, "createdAt": time.Now().UTC()})
-		if len(logs) > 1000 {
-			logs = logs[len(logs)-1000:]
-		}
-		s.state.Settings["ftp.logs"] = logs
-		saveErr := s.saveLocked()
-		s.mu.Unlock()
-		if saveErr != nil {
-			runtimeErr(w, 500, "保存 FTP 配置失败: "+saveErr.Error())
-			return
-		}
-		s.mu.Lock()
-		appendFTPLog(s, "create_or_update", id, host)
+		appendFTPLog(s, "create_or_update", user, directory)
 		_ = s.saveLocked()
 		s.mu.Unlock()
-		runtimeOK(w, body)
+		runtimeOK(w, map[string]any{"user": user, "path": directory, "status": "Enable"})
 	}
 }
 
@@ -260,64 +439,93 @@ func ftpSaveHandler(s *runtimeStore, path string) http.HandlerFunc {
 func ftpDeleteHandler(s *runtimeStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, _ := runtimeBody(r)
-		id := runtimeString(body, "id", "ftpId")
-		if id == "" {
-			runtimeErr(w, 400, "FTP 配置 ID 不能为空")
+		if !ftpBaseInfo(r.Context())["isExist"].(bool) {
+			runtimeErr(w, http.StatusServiceUnavailable, "pure-ftpd 未安装")
 			return
 		}
-		s.mu.Lock()
-		value, _ := s.state.Settings["ftp.entries"].([]any)
-		out := make([]any, 0, len(value))
-		found := false
-		for _, item := range value {
-			record, ok := item.(map[string]any)
-			if ok && fmt.Sprint(record["id"]) == id {
-				found = true
-				continue
+		if !hostMutationAllowed() {
+			runtimeErr(w, http.StatusServiceUnavailable, "修改 FTP 需要 WORKMESH_ALLOW_HOST_MUTATION=1")
+			return
+		}
+		names := ftpDeleteNames(body)
+		if len(names) == 0 {
+			runtimeErr(w, 400, "FTP 用户不能为空")
+			return
+		}
+		if _, err := hostBinary("pure-pw"); err != nil {
+			runtimeErr(w, http.StatusServiceUnavailable, "pure-pw 未安装")
+			return
+		}
+		for _, name := range names {
+			if !validHostUser(name) {
+				runtimeErr(w, http.StatusBadRequest, "FTP 用户名无效")
+				return
 			}
-			out = append(out, item)
-		}
-		s.state.Settings["ftp.entries"] = out
-		if found {
-			logs, _ := s.state.Settings["ftp.logs"].([]any)
-			logs = append(logs, map[string]any{"id": "ftp-log-" + strconv.FormatInt(time.Now().UnixNano(), 10), "action": "delete", "resourceId": id, "createdAt": time.Now().UTC()})
-			if len(logs) > 1000 {
-				logs = logs[len(logs)-1000:]
+			if _, err := hostCommand(r.Context(), 15*time.Second, "pure-pw", "userdel", name, "-f", pureFTPDPasswdPath(), "-m"); err != nil {
+				runtimeErr(w, http.StatusBadGateway, "删除 FTP 用户失败")
+				return
 			}
-			s.state.Settings["ftp.logs"] = logs
 		}
-		saveErr := s.saveLocked()
-		s.mu.Unlock()
-		if !found {
-			runtimeErr(w, 404, "FTP 配置不存在")
-			return
-		}
-		if saveErr != nil {
-			runtimeErr(w, 500, "保存 FTP 配置失败: "+saveErr.Error())
-			return
-		}
-		s.mu.Lock()
-		appendFTPLog(s, "delete", id, "")
-		_ = s.saveLocked()
-		s.mu.Unlock()
-		runtimeOK(w, map[string]any{"id": id, "deleted": true})
+		runtimeOK(w, map[string]any{"deleted": names})
 	}
+}
+
+func ftpDeleteNames(body map[string]any) []string {
+	names := make([]string, 0)
+	if list, ok := body["ids"].([]any); ok {
+		users := listPureFTPUsers("")
+		for _, item := range list {
+			id := int(0)
+			switch value := item.(type) {
+			case float64:
+				id = int(value)
+			case string:
+				parsed, _ := strconv.Atoi(value)
+				id = parsed
+			}
+			for _, user := range users {
+				if user["id"] == id {
+					names = append(names, fmt.Sprint(user["user"]))
+				}
+			}
+		}
+	}
+	if name := runtimeString(body, "user", "username"); name != "" {
+		names = append(names, name)
+	}
+	return names
 }
 
 // ftpOperateHandler 记录 FTP 客户端操作，不在服务端伪造连接结果。
 func ftpOperateHandler(s *runtimeStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, _ := runtimeBody(r)
-		op := strings.ToLower(runtimeString(body, "operate", "operation"))
-		if op != "connect" && op != "disconnect" && op != "test" {
+		op := strings.ToLower(runtimeString(body, "operation", "operate"))
+		if op != "start" && op != "stop" && op != "restart" {
 			runtimeErr(w, 400, "FTP 操作无效")
 			return
 		}
+		if !hostMutationAllowed() {
+			runtimeErr(w, http.StatusServiceUnavailable, "修改 FTP 需要 WORKMESH_ALLOW_HOST_MUTATION=1")
+			return
+		}
+		if !ftpBaseInfo(r.Context())["isExist"].(bool) {
+			runtimeErr(w, http.StatusServiceUnavailable, "pure-ftpd 未安装")
+			return
+		}
+		if _, err := hostBinary("systemctl"); err != nil {
+			runtimeErr(w, http.StatusServiceUnavailable, "systemctl 未安装")
+			return
+		}
+		if _, err := hostCommand(r.Context(), 20*time.Second, "systemctl", op, "pure-ftpd"); err != nil {
+			runtimeErr(w, http.StatusBadGateway, "执行 FTP 操作失败")
+			return
+		}
 		s.mu.Lock()
-		appendFTPLog(s, op, runtimeString(body, "id", "ftpId"), "client_operation")
+		appendFTPLog(s, op, "", "pure-ftpd")
 		_ = s.saveLocked()
 		s.mu.Unlock()
-		runtimeOK(w, map[string]any{"operation": op, "status": "not_connected", "message": "FTP 连接需由已配置的客户端执行"})
+		runtimeOK(w, map[string]any{"operation": op})
 	}
 }
 

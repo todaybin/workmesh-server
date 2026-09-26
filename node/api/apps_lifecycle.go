@@ -153,8 +153,8 @@ func appServices(ctx context.Context, s *appStore, key string) []map[string]any 
 func appConnectionInfo(ctx context.Context, s *appStore, body map[string]any) map[string]any {
 	typ := appValue(body, "type", "key", "appKey")
 	name := appValue(body, "name", "serviceName", "database")
-	if item, ok := databaseService.FindConnection(ctx, typ, name); ok {
-		return map[string]any{"status": "Running", "username": item.Username, "password": item.Password, "privilege": true, "containerName": "", "serviceName": item.Name, "systemIP": item.Host, "port": item.Port}
+	if canonicalDatabaseAppType(typ) != "" {
+		return findDatabaseServerConnection(ctx, s, typ, name)
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()

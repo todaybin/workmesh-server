@@ -36,6 +36,8 @@ type SecuritySettings struct {
 type SecurityMiddlewareOptions struct {
 	DataDir   string
 	Authorize func(*http.Request) bool
+	// SelfAuthenticated 只允许精确路由绕过浏览器 Session；对应处理器必须自行验证服务凭据。
+	SelfAuthenticated func(*http.Request) bool
 	// Settings 返回统一 SQLite 中的安全设置；为空时兼容读取旧 domains.json。
 	Settings func() map[string]any
 	// OperationLog 在写请求完成后接收统一审计元数据；返回值不影响原始响应。
@@ -100,7 +102,8 @@ func NewSecurityMiddleware(next http.Handler, options SecurityMiddlewareOptions)
 			return
 		}
 		started := time.Now()
-		logRequest := options.OperationLog != nil && unsafeHTTPMethod(r.Method) && !strings.Contains(strings.ToLower(r.URL.Path), "/search") && !isSelfAuthenticatedStream(r.URL.Path)
+		serviceRequest := options.SelfAuthenticated != nil && options.SelfAuthenticated(r)
+		logRequest := options.OperationLog != nil && unsafeHTTPMethod(r.Method) && !strings.Contains(strings.ToLower(r.URL.Path), "/search") && !isSelfAuthenticatedStream(r.URL.Path) && !serviceRequest
 		var operationWriter *operationResponseWriter
 		if logRequest {
 			operationWriter = &operationResponseWriter{ResponseWriter: responseWriter}
@@ -140,6 +143,10 @@ func NewSecurityMiddleware(next http.Handler, options SecurityMiddlewareOptions)
 		}
 		// 流接口使用一次性令牌和握手来源校验，不能再要求普通 API Session。
 		if isSelfAuthenticatedStream(r.URL.Path) {
+			next.ServeHTTP(responseWriter, r)
+			return
+		}
+		if serviceRequest {
 			next.ServeHTTP(responseWriter, r)
 			return
 		}

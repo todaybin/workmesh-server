@@ -58,7 +58,7 @@ func TestPostgresCLICommandUsesDockerWithoutHostPSQL(t *testing.T) {
 
 	args, env, err := postgresCLICommand(PostgresTarget{
 		Host:          "127.0.0.1",
-		Port:          5432,
+		Port:          55432,
 		Username:      "postgres",
 		Password:      "secret",
 		ContainerName: "postgres-test",
@@ -71,6 +71,9 @@ func TestPostgresCLICommandUsesDockerWithoutHostPSQL(t *testing.T) {
 	}
 	if args[6] != postgresContainerScript || args[7] != "--" || args[8] != "workmesh-missing-psql" {
 		t.Fatalf("container password script missing: %#v", args)
+	}
+	if !strings.Contains(strings.Join(args, " "), "-p 5432") {
+		t.Fatalf("container command must use the image port: %#v", args)
 	}
 	if len(env) != 0 {
 		t.Fatalf("container password must not be placed in host environment: %#v", env)

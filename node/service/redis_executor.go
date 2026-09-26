@@ -99,6 +99,11 @@ func redisCLICommand(target RedisTarget, args ...string) ([]string, []string, er
 	if port > 65535 {
 		return nil, nil, errors.New("Redis 端口无效")
 	}
+	// 容器内客户端必须连镜像监听端口，不能使用宿主机映射端口。
+	if target.ContainerName != "" {
+		host = "127.0.0.1"
+		port = 6379
+	}
 	command := []string{bin, "--raw", "-h", host, "-p", strconv.Itoa(port)}
 	if target.ContainerName != "" {
 		if err := validateRedisContainerName(target.ContainerName); err != nil {

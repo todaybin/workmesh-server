@@ -85,10 +85,17 @@ func mysqlTargetForRequest(ctx context.Context, name, typ string) (service.MySQL
 		typ = "mysql"
 	}
 	item, ok := databaseService.FindByName(ctx, typ, name)
-	if !ok && typ == "mysql" {
-		item, ok = databaseService.FindByName(ctx, "mariadb", name)
+	if !ok {
+		for _, candidate := range databaseTypeFamily(typ) {
+			if candidate == typ {
+				continue
+			}
+			if item, ok = databaseService.FindByName(ctx, candidate, name); ok {
+				break
+			}
+		}
 	}
-	if !ok || (item.Type != "mysql" && item.Type != "mariadb") {
+	if !ok || (item.Type != "mysql" && item.Type != "mariadb" && item.Type != "mysql-cluster") {
 		return service.MySQLTarget{}, false
 	}
 	host, containerName := normalizedDatabaseItemTarget(item)
@@ -259,9 +266,11 @@ func handleMySQLLoadRemote(w http.ResponseWriter, r *http.Request) {
 		wmhttp.JSON(w, http.StatusBadRequest, map[string]any{"code": "ERR", "message": "MySQL 实例不能为空"})
 		return
 	}
-	serverItem, found := databaseService.FindByName(r.Context(), "mysql", server)
-	if !found {
-		serverItem, found = databaseService.FindByName(r.Context(), "mariadb", server)
+	serverItem, found := service.Database{}, false
+	for _, candidate := range databaseTypeFamily("mysql") {
+		if serverItem, found = databaseService.FindByName(r.Context(), candidate, server); found {
+			break
+		}
 	}
 	if !found {
 		wmhttp.JSON(w, http.StatusServiceUnavailable, map[string]any{"code": "ERR", "message": "目标 MySQL/MariaDB 实例未登记"})
@@ -295,6 +304,9 @@ func handleMySQLLoadRemote(w http.ResponseWriter, r *http.Request) {
 		}
 		item, createErr := databaseService.Create(r.Context(), service.Database{Name: name, Type: serverItem.Type, From: databaseSourceForTarget(serverItem.From, target.ContainerName), Host: target.Host, Port: target.Port, ContainerName: target.ContainerName, InitialDB: server})
 		if createErr != nil {
+			if _, exists := databaseService.FindByName(r.Context(), serverItem.Type, name); exists {
+				continue
+			}
 			for index := len(created) - 1; index >= 0; index-- {
 				_ = databaseService.Delete(r.Context(), created[index].ID)
 			}
@@ -470,7 +482,7 @@ func databaseRoute(w http.ResponseWriter, r *http.Request) {
 		if len(segments) == 2 && segments[0] == "db" {
 			name = segments[1]
 		}
-		if len(segments) == 3 && segments[0] == "db" && segments[1] == "list" {
+		if len(segments) == 3 && segments[0] == "db" && (segments[1] == "list" || segments[1] == "item") {
 			typ = segments[2]
 		}
 		if strings.HasSuffix(path, "/check") {
@@ -485,18 +497,28 @@ func databaseRoute(w http.ResponseWriter, r *http.Request) {
 			wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"available": available, "type": checkType, "error": message}})
 			return
 		}
-		items := databaseService.Search(r.Context(), typ, name)
+		if len(segments) == 3 && segments[0] == "db" && segments[1] == "list" {
+			handleDatabaseServerList(w, r, typ)
+			return
+		}
+		if len(segments) == 3 && segments[0] == "db" && segments[1] == "item" {
+			handleDatabaseItemList(w, r, typ)
+			return
+		}
 		if len(segments) == 2 && segments[0] == "db" {
-			for _, item := range items {
-				if strings.EqualFold(item.Name, name) {
-					wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": item})
-					return
-				}
+			if item, ok := findDatabaseByName(r.Context(), name); ok {
+				wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": databasePublicInfo(item)})
+				return
 			}
 			wmhttp.JSON(w, http.StatusNotFound, map[string]any{"code": "ERR", "message": "database not found"})
 			return
 		}
+		items := databaseService.Search(r.Context(), typ, name)
 		wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": map[string]any{"items": items, "total": len(items), "page": 1, "pageSize": 50}})
+		return
+	}
+	if path == "search" {
+		handleMySQLDatabaseSearch(w, r)
 		return
 	}
 	var payload struct {

@@ -36,6 +36,8 @@ type CronjobService struct {
 	db           *sql.DB
 	repository   storage.Transactional
 	wake         chan struct{}
+	// databaseBackup 为空时使用容器内 pg_dump/mysqldump；测试可替换。
+	databaseBackup func(context.Context, cronDatabaseTarget, string) error
 }
 
 // NewCronjobService 创建计划任务服务。

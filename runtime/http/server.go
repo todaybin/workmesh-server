@@ -72,6 +72,9 @@ func LocaleOf(w http.ResponseWriter) string {
 // ResponseLocale 返回当前响应的语言代码。
 func (w *localeResponseWriter) ResponseLocale() string { return w.locale }
 
+// Unwrap 让 http.ResponseController 访问底层 Flusher，供已鉴权 SSE 响应使用。
+func (w *localeResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func localizeResponse(value any, status int, locale string) any {
 	item, ok := value.(map[string]any)
 	if !ok || strings.TrimSpace(fmtString(item["code"])) != "ERR" {

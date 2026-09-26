@@ -43,7 +43,7 @@ func registerHostMonitorInterfaces(mux *http.ServeMux) {
 					continue
 				}
 				name := fields[2]
-				if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "ram") || dashboardIsPartition(name) || seen[name] {
+				if strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "ram") || seen[name] {
 					continue
 				}
 				seen[name] = true
@@ -55,30 +55,26 @@ func registerHostMonitorInterfaces(mux *http.ServeMux) {
 	})
 }
 
-// registerHostMonitorSettings 注册监控设置的读取和更新接口，设置保存到共享 SQLite。
+// registerHostMonitorSettings 注册监控设置的读取和更新接口，字段与 1Panel 设置页一致。
 func registerHostMonitorSettings(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/hosts/monitor/setting", func(w http.ResponseWriter, _ *http.Request) {
-		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": loadHostOperationalState().Monitor})
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": loadHostMonitorSettings()})
 	})
 	mux.HandleFunc("POST /api/v2/hosts/monitor/setting/update", func(w http.ResponseWriter, r *http.Request) {
-		var monitor map[string]any
-		if err := decodeJSON(r, &monitor); err != nil {
+		var request struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := decodeJSON(r, &request); err != nil {
 			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
 			return
 		}
-		if v, ok := monitor["interval"].(float64); ok && (v < 1 || v > 3600) {
-			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": "监控间隔必须在 1-3600 秒之间"})
-			return
-		}
-		hostOperationalMu.Lock()
-		state := loadHostOperationalStateLocked()
-		state.Monitor = monitor
-		err := saveHostOperationalStateLocked(state)
-		hostOperationalMu.Unlock()
+		updated, err := updateHostMonitorSetting(request.Key, request.Value)
 		if err != nil {
-			wmhttp.JSON(w, 500, map[string]any{"code": "ERR", "message": "保存监控设置失败: " + err.Error()})
+			wmhttp.JSON(w, 400, map[string]any{"code": "ERR", "message": err.Error()})
 			return
 		}
-		wmhttp.JSON(w, 200, map[string]any{"code": 200})
+		restartHostMonitorLoop()
+		wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": updated})
 	})
 }

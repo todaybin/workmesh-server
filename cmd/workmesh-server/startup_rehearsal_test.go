@@ -118,8 +118,8 @@ func assertMigrationRehearsal(t *testing.T, path, artifactHash string) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&schemaCount); err != nil {
 		t.Fatal(err)
 	}
-	if schemaCount != 17 {
-		t.Fatalf("隔离库迁移数量 = %d, want 17", schemaCount)
+	if schemaCount != 18 {
+		t.Fatalf("隔离库迁移数量 = %d, want 18", schemaCount)
 	}
 	if err := db.QueryRow("SELECT COUNT(*) FROM migration_runs WHERE status='failed'").Scan(&failedRuns); err != nil {
 		t.Fatal(err)

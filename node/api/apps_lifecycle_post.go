@@ -218,6 +218,26 @@ func appCatalogTagsSnapshot(s *appStore) []appTagRecord {
 
 // handleAppInstalledCheck 探测已安装应用及其真实运行状态。
 func handleAppInstalledCheck(w http.ResponseWriter, s *appStore, body map[string]any) {
+	key := appValue(body, "key", "appKey", "type", "app")
+	name := appValue(body, "name")
+	if canonicalDatabaseAppType(key) != "" {
+		if install, ok := findDatabaseInstall(s, key, name); ok {
+			if s != nil && s.containerStates != nil && appConfiguredContainerName(install) != "" {
+				s.mu.RLock()
+				_, current := findApp(s.state.Apps, install.ID)
+				s.mu.RUnlock()
+				if current.ID != "" {
+					item, exists, err := s.syncAppInstallStatus(context.Background(), current.ID, false)
+					if err == nil && exists {
+						respondInstalledDatabase(w, item)
+						return
+					}
+				}
+			}
+			respondInstalledDatabase(w, install)
+			return
+		}
+	}
 	id := appValue(body, "name", "key", "appInstallId")
 	s.mu.RLock()
 	_, item := findApp(s.state.Apps, id)

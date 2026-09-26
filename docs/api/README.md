@@ -13,6 +13,8 @@
 
 节点链路的签名、重试、游标和 fencing 约束见 [link.md](link.md)。
 - `/api/v2/system/agent/*`：Agent 沙盒和在线开发统一生命周期。
+- `/api/v2/agent-runtime/*`、`/api/v2/projects/{projectId}/tasks`、`/api/v2/projects/{projectId}/events/stream`、`/api/v2/projects/{projectId}/artifacts/reconcile`、`/api/v2/projects/{projectId}/artifacts/reclaim-plan`、`/api/v2/projects/{projectId}/artifacts/reclaim-plans`、`/api/v2/projects/{projectId}/deployments/dry-run`、`/api/v2/projects/{projectId}/deployments/plans`、`/api/v2/dev/tasks/{taskId}/artifacts`、`/api/v2/dev/tasks/{taskId}/evidence`、`/api/v2/dev/tasks/{taskId}/artifacts/verify`、`/api/v2/dev/tasks/{taskId}/artifacts/reconcile`、`/api/v2/dev/tasks/{taskId}/artifacts/{artifactId}`：项目 Agent runtime 注册、任务、Artifact 元数据/文件、只读回收计划、非生产部署计划和 SSE 团队事件，详见 [agent-team.md](agent-team.md)。回收与部署计划均需要人工审批，当前不会删除文件或执行部署。
+- `/api/v2/workmesh/tasks/*`：受控 Sandbox 任务生命周期接口，详见 [ai-tasks.md](ai-tasks.md)。
 
 ## 完整性校验
 

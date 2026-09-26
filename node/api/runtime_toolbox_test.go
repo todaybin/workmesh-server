@@ -498,8 +498,8 @@ func TestToolboxGetDataUsesHostState(t *testing.T) {
 		t.Fatalf("timezone response missing current zone: %#v", zones)
 	}
 	ftp := toolboxGetData(s, "/api/v2/toolbox/ftp/base")
-	if ftp["status"] == nil && ftp["enabled"] == nil {
-		t.Fatalf("ftp response missing state: %#v", ftp)
+	if _, ok := ftp["isExist"].(bool); !ok {
+		t.Fatalf("ftp response missing isExist: %#v", ftp)
 	}
 }
 
@@ -509,6 +509,7 @@ func TestToolboxDeviceDNSAndFTPState(t *testing.T) {
 	_ = os.RemoveAll(root)
 	defer os.RemoveAll(root)
 	t.Setenv("WORKMESH_DATA_DIR", root)
+	t.Setenv("WORKMESH_PANEL_DIR", "")
 	store, err := storage.Open(filepath.Join(root, "workmesh.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -537,14 +538,27 @@ func TestToolboxDeviceDNSAndFTPState(t *testing.T) {
 	if res := call(http.MethodPost, "/api/v2/toolbox/device/check/dns", `{"host":"../etc/passwd"}`); res.Code != http.StatusBadRequest {
 		t.Fatalf("非法 DNS 主机名应拒绝: %d %s", res.Code, res.Body.String())
 	}
-	if res := call(http.MethodPost, "/api/v2/toolbox/ftp", `{"name":"测试 FTP","host":"ftp.example","username":"deploy","password":"secret"}`); res.Code != http.StatusOK || strings.Contains(res.Body.String(), "secret") {
-		t.Fatalf("FTP 创建失败或泄漏密码: %d %s", res.Code, res.Body.String())
+	if res := call(http.MethodGet, "/api/v2/toolbox/ftp/base", ``); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"isExist"`) {
+		t.Fatalf("FTP 状态失败: %d %s", res.Code, res.Body.String())
 	}
-	if res := call(http.MethodPost, "/api/v2/toolbox/ftp/search", `{"keyword":"ftp.example"}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "ftp.example") {
+	if res := call(http.MethodPost, "/api/v2/toolbox/ftp/search", `{"info":"","page":1,"pageSize":20}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"items"`) {
 		t.Fatalf("FTP 搜索失败: %d %s", res.Code, res.Body.String())
 	}
-	if res := call(http.MethodPost, "/api/v2/toolbox/ftp/log/search", `{"page":1,"pageSize":20}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "create_or_update") {
-		t.Fatalf("FTP 日志查询失败: %d %s", res.Code, res.Body.String())
+	if res := call(http.MethodPost, "/api/v2/toolbox/clam/base", `{}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"isExist"`) {
+		t.Fatalf("ClamAV 状态失败: %d %s", res.Code, res.Body.String())
+	}
+	uploadDir := filepath.Join(root, "tmp", "upload")
+	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "junk.tmp"), []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if res := call(http.MethodPost, "/api/v2/toolbox/scan", `{}`); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "junk.tmp") || !strings.Contains(res.Body.String(), `"systemClean"`) {
+		t.Fatalf("垃圾扫描失败: %d %s", res.Code, res.Body.String())
+	}
+	if res := call(http.MethodPost, "/api/v2/toolbox/clean", `[{"treeType":"upload","name":"missing","size":1}]`); res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("未授权清理应拒绝: %d %s", res.Code, res.Body.String())
 	}
 	if res := call(http.MethodPost, "/api/v2/toolbox/fail2ban/update", `{"content":"[sshd]\nenabled=true"}`); res.Code != http.StatusOK {
 		t.Fatalf("Fail2ban 配置保存失败: %d %s", res.Code, res.Body.String())
@@ -594,7 +608,7 @@ func TestTerminalAISettingsDefaultsValidationAndPersistence(t *testing.T) {
 	}
 	if defaultEnvelope.Data["aiStatus"] != "Disable" ||
 		defaultEnvelope.Data["aiPrefix"] != "@ai" ||
-		defaultEnvelope.Data["aiRiskCommands"] != "[]" {
+		defaultEnvelope.Data["aiRiskCommands"] != terminalAIDefaultRiskCommands {
 		t.Fatalf("终端 AI 默认字段错误: %s", defaults.Body.String())
 	}
 	defaultRisk, ok := defaultEnvelope.Data["aiRiskCommandsDefault"].(string)

@@ -9,10 +9,73 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestDashboardHostInfoMatchesPanelShape(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("host identity is read from proc on linux")
+	}
+	release, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	RegisterHostContainerCronRoutes(mux)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v2/dashboard/base/all/all", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", res.Code, res.Body.String())
+	}
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	version := fmt.Sprint(envelope.Data["kernelVersion"])
+	if version != strings.TrimSpace(string(release)) || strings.Contains(version, "Linux version") {
+		t.Fatalf("kernelVersion = %q, want %q", version, strings.TrimSpace(string(release)))
+	}
+	arch := fmt.Sprint(envelope.Data["kernelArch"])
+	if arch == "" || arch == "amd64" || arch == "arm64" {
+		t.Fatalf("kernelArch = %q, want uname machine such as x86_64", arch)
+	}
+	current, _ := envelope.Data["currentInfo"].(map[string]any)
+	if current == nil {
+		t.Fatal("currentInfo missing")
+	}
+	if _, ok := current["loadUsagePercent"].(float64); !ok {
+		t.Fatalf("loadUsagePercent missing: %#v", current["loadUsagePercent"])
+	}
+	uptime := fmt.Sprint(current["timeSinceUptime"])
+	if strings.Contains(uptime, "T") || strings.HasSuffix(uptime, "Z") {
+		t.Fatalf("timeSinceUptime = %q, want local 2006-01-02 15:04:05", uptime)
+	}
+}
+
+func TestDashboardDiskUsageIncludesInodes(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("statfs inode sample requires linux")
+	}
+	usage := dashboardDiskUsage("/")
+	if !usage.Available || usage.Total == 0 || usage.InodesTotal == 0 {
+		t.Fatalf("root disk usage incomplete: %+v", usage)
+	}
+	if usage.Used+usage.Free != usage.Total {
+		t.Fatalf("used+free = %d, total = %d", usage.Used+usage.Free, usage.Total)
+	}
+}
+
+func TestUnescapeProcMountField(t *testing.T) {
+	if got := unescapeProcField(`/var/lib/docker/overlay2/abc\040merged`); got != "/var/lib/docker/overlay2/abc merged" {
+		t.Fatalf("unescape = %q", got)
+	}
+}
 
 func TestDashboardOS(t *testing.T) {
 	mux := http.NewServeMux()

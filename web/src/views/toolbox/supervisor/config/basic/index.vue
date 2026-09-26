@@ -48,7 +48,7 @@ const getStatus = async () => {
     try {
         loading.value = true;
         const res = await getSupervisorStatus();
-        data.value = res.data.config as HostTool.Supervisor;
+        data.value = res.data as HostTool.Supervisor;
     } catch (error) {}
     loading.value = false;
 };

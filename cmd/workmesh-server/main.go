@@ -89,7 +89,7 @@ func runHTTPService(cfg config.Config, readiness *readinessState, logger interfa
 	gatewayStore.Start(ctx, []string{"system", "containers", "files", "databases", "websites", "tasks"})
 	// 统一安全包装器位于所有控制面和节点路由外层，避免新增路由遗漏 Session/CSRF、域名绑定和密码过期校验。
 	securedMux := controlapi.NewSecurityMiddleware(mux, controlapi.SecurityMiddlewareOptions{
-		DataDir: cfg.DataDir, Authorize: nodeapi.AuthorizeControlRequest, Settings: nodeapi.LoadSecuritySettings, OperationLog: nodeapi.RecordOperationLog,
+		DataDir: cfg.DataDir, Authorize: nodeapi.AuthorizeControlRequest, SelfAuthenticated: nodeapi.IsAgentRuntimeRequest, Settings: nodeapi.LoadSecuritySettings, OperationLog: nodeapi.RecordOperationLog,
 	})
 	readiness.SetReady()
 	server := wmhttp.New(cfg.ListenAddr, securedMux, cfg.RequestTimeout)
@@ -159,6 +159,7 @@ func unifiedSchemaMigrations() []storage.Migration {
 		service.WebsiteDefaultHTMLMigration(),
 		nodeapi.WebsiteTemplateMigration(),
 		controlapi.GatewayBindingMigration(),
+		nodeapi.HostMonitorMigration(),
 	}
 }
 
@@ -264,7 +265,7 @@ func httpMuxWithReadinessAndFrontend(cfg config.Config, readiness *readinessStat
 func authenticateNodeAPI(next *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := next.Handler(r)
-		if pattern == "" || publicNodeAPIPath(r) || selfAuthenticatedStreamPath(r.URL.Path) || nodeapi.IsForwardedRequestVerified(r) {
+		if pattern == "" || publicNodeAPIPath(r) || selfAuthenticatedStreamPath(r.URL.Path) || nodeapi.IsAgentRuntimeRequest(r) || nodeapi.IsForwardedRequestVerified(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -298,7 +299,7 @@ func publicNodeAPIPath(r *http.Request) bool {
 
 func selfAuthenticatedStreamPath(path string) bool {
 	switch path {
-	case "/api/v2/process/ws", "/api/v2/containers/search/log", "/api/v2/files/wget/process", "/api/v2/hosts/terminal/local", "/api/v2/hosts/terminal/container", "/api/v2/hosts/terminal/ssh":
+	case "/api/v2/process/ws", "/api/v2/containers/search/log", "/api/v2/files/wget/process", "/api/v2/hosts/terminal/local", "/api/v2/hosts/terminal/container", "/api/v2/hosts/terminal/ssh", "/api/v2/core/script/run":
 		return true
 	default:
 		return false

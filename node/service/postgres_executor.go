@@ -114,6 +114,11 @@ func postgresCLICommand(target PostgresTarget) ([]string, []string, error) {
 	if port > 65535 {
 		return nil, nil, errors.New("PostgreSQL 端口无效")
 	}
+	// 容器内客户端必须连镜像监听端口，不能使用宿主机映射端口。
+	if target.ContainerName != "" {
+		host = "127.0.0.1"
+		port = 5432
+	}
 	user := strings.TrimSpace(target.Username)
 	if user == "" {
 		return nil, nil, errors.New("PostgreSQL 管理用户名不能为空")
@@ -266,11 +271,9 @@ func ListPostgresDatabases(ctx context.Context, executor PostgresExecutor, targe
 	seen := make(map[string]struct{})
 	for _, line := range strings.Split(strings.ReplaceAll(output, "\r", ""), "\n") {
 		name := strings.TrimSpace(line)
-		if name == "" {
+		if name == "" || ValidatePostgresIdentifier(name) != nil {
+			// psql 提示或表头不能让整次同步失败。
 			continue
-		}
-		if err := ValidatePostgresIdentifier(name); err != nil {
-			return nil, err
 		}
 		key := strings.ToLower(name)
 		if _, ok := seen[key]; ok {

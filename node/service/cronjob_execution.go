@@ -124,8 +124,18 @@ func (s *CronjobService) executeJob(ctx context.Context, job model.Cronjob) (mod
 		return s.cmd.Execute(ctx, model.CommandRequest{Program: argv[0], Args: argv[1:], Timeout: timeout})
 	case "clean", "cleanLog":
 		return executeClean(ctx, job.Config)
-	case "directory":
-		return executeDirectoryBackup(ctx, job.SourceDir)
+	case "directory", "log":
+		return s.executeArchiveJob(ctx, job)
+	case "website", "app", "snapshot":
+		return s.executeResourceArchive(ctx, job)
+	case "cutWebsiteLog":
+		return s.executeCutWebsiteLog(ctx, job)
+	case "database":
+		return s.executeDatabaseCron(ctx, job)
+	case "ntp":
+		return s.executeNTP(ctx)
+	case "syncIpGroup":
+		return s.executeSyncIPGroup(ctx, job)
 	default:
 		return model.CommandResult{}, fmt.Errorf("任务类型 %s 需要配置对应运行时资源", job.Type)
 	}

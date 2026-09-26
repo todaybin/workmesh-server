@@ -189,6 +189,7 @@ func runAppInstallTask(store *appStore, item appRecord, downloadURL, compose str
 	item.Config["composePath"] = composePath
 	item.Config["composeProject"] = filepath.Base(filepath.Dir(composePath))
 	_ = update("running", "安装完成")
+	registerInstalledDatabaseServer(context.Background(), item)
 	appendAppTaskLog(taskID, "[TASK-END]")
 }
 

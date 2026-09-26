@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/todaybin/workmesh-server/internal/storage"
@@ -23,7 +24,7 @@ func hostRepository() (storage.Transactional, error) {
 }
 
 // hostPayload 将主机凭据与普通元数据分离，凭据只以 AES-GCM 密文写入数据库。
-func hostPayload(item hostRecord) ([]byte, error) {
+func hostPayload(item hostRecord, preservedCipher string) ([]byte, error) {
 	credentials := hostCredentials{Password: item.Password, PrivateKey: item.PrivateKey, PassPhrase: item.PassPhrase}
 	item.Password, item.PrivateKey, item.PassPhrase = "", "", ""
 	payload := storedHostPayload{Host: item}
@@ -33,6 +34,8 @@ func hostPayload(item hostRecord) ([]byte, error) {
 			return nil, err
 		}
 		payload.Credentials = encoded
+	} else if preservedCipher != "" {
+		payload.Credentials = preservedCipher
 	}
 	return json.Marshal(payload)
 }
@@ -58,17 +61,65 @@ func hostFromRow(id, name, address, user string, port int, groupID uint, payload
 	return item
 }
 
-// hostCredentialKey 从环境配置派生固定长度的 AES 密钥。
+// hostCredentialKey 从环境变量或数据目录密钥文件派生固定长度的 AES 密钥。
 func hostCredentialKey() ([]byte, error) {
 	raw := strings.TrimSpace(os.Getenv("WORKMESH_HOST_CREDENTIAL_KEY"))
 	if raw == "" {
-		return nil, fmt.Errorf("未配置主机凭据密钥 WORKMESH_HOST_CREDENTIAL_KEY")
+		var err error
+		raw, err = loadOrCreateHostCredentialKey()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil && len(decoded) >= 16 {
 		raw = string(decoded)
 	}
 	sum := sha256.Sum256([]byte(raw))
 	return sum[:], nil
+}
+
+// loadOrCreateHostCredentialKey 读取数据目录中的主机凭据密钥，不存在时创建 0600 文件。
+func loadOrCreateHostCredentialKey() (string, error) {
+	dir := strings.TrimSpace(os.Getenv("WORKMESH_DATA_DIR"))
+	if dir == "" {
+		dir = "./data"
+	}
+	path := filepath.Join(dir, "secrets", "host-credential.key")
+	if raw, err := readHostCredentialKey(path); err == nil && raw != "" {
+		return raw, nil
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	raw := base64.StdEncoding.EncodeToString(buf)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			return readHostCredentialKey(path)
+		}
+		return "", err
+	}
+	defer file.Close()
+	if _, err := file.WriteString(raw + "\n"); err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+func readHostCredentialKey(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	raw := strings.TrimSpace(string(content))
+	if raw == "" {
+		return "", fmt.Errorf("主机凭据密钥文件为空")
+	}
+	return raw, nil
 }
 
 // encryptHostCredentials 使用 AES-GCM 加密主机认证凭据并编码为文本。

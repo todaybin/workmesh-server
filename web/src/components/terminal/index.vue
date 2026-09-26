@@ -138,8 +138,9 @@ const newTerm = () => {
     const bg = terminalStore.backgroundColor || '#000000';
     const fg = terminalStore.foregroundColor || '#f5f5f5';
     term.value = new Terminal({
-        lineHeight: terminalStore.lineHeight || 1.2,
-        fontSize: terminalStore.fontSize || 12,
+        lineHeight: Number.isFinite(terminalStore.lineHeight) ? terminalStore.lineHeight : 1.2,
+        letterSpacing: Number.isFinite(terminalStore.letterSpacing) ? terminalStore.letterSpacing : 0,
+        fontSize: Number.isFinite(terminalStore.fontSize) ? terminalStore.fontSize : 12,
         fontFamily: terminalStore.fontFamily || "Monaco, Menlo, Consolas, 'Courier New', monospace",
         theme: {
             background: bg,

@@ -171,13 +171,11 @@ const getStatus = async () => {
         loading.value = true;
         em('update:loading', true);
         const res = await getSupervisorStatus();
-        if (res.data.config) {
-            data.value = res.data.config as HostTool.Supervisor;
-        }
+        data.value = res.data as HostTool.Supervisor & { isRunning?: boolean };
 
         const status = {
-            isExist: data.value.isExist && data.value.ctlExist,
-            isRunning: data.value.status === 'running',
+            isExist: !!(data.value.isExist && data.value.ctlExist),
+            isRunning: data.value.status === 'running' || data.value.isRunning === true,
             init: data.value.init,
         };
         em('getStatus', status);

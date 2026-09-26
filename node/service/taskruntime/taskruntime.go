@@ -21,12 +21,14 @@ import (
 type TaskState string
 
 const (
-	TaskCreated   TaskState = "created"
-	TaskRunning   TaskState = "running"
-	TaskCancelled TaskState = "cancelled"
-	TaskCompleted TaskState = "completed"
-	TaskFailed    TaskState = "failed"
-	TaskDestroyed TaskState = "destroyed"
+	TaskCreated       TaskState = "created"
+	TaskRunning       TaskState = "running"
+	TaskCancelled     TaskState = "cancelled"
+	TaskCompleted     TaskState = "completed"
+	TaskFailed        TaskState = "failed"
+	TaskAwaitingHuman TaskState = "awaiting_human"
+	TaskDestroyed     TaskState = "destroyed"
+	TaskUnknown       TaskState = "unknown"
 )
 
 // RuntimePolicy 描述任务运行时必须满足的隔离约束。
@@ -44,22 +46,176 @@ type RuntimePolicy struct {
 
 // TaskSpec 只描述经 HTTP 层校验的任务，不包含宿主 Shell 字符串。
 type TaskSpec struct {
-	TaskID        string        `json:"taskId"`
-	ImageDigest   string        `json:"imageDigest"`
-	Worktree      string        `json:"worktree"`
-	Entrypoint    []string      `json:"entrypoint"`
-	Timeout       time.Duration `json:"timeout"`
-	RuntimePolicy RuntimePolicy `json:"runtimePolicy"`
+	TaskID          string         `json:"taskId"`
+	ImageDigest     string         `json:"imageDigest"`
+	Worktree        string         `json:"worktree"`
+	Entrypoint      []string       `json:"entrypoint"`
+	Timeout         time.Duration  `json:"timeout"`
+	ResourceProfile string         `json:"resourceProfile"`
+	ResourceLimits  ResourceLimits `json:"resourceLimits"`
+	RuntimePolicy   RuntimePolicy  `json:"runtimePolicy"`
+}
+
+// ResourceLimits 是 Sandbox 必须执行的硬资源上限。
+// CPUQuotaMicros 使用 cgroup v2 cpu.max 的 quota 单位，周期固定为 100000 微秒。
+type ResourceLimits struct {
+	CPUQuotaMicros int64 `json:"cpuQuotaMicros"`
+	MemoryBytes    int64 `json:"memoryBytes"`
+	PIDsMax        int64 `json:"pidsMax"`
+	DiskBytes      int64 `json:"diskBytes"`
+}
+
+// SandboxCapabilities 描述外部 Sandbox 后端实际能够执行的隔离边界。
+// 这些字段是准入证明，不是 Server 根据配置推断出的状态。
+type SandboxCapabilities struct {
+	ProtocolVersion        string         `json:"protocolVersion"`
+	SandboxType            string         `json:"sandboxType"`
+	Backend                string         `json:"backend"`
+	Isolation              string         `json:"isolation"`
+	WorkspaceIsolation     bool           `json:"workspaceIsolation"`
+	NetworkIsolation       bool           `json:"networkIsolation"`
+	NetworkAllowlist       bool           `json:"networkAllowlist"`
+	PreStartEnforcement    bool           `json:"preStartEnforcement"`
+	ProcessTreeContainment bool           `json:"processTreeContainment"`
+	HardCPU                bool           `json:"hardCpu"`
+	HardMemory             bool           `json:"hardMemory"`
+	HardPIDs               bool           `json:"hardPids"`
+	HardDisk               bool           `json:"hardDisk"`
+	MaxResourceLimits      ResourceLimits `json:"maxResourceLimits"`
+}
+
+const SandboxProtocolVersion = "workmesh.sandbox.v1"
+
+// SandboxEnforcementReceipt 是 CLI 对本次创建已应用约束的逐任务回执。
+type SandboxEnforcementReceipt struct {
+	ProtocolVersion          string         `json:"protocolVersion"`
+	SandboxType              string         `json:"sandboxType"`
+	Backend                  string         `json:"backend"`
+	Isolation                string         `json:"isolation"`
+	WorkspaceRef             string         `json:"workspaceRef"`
+	ResourceLimits           ResourceLimits `json:"resourceLimits"`
+	WorkspaceIsolation       bool           `json:"workspaceIsolation"`
+	NetworkIsolation         bool           `json:"networkIsolation"`
+	NetworkAllowlistEnforced bool           `json:"networkAllowlistEnforced"`
+	AllowedHosts             []string       `json:"allowedHosts"`
+	PreStartEnforcement      bool           `json:"preStartEnforcement"`
+	ProcessTreeContainment   bool           `json:"processTreeContainment"`
+	HardCPU                  bool           `json:"hardCpu"`
+	HardMemory               bool           `json:"hardMemory"`
+	HardPIDs                 bool           `json:"hardPids"`
+	HardDisk                 bool           `json:"hardDisk"`
+}
+
+// ValidateSandboxEnforcementReceipt 拒绝缺字段、降级或与任务不匹配的执行回执。
+func ValidateSandboxEnforcementReceipt(receipt SandboxEnforcementReceipt, spec TaskSpec) error {
+	policy := spec.RuntimePolicy.normalized()
+	if receipt.ProtocolVersion != SandboxProtocolVersion {
+		return errors.New("Sandbox create 回执协议版本不受支持")
+	}
+	if receipt.SandboxType != policy.SandboxType || receipt.Backend != policy.Backend || receipt.Isolation != policy.IsolationRequired {
+		return errors.New("Sandbox create 回执的隔离类型与任务策略不匹配")
+	}
+	if receipt.WorkspaceRef != policy.WorkspaceRef || receipt.ResourceLimits != spec.ResourceLimits {
+		return errors.New("Sandbox create 回执的工作区或资源限制与任务请求不匹配")
+	}
+	if !receipt.WorkspaceIsolation || !receipt.PreStartEnforcement || !receipt.ProcessTreeContainment || !receipt.HardCPU || !receipt.HardMemory || !receipt.HardPIDs || !receipt.HardDisk {
+		return errors.New("Sandbox create 回执未确认启动前资源限制、进程树约束及工作区隔离")
+	}
+	if (policy.RiskClass == "untrusted" || len(policy.AllowedHosts) > 0) && !receipt.NetworkIsolation {
+		return errors.New("Sandbox create 回执未确认网络隔离")
+	}
+	if len(policy.AllowedHosts) > 0 && !receipt.NetworkAllowlistEnforced {
+		return errors.New("Sandbox create 回执未确认网络 allowlist 已执行")
+	}
+	if !sameStrings(receipt.AllowedHosts, policy.AllowedHosts) {
+		return errors.New("Sandbox create 回执的网络 allowlist 与任务策略不匹配")
+	}
+	return nil
+}
+
+func sameStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// SandboxCapabilityError 表示后端无法证明满足任务的硬隔离要求。
+type SandboxCapabilityError struct {
+	Err error
+}
+
+// Error 返回能力错误的上下文信息。
+func (e *SandboxCapabilityError) Error() string {
+	if e == nil || e.Err == nil {
+		return "Sandbox 能力不可用"
+	}
+	return e.Err.Error()
+}
+
+// Unwrap 保留底层能力探测或校验错误，供 HTTP 层识别。
+func (e *SandboxCapabilityError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+const (
+	resourceProfileSmall  = "small"
+	resourceProfileMedium = "medium"
+	resourceProfileLarge  = "large"
+)
+
+// ResourceLimitsForProfile 返回受支持 profile 的默认硬限制。
+func ResourceLimitsForProfile(profile string) (ResourceLimits, error) {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", resourceProfileSmall:
+		return ResourceLimits{CPUQuotaMicros: 100_000, MemoryBytes: 1 << 30, PIDsMax: 256, DiskBytes: 4 << 30}, nil
+	case resourceProfileMedium:
+		return ResourceLimits{CPUQuotaMicros: 200_000, MemoryBytes: 2 << 30, PIDsMax: 512, DiskBytes: 8 << 30}, nil
+	case resourceProfileLarge:
+		return ResourceLimits{CPUQuotaMicros: 400_000, MemoryBytes: 4 << 30, PIDsMax: 1024, DiskBytes: 16 << 30}, nil
+	default:
+		return ResourceLimits{}, fmt.Errorf("resourceProfile 只能是 small、medium 或 large")
+	}
+}
+
+func normalizeResourceLimits(profile string, limits ResourceLimits) (string, ResourceLimits, error) {
+	profile = strings.ToLower(strings.TrimSpace(profile))
+	defaults, err := ResourceLimitsForProfile(profile)
+	if err != nil {
+		return "", ResourceLimits{}, err
+	}
+	if profile == "" {
+		profile = resourceProfileSmall
+	}
+	if limits == (ResourceLimits{}) {
+		return profile, defaults, nil
+	}
+	if limits.CPUQuotaMicros <= 0 || limits.MemoryBytes <= 0 || limits.PIDsMax <= 0 || limits.DiskBytes <= 0 {
+		return "", ResourceLimits{}, errors.New("resourceLimits 必须全部为正数")
+	}
+	if limits.CPUQuotaMicros > defaults.CPUQuotaMicros || limits.MemoryBytes > defaults.MemoryBytes || limits.PIDsMax > defaults.PIDsMax || limits.DiskBytes > defaults.DiskBytes {
+		return "", ResourceLimits{}, fmt.Errorf("resourceLimits 不能超过 %s profile 的默认上限", profile)
+	}
+	return profile, limits, nil
 }
 
 // TaskHandle 是任务沙盒的公开句柄。
 type TaskHandle struct {
-	TaskID      string    `json:"taskId"`
-	SandboxID   string    `json:"sandboxId"`
-	ImageDigest string    `json:"imageDigest"`
-	SandboxType string    `json:"sandboxType"`
-	Backend     string    `json:"backend"`
-	State       TaskState `json:"state"`
+	TaskID       string    `json:"taskId"`
+	SandboxID    string    `json:"sandboxId"`
+	ImageDigest  string    `json:"imageDigest"`
+	SandboxType  string    `json:"sandboxType"`
+	Backend      string    `json:"backend"`
+	WorkspaceRef string    `json:"workspaceRef,omitempty"`
+	State        TaskState `json:"state"`
 }
 
 // TaskExecResult 是沙盒内受控入口的执行结果。
@@ -79,11 +235,28 @@ type TaskBackend interface {
 	Destroy(context.Context, string) error
 }
 
+// TaskBackendCapabilities 是支持硬隔离准入证明的后端扩展接口。
+type TaskBackendCapabilities interface {
+	Capabilities(context.Context) (SandboxCapabilities, error)
+}
+
+// TaskBackendInspector 只读查询已存在沙盒的真实状态，不执行生命周期动作。
+type TaskBackendInspector interface {
+	Inspect(context.Context, string) (TaskInspection, error)
+}
+
+// TaskInspection 是后端对持久化沙盒句柄的只读核验结果。
+type TaskInspection struct {
+	Found bool      `json:"found"`
+	State TaskState `json:"state,omitempty"`
+}
+
 // TaskProvider 编排任务生命周期，并保证同一 taskId 只创建一次。
 type TaskProvider struct {
-	mu      sync.Mutex
-	backend TaskBackend
-	tasks   map[string]*TaskHandle
+	mu                  sync.Mutex
+	backend             TaskBackend
+	tasks               map[string]*TaskHandle
+	requireCapabilities bool
 }
 
 // NewTaskProvider 创建任务 Provider。
@@ -92,6 +265,18 @@ func NewTaskProvider(backend TaskBackend) (*TaskProvider, error) {
 		return nil, errors.New("任务运行时 backend 不能为空")
 	}
 	return &TaskProvider{backend: backend, tasks: make(map[string]*TaskHandle)}, nil
+}
+
+// NewCapabilityCheckedTaskProvider 创建要求后端提供硬隔离能力证明的 Provider。
+// 生产任务必须使用该构造器；普通构造器只适合单元测试和非执行型适配器。
+func NewCapabilityCheckedTaskProvider(backend TaskBackend) (*TaskProvider, error) {
+	if backend == nil {
+		return nil, errors.New("任务运行时 backend 不能为空")
+	}
+	if _, ok := backend.(TaskBackendCapabilities); !ok {
+		return nil, errors.New("任务运行时 backend 未提供 Sandbox 能力证明")
+	}
+	return &TaskProvider{backend: backend, tasks: make(map[string]*TaskHandle), requireCapabilities: true}, nil
 }
 
 // Restore 恢复进程重启前已知的沙盒句柄；后端负责确认句柄仍然有效。
@@ -107,12 +292,91 @@ func (p *TaskProvider) Restore(handles []TaskHandle) {
 			continue
 		}
 		switch handle.State {
-		case TaskCreated, TaskRunning, TaskCancelled, TaskCompleted, TaskFailed, TaskDestroyed:
+		case TaskCreated, TaskRunning, TaskCancelled, TaskCompleted, TaskFailed, TaskAwaitingHuman, TaskDestroyed, TaskUnknown:
 		default:
 			handle.State = TaskCreated
 		}
 		copy := handle
 		p.tasks[handle.TaskID] = &copy
+	}
+}
+
+// RestoreAndInspect 恢复持久化句柄并尝试从后端确认状态；缺少 inspect 时标记为 unknown。
+func (p *TaskProvider) RestoreAndInspect(ctx context.Context, handles []TaskHandle) ([]TaskHandle, error) {
+	if p == nil {
+		return nil, errors.New("任务运行时 Provider 未配置")
+	}
+	inspector, supported := p.backend.(TaskBackendInspector)
+	results := make([]TaskHandle, 0, len(handles))
+	for _, handle := range handles {
+		if !taskIDPattern.MatchString(handle.TaskID) || strings.TrimSpace(handle.SandboxID) == "" {
+			continue
+		}
+		if handle.State != TaskDestroyed {
+			handle.State = TaskUnknown
+		}
+		if supported && handle.State == TaskUnknown {
+			inspection, err := inspector.Inspect(ctx, handle.SandboxID)
+			if err == nil {
+				if inspection.Found && validInspectedState(inspection.State) {
+					handle.State = inspection.State
+				} else {
+					handle.State = TaskAwaitingHuman
+				}
+			}
+		}
+		p.mu.Lock()
+		copy := handle
+		p.tasks[handle.TaskID] = &copy
+		p.mu.Unlock()
+		results = append(results, handle)
+	}
+	return results, nil
+}
+
+// RecoverInspect 再次只读核验一个 unknown 任务，不执行 Sandbox 生命周期动作。
+func (p *TaskProvider) RecoverInspect(ctx context.Context, taskID string) (TaskState, error) {
+	if p == nil || p.backend == nil {
+		return TaskUnknown, errors.New("任务运行时 Provider 未配置")
+	}
+	inspector, ok := p.backend.(TaskBackendInspector)
+	if !ok {
+		return TaskUnknown, errors.New("任务后端不支持只读 inspect")
+	}
+	p.mu.Lock()
+	handle := p.tasks[taskID]
+	if handle == nil {
+		p.mu.Unlock()
+		return TaskUnknown, errors.New("任务不存在")
+	}
+	sandboxID := handle.SandboxID
+	if handle.State == TaskDestroyed {
+		p.mu.Unlock()
+		return handle.State, errors.New("已销毁任务不需要恢复核验")
+	}
+	p.mu.Unlock()
+	inspection, err := inspector.Inspect(ctx, sandboxID)
+	if err != nil {
+		return TaskUnknown, err
+	}
+	state := TaskAwaitingHuman
+	if inspection.Found && validInspectedState(inspection.State) {
+		state = inspection.State
+	}
+	p.mu.Lock()
+	if current := p.tasks[taskID]; current != nil && current.SandboxID == sandboxID {
+		current.State = state
+	}
+	p.mu.Unlock()
+	return state, nil
+}
+
+func validInspectedState(state TaskState) bool {
+	switch state {
+	case TaskCreated, TaskRunning, TaskCancelled, TaskCompleted, TaskFailed, TaskAwaitingHuman, TaskDestroyed:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -126,7 +390,13 @@ func defaultPolicy() RuntimePolicy {
 // normalized 将零值策略补齐为默认值，并裁剪到服务端允许的范围。
 func (p RuntimePolicy) normalized() RuntimePolicy {
 	if p.SandboxType == "" && p.Backend == "" && p.IsolationRequired == "" && p.RiskClass == "" && p.Environment == "" {
-		return defaultPolicy()
+		defaults := defaultPolicy()
+		p.SandboxType = defaults.SandboxType
+		p.Backend = defaults.Backend
+		p.IsolationRequired = defaults.IsolationRequired
+		p.RiskClass = defaults.RiskClass
+		p.Environment = defaults.Environment
+		p.AllowRemoteDispatch = defaults.AllowRemoteDispatch
 	}
 	return p
 }
@@ -169,6 +439,55 @@ func (p RuntimePolicy) validate() error {
 	return nil
 }
 
+// ValidateSandboxCapabilities 检查后端能力是否覆盖任务声明的硬隔离要求。
+func ValidateSandboxCapabilities(caps SandboxCapabilities, spec TaskSpec) error {
+	if err := validateCapabilitySet(caps); err != nil {
+		return err
+	}
+	policy := spec.RuntimePolicy.normalized()
+	if strings.TrimSpace(caps.SandboxType) != policy.SandboxType {
+		return fmt.Errorf("Sandbox 类型不匹配: 需要 %s，实际 %s", policy.SandboxType, caps.SandboxType)
+	}
+	if strings.TrimSpace(caps.Backend) != policy.Backend {
+		return fmt.Errorf("Sandbox backend 不匹配: 需要 %s，实际 %s", policy.Backend, caps.Backend)
+	}
+	if policy.IsolationRequired != "none" && caps.Isolation != policy.IsolationRequired {
+		return fmt.Errorf("Sandbox 隔离级别不匹配: 需要 %s，实际 %s", policy.IsolationRequired, caps.Isolation)
+	}
+	if (policy.RiskClass == "untrusted" || len(policy.AllowedHosts) > 0) && !caps.NetworkIsolation {
+		return errors.New("Sandbox 未提供网络隔离能力")
+	}
+	if len(policy.AllowedHosts) > 0 && !caps.NetworkAllowlist {
+		return errors.New("Sandbox 未提供网络 allowlist 能力")
+	}
+	max := caps.MaxResourceLimits
+	limits := spec.ResourceLimits
+	if limits.CPUQuotaMicros > max.CPUQuotaMicros || limits.MemoryBytes > max.MemoryBytes || limits.PIDsMax > max.PIDsMax || limits.DiskBytes > max.DiskBytes {
+		return errors.New("任务资源限制超过 Sandbox 能力上限")
+	}
+	return nil
+}
+
+func validateCapabilitySet(caps SandboxCapabilities) error {
+	if caps.ProtocolVersion != SandboxProtocolVersion {
+		return errors.New("Sandbox CLI 未实现受支持的 WorkMesh Sandbox 协议版本")
+	}
+	if !caps.WorkspaceIsolation {
+		return errors.New("Sandbox 未提供工作区隔离能力")
+	}
+	if !caps.HardCPU || !caps.HardMemory || !caps.HardPIDs || !caps.HardDisk {
+		return errors.New("Sandbox 未提供完整 CPU、内存、PID 和磁盘硬限制")
+	}
+	if !caps.PreStartEnforcement || !caps.ProcessTreeContainment {
+		return errors.New("Sandbox 未声明启动前限制和进程树约束")
+	}
+	max := caps.MaxResourceLimits
+	if max.CPUQuotaMicros <= 0 || max.MemoryBytes <= 0 || max.PIDsMax <= 0 || max.DiskBytes <= 0 {
+		return errors.New("Sandbox 未声明有效的资源上限")
+	}
+	return nil
+}
+
 // validateSpec 校验任务标识、工作目录、镜像摘要和入口参数白名单。
 func validateSpec(spec TaskSpec) error {
 	if strings.TrimSpace(spec.TaskID) != spec.TaskID || !taskIDPattern.MatchString(spec.TaskID) {
@@ -186,6 +505,9 @@ func validateSpec(spec TaskSpec) error {
 		return errors.New("Agent image digest 不是有效的小写十六进制")
 	}
 	if err := validateWorktree(spec.Worktree); err != nil {
+		return err
+	}
+	if _, _, err := normalizeResourceLimits(spec.ResourceProfile, spec.ResourceLimits); err != nil {
 		return err
 	}
 	if len(spec.Entrypoint) == 0 || strings.TrimSpace(spec.Entrypoint[0]) == "" {
@@ -215,13 +537,50 @@ func validateWorktree(value string) error {
 			return fmt.Errorf("worktree 位于禁止访问的宿主目录: %s", denied)
 		}
 	}
-	if root := strings.TrimSpace(os.Getenv("WORKMESH_AGENT_WORKSPACE_ROOT")); root != "" {
-		if !isAbsolutePath(root) {
-			return errors.New("WORKMESH_AGENT_WORKSPACE_ROOT 必须是绝对路径")
+	root := strings.TrimSpace(os.Getenv("WORKMESH_AGENT_WORKSPACE_ROOT"))
+	if root == "" {
+		return errors.New("未配置 WORKMESH_AGENT_WORKSPACE_ROOT，拒绝使用未隔离工作区")
+	}
+	if !isAbsolutePath(root) {
+		return errors.New("WORKMESH_AGENT_WORKSPACE_ROOT 必须是绝对路径")
+	}
+	rootPath := filepath.Clean(root)
+	rootSlash := strings.TrimRight(filepath.ToSlash(rootPath), "/")
+	rootCompare := strings.ToLower(rootSlash)
+	if clean == rootCompare || !strings.HasPrefix(clean, rootCompare+"/") {
+		return errors.New("worktree 必须位于 Agent workspace root 的任务子目录")
+	}
+	if err := rejectSymlinkPath(rootSlash, filepath.ToSlash(filepath.Clean(value))); err != nil {
+		return err
+	}
+	return nil
+}
+
+// rejectSymlinkPath 校验已存在的路径组件，防止工作区通过符号链接逃逸。
+func rejectSymlinkPath(root, target string) error {
+	rootInfo, err := os.Lstat(filepath.FromSlash(root))
+	if err != nil {
+		return fmt.Errorf("Agent workspace root 不可用: %w", err)
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return errors.New("Agent workspace root 必须是非符号链接目录")
+	}
+	rel, err := filepath.Rel(filepath.FromSlash(root), filepath.FromSlash(target))
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return errors.New("worktree 路径解析失败")
+	}
+	current := filepath.FromSlash(root)
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, statErr := os.Lstat(current)
+		if errors.Is(statErr, os.ErrNotExist) {
+			break
 		}
-		root = strings.TrimRight(filepath.ToSlash(filepath.Clean(root)), "/")
-		if clean != root && !strings.HasPrefix(clean, root+"/") {
-			return errors.New("worktree 超出 Agent workspace root")
+		if statErr != nil {
+			return fmt.Errorf("检查 worktree 路径失败: %w", statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("worktree 路径不能包含符号链接")
 		}
 	}
 	return nil
@@ -254,6 +613,27 @@ func (p *TaskProvider) Create(ctx context.Context, spec TaskSpec) (TaskHandle, e
 	if err := validateSpec(spec); err != nil {
 		return TaskHandle{}, err
 	}
+	profile, limits, err := normalizeResourceLimits(spec.ResourceProfile, spec.ResourceLimits)
+	if err != nil {
+		return TaskHandle{}, err
+	}
+	spec.ResourceProfile, spec.ResourceLimits = profile, limits
+	if p.requireCapabilities {
+		capabilityBackend, ok := p.backend.(TaskBackendCapabilities)
+		if !ok {
+			return TaskHandle{}, &SandboxCapabilityError{Err: errors.New("任务运行时 backend 未提供 Sandbox 能力证明")}
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		caps, capabilityErr := capabilityBackend.Capabilities(ctx)
+		if capabilityErr != nil {
+			return TaskHandle{}, &SandboxCapabilityError{Err: fmt.Errorf("Sandbox 能力探测失败: %w", capabilityErr)}
+		}
+		if err := ValidateSandboxCapabilities(caps, spec); err != nil {
+			return TaskHandle{}, &SandboxCapabilityError{Err: fmt.Errorf("Sandbox 能力不足: %w", err)}
+		}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, exists := p.tasks[spec.TaskID]; exists {
@@ -264,12 +644,12 @@ func (p *TaskProvider) Create(ctx context.Context, spec TaskSpec) (TaskHandle, e
 		return TaskHandle{}, fmt.Errorf("创建任务沙盒失败: %w", err)
 	}
 	policy := spec.RuntimePolicy.normalized()
-	h := &TaskHandle{TaskID: spec.TaskID, SandboxID: sandboxID, ImageDigest: spec.ImageDigest, SandboxType: policy.SandboxType, Backend: policy.Backend, State: TaskCreated}
+	h := &TaskHandle{TaskID: spec.TaskID, SandboxID: sandboxID, ImageDigest: spec.ImageDigest, SandboxType: policy.SandboxType, Backend: policy.Backend, WorkspaceRef: policy.WorkspaceRef, State: TaskCreated}
 	p.tasks[spec.TaskID] = h
 	return *h, nil
 }
 
-// transition 按允许的状态边界执行后端操作，失败时保留可恢复的原状态。
+// transition 按允许的状态边界执行后端操作；后端失败时保留原状态，允许调用方重试。
 func (p *TaskProvider) transition(ctx context.Context, taskID string, from, to TaskState, operation func(string) error) error {
 	p.mu.Lock()
 	h, ok := p.tasks[taskID]
@@ -284,9 +664,6 @@ func (p *TaskProvider) transition(ctx context.Context, taskID string, from, to T
 	sandboxID := h.SandboxID
 	p.mu.Unlock()
 	if err := operation(sandboxID); err != nil {
-		p.mu.Lock()
-		h.State = TaskFailed
-		p.mu.Unlock()
 		return err
 	}
 	p.mu.Lock()
@@ -319,6 +696,20 @@ func (p *TaskProvider) Exec(ctx context.Context, taskID string, argv []string) (
 		return TaskExecResult{}, errors.New("任务沙盒未运行")
 	}
 	return p.backend.Exec(ctx, h.SandboxID, argv)
+}
+
+// State 返回任务当前状态，供 API 在重启和收集结果后持久化真实状态。
+func (p *TaskProvider) State(taskID string) (TaskState, error) {
+	if p == nil {
+		return "", errors.New("任务运行时 Provider 未配置")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	h, ok := p.tasks[taskID]
+	if !ok {
+		return "", errors.New("任务不存在")
+	}
+	return h.State, nil
 }
 
 // Cancel 请求取消任务但保留沙盒句柄，便于收集诊断结果。
@@ -361,8 +752,32 @@ func (p *TaskProvider) Destroy(ctx context.Context, taskID string) error {
 	if !ok {
 		return errors.New("任务不存在")
 	}
-	if err := p.backend.Destroy(ctx, h.SandboxID); err != nil {
-		return fmt.Errorf("销毁任务沙盒失败: %w", err)
+	if h.State == TaskRunning {
+		return errors.New("运行中的任务必须先取消或收集结果后才能销毁")
+	}
+	if h.State == TaskDestroyed {
+		return errors.New("任务已销毁")
+	}
+	if h.State == TaskUnknown {
+		return errors.New("任务后端状态未知，必须先通过 inspect 核验")
+	}
+	// workspace 清理失败时后端 Sandbox 已经销毁，人工修复目录后再次调用
+	// destroy 只需重试清理，不能重复调用后端销毁操作。
+	if h.State != TaskAwaitingHuman {
+		if err := p.backend.Destroy(ctx, h.SandboxID); err != nil {
+			return fmt.Errorf("销毁任务沙盒失败: %w", err)
+		}
+	}
+	if h.WorkspaceRef != "" {
+		layout, layoutErr := NewWorkspaceLayout(os.Getenv("WORKMESH_AGENT_WORKSPACE_ROOT"), h.WorkspaceRef, h.TaskID)
+		if layoutErr != nil {
+			p.markTaskAwaitingHuman(taskID)
+			return &WorkspaceCleanupError{Err: fmt.Errorf("任务 workspace 清理前置校验失败: %w", layoutErr)}
+		}
+		if cleanupErr := layout.CleanupTransient(ctx); cleanupErr != nil {
+			p.markTaskAwaitingHuman(taskID)
+			return &WorkspaceCleanupError{Err: cleanupErr}
+		}
 	}
 	p.mu.Lock()
 	if current := p.tasks[taskID]; current != nil {
@@ -370,4 +785,20 @@ func (p *TaskProvider) Destroy(ctx context.Context, taskID string) error {
 	}
 	p.mu.Unlock()
 	return nil
+}
+
+func (p *TaskProvider) markTaskFailed(taskID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if current := p.tasks[taskID]; current != nil {
+		current.State = TaskFailed
+	}
+}
+
+func (p *TaskProvider) markTaskAwaitingHuman(taskID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if current := p.tasks[taskID]; current != nil {
+		current.State = TaskAwaitingHuman
+	}
 }

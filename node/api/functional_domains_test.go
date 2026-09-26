@@ -230,12 +230,17 @@ func TestSettingsOperationalEndpointsReturnPersistedState(t *testing.T) {
 	t.Setenv("WORKMESH_SSL_RELOAD_COMMAND", "true")
 	mux := http.NewServeMux()
 	registerBackupAlertLogSettingsRoutes(mux)
-	for _, path := range []string{"/api/v2/core/settings/menu/default", "/api/v2/core/settings/terminal/search", "/api/v2/core/settings/ssl/download", "/api/v2/core/settings/ssl/reload"} {
+	for _, path := range []string{"/api/v2/core/settings/menu/default", "/api/v2/core/settings/ssl/download", "/api/v2/core/settings/ssl/reload"} {
 		res := httptest.NewRecorder()
 		mux.ServeHTTP(res, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`)))
 		if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"path"`) {
 			t.Fatalf("settings endpoint %s failed: %d %s", path, res.Code, res.Body.String())
 		}
+	}
+	terminal := httptest.NewRecorder()
+	mux.ServeHTTP(terminal, httptest.NewRequest(http.MethodPost, "/api/v2/core/settings/terminal/search", strings.NewReader(`{}`)))
+	if terminal.Code != http.StatusOK || !strings.Contains(terminal.Body.String(), `"fontSize":"12"`) || !strings.Contains(terminal.Body.String(), `"cursorBlink":"Enable"`) {
+		t.Fatalf("terminal search status=%d body=%s", terminal.Code, terminal.Body.String())
 	}
 }
 

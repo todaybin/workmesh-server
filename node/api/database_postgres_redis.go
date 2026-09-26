@@ -54,7 +54,7 @@ func postgresResource(item service.Database) map[string]any {
 	result := map[string]any{
 		"id": item.ID, "createdAt": item.CreatedAt, "name": item.Name,
 		"postgresqlName": item.InitialDB, "from": item.From, "format": "",
-		"username": item.Username, "superUser": false, "isDelete": false,
+		"username": item.Username, "password": item.Password, "superUser": false, "isDelete": false,
 		"description": item.Description,
 	}
 	var cfg struct {
@@ -156,7 +156,11 @@ func handlePostgresCreate(w http.ResponseWriter, r *http.Request) {
 		writeDBError(w, http.StatusServiceUnavailable, err)
 		return
 	}
-	item, err := databaseService.Create(r.Context(), service.Database{Name: name, Type: "postgresql", From: databaseSourceForTarget(strField(b, "from"), target.ContainerName), Host: target.Host, Port: target.Port, ContainerName: target.ContainerName, InitialDB: server, Username: username, Description: strField(b, "description")})
+	dbType := target.Type
+	if dbType == "" {
+		dbType = "postgresql"
+	}
+	item, err := databaseService.Create(r.Context(), service.Database{Name: name, Type: dbType, From: databaseSourceForTarget(strField(b, "from"), target.ContainerName), Host: target.Host, Port: target.Port, ContainerName: target.ContainerName, InitialDB: server, Username: username, Password: password, Description: strField(b, "description")})
 	if err != nil {
 		_, _ = postgresExecutor.Exec(r.Context(), target, "DROP DATABASE IF EXISTS "+service.QuotePostgresIdentifier(name)+";")
 		_, _ = postgresExecutor.Exec(r.Context(), target, "DROP ROLE IF EXISTS "+service.QuotePostgresIdentifier(username)+";")
@@ -299,12 +303,15 @@ func handlePostgresSearch(w http.ResponseWriter, r *http.Request) {
 		writeDBError(w, 400, err)
 		return
 	}
-	items := databaseService.Search(r.Context(), "postgresql", strField(b, "info"))
-	out := make([]map[string]any, 0, len(items))
-	for _, item := range items {
+	server := strField(b, "database")
+	live := syncPostgresLiveDatabases(r.Context(), server)
+	children := visibleChildDatabases(databasesForTypes(r.Context(), databaseTypeFamily("postgresql")), server, strField(b, "info"), live)
+	paged, total, page, pageSize := pageDatabaseSlice(children, int(intField(b, "page")), int(intField(b, "pageSize")))
+	out := make([]map[string]any, 0, len(paged))
+	for _, item := range paged {
 		out = append(out, postgresResource(item))
 	}
-	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": out, "total": len(out)}})
+	wmhttp.JSON(w, 200, map[string]any{"code": 200, "data": map[string]any{"items": out, "total": total, "page": page, "pageSize": pageSize}})
 }
 
 func handlePostgresDescription(w http.ResponseWriter, r *http.Request) {
@@ -349,7 +356,11 @@ func handlePostgresLoadRemote(w http.ResponseWriter, r *http.Request) {
 	if target.ContainerName != "" {
 		source = "local"
 	}
-	for _, item := range databaseService.Search(r.Context(), "postgresql", "") {
+	dbType := target.Type
+	if dbType == "" {
+		dbType = "postgresql"
+	}
+	for _, item := range databasesForTypes(r.Context(), databaseTypeFamily(dbType)) {
 		if strings.EqualFold(item.InitialDB, server) {
 			existing[strings.ToLower(item.Name)] = struct{}{}
 		}
@@ -359,8 +370,11 @@ func handlePostgresLoadRemote(w http.ResponseWriter, r *http.Request) {
 		if _, found := existing[strings.ToLower(name)]; found {
 			continue
 		}
-		item, createErr := databaseService.Create(r.Context(), service.Database{Name: name, Type: "postgresql", From: source, Host: target.Host, Port: target.Port, ContainerName: target.ContainerName, InitialDB: server})
+		item, createErr := databaseService.Create(r.Context(), service.Database{Name: name, Type: dbType, From: source, Host: target.Host, Port: target.Port, ContainerName: target.ContainerName, InitialDB: server})
 		if createErr != nil {
+			if _, exists := databaseService.FindByName(r.Context(), dbType, name); exists {
+				continue
+			}
 			for index := len(created) - 1; index >= 0; index-- {
 				_ = databaseService.Delete(r.Context(), created[index].ID)
 			}

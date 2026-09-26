@@ -3,6 +3,8 @@
 
 # 运维与验收手册
 
+多 Agent 并行开发、进程登记/回收、实时事件和测试收尾流程见[多 Agent 并行开发与实时执行手册](multi-agent-development-runbook.md)。
+
 ## 安装与启动
 
 每台主机安装同一版本独立二进制，配置 `WORKMESH_SERVER_ADDR`、`WORKMESH_DATA_DIR`、`WORKMESH_NODE_ID`、`WORKMESH_NODE_ROLE` 和 Gateway 地址。服务默认监听 `:9999`，由 systemd 或等效进程管理器托管。

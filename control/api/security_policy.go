@@ -230,7 +230,7 @@ func isPublicSecurityPath(r *http.Request) bool {
 // isSelfAuthenticatedStream 列出使用一次性令牌和握手来源校验的流式接口。
 func isSelfAuthenticatedStream(path string) bool {
 	switch path {
-	case "/api/v2/process/ws", "/api/v2/containers/search/log", "/api/v2/files/wget/process", "/api/v2/hosts/terminal/local", "/api/v2/hosts/terminal/container", "/api/v2/hosts/terminal/ssh":
+	case "/api/v2/process/ws", "/api/v2/containers/search/log", "/api/v2/files/wget/process", "/api/v2/hosts/terminal/local", "/api/v2/hosts/terminal/container", "/api/v2/hosts/terminal/ssh", "/api/v2/core/script/run":
 		return true
 	default:
 		return false

@@ -15,6 +15,7 @@ import (
 )
 
 func registerAIExecutionRoutes(mux *http.ServeMux) {
+	registerAgentTeamRoutes(mux)
 	registerAIExplicitRoutes(mux)
 	mux.HandleFunc("/api/v2/ai/", aiHandler)
 	mux.HandleFunc("/api/v2/cubesandbox/", sandboxHandler)

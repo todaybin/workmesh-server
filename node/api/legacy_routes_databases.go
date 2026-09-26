@@ -52,7 +52,8 @@ func registerLegacyDatabasesRoutes(mux routeRegistrar) {
 	// Redis 状态、配置、持久化和密码接口已由真实执行器承接。
 	// redis-cli 安装接口明确返回 503，不执行系统包安装。
 	mux.HandleFunc("POST /api/v2/databases/remote", fallbackRouteHandler)
-	mux.HandleFunc("POST /api/v2/databases/search", fallbackRouteHandler)
+	// MySQL 库内列表由 databaseRoute 分派到 handleMySQLDatabaseSearch。
+	mux.HandleFunc("POST /api/v2/databases/search", handleMySQLDatabaseSearch)
 	mux.HandleFunc("POST /api/v2/databases/status", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/databases/users", fallbackRouteHandler)
 	mux.HandleFunc("POST /api/v2/databases/users/del", fallbackRouteHandler)

@@ -158,6 +158,11 @@ func mysqlCLICommand(target MySQLTarget) ([]string, []string, error) {
 	if port > 65535 {
 		return nil, nil, errors.New("MySQL 端口无效")
 	}
+	// 容器内客户端必须连镜像监听端口，不能使用宿主机映射端口。
+	if target.ContainerName != "" {
+		host = "127.0.0.1"
+		port = 3306
+	}
 	user := strings.TrimSpace(target.Username)
 	if user == "" {
 		return nil, nil, errors.New("MySQL 管理用户名不能为空")

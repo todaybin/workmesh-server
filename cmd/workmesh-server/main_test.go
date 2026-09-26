@@ -6,6 +6,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -239,6 +242,32 @@ func TestSecurityWrapperProtectsControlAndLeavesHealthPublic(t *testing.T) {
 	secured.ServeHTTP(blocked, request)
 	if blocked.Code != http.StatusUnauthorized {
 		t.Fatalf("控制面状态查询应要求登录，状态码 = %d", blocked.Code)
+	}
+}
+
+func TestAgentRuntimeRegistrationPassesBothSecurityLayers(t *testing.T) {
+	t.Setenv("WORKMESH_DATA_DIR", t.TempDir())
+	t.Setenv("WORKMESH_AGENT_RUNTIME_TOKEN", "test-runtime-token")
+	mux, _ := httpMux(configForTest())
+	secured := controlapi.NewSecurityMiddleware(mux, controlapi.SecurityMiddlewareOptions{
+		Authorize:         nodeapi.AuthorizeControlRequest,
+		SelfAuthenticated: nodeapi.IsAgentRuntimeRequest,
+	})
+	body := `{"projectId":"project-auth","runtimeId":"runtime-auth","instanceId":"instance-auth","memberId":"leader-auth"}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v2/agent-runtime/register", strings.NewReader(body))
+	unauthorized := httptest.NewRecorder()
+	secured.ServeHTTP(unauthorized, request)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("缺少 runtime token 未拒绝: %d %s", unauthorized.Code, unauthorized.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/v2/agent-runtime/register", strings.NewReader(body))
+	mac := hmac.New(sha256.New, []byte("test-runtime-token"))
+	_, _ = mac.Write([]byte("workmesh.agent.v1:project-auth"))
+	request.Header.Set("X-WorkMesh-Agent-Token", hex.EncodeToString(mac.Sum(nil)))
+	authorized := httptest.NewRecorder()
+	secured.ServeHTTP(authorized, request)
+	if authorized.Code != http.StatusOK {
+		t.Fatalf("有效 runtime token 被安全链路拦截: %d %s", authorized.Code, authorized.Body.String())
 	}
 }
 

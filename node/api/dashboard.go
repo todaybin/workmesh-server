@@ -37,19 +37,8 @@ func handleDashboardOS(w http.ResponseWriter, _ *http.Request) {
 			diskSize += total
 		}
 	}
-	info := map[string]any{"os": runtime.GOOS, "platform": runtime.GOOS, "platformFamily": runtime.GOOS, "kernelArch": runtime.GOARCH, "kernelVersion": "", "diskSize": diskSize}
-	if data, err := os.ReadFile("/proc/version"); err == nil {
-		info["kernelVersion"] = strings.TrimSpace(string(data))
-	}
-	if release, err := os.ReadFile("/etc/os-release"); err == nil {
-		for _, line := range strings.Split(string(release), "\n") {
-			key, value, found := strings.Cut(line, "=")
-			if found && key == "PRETTY_NAME" {
-				info["prettyDistro"] = strings.Trim(strings.TrimSpace(value), "\"")
-				break
-			}
-		}
-	}
+	release := dashboardOSRelease()
+	info := map[string]any{"os": runtime.GOOS, "platform": release.ID, "platformFamily": release.Family, "kernelArch": dashboardKernelArch(), "kernelVersion": dashboardKernelVersion(), "diskSize": diskSize, "prettyDistro": release.Pretty}
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": info})
 }
 
@@ -59,22 +48,17 @@ func handleDashboardBase(w http.ResponseWriter, r *http.Request) {
 	current := dashboardCurrent(r.Context(), ioOption, netOption)
 	host, _ := os.Hostname()
 	cpu := dashboardCPUInfo()
-	distro := runtime.GOOS
-	if value, ok := cpu["prettyDistro"].(string); ok && value != "" {
-		distro = value
-	}
+	release := dashboardOSRelease()
+	physical, logical := dashboardCPUCores()
 	counts := dashboardQuickCounts()
 	data := map[string]any{
-		"hostname": host, "os": runtime.GOOS, "platform": runtime.GOOS, "platformFamily": runtime.GOOS,
-		"platformVersion": "", "prettyDistro": distro, "kernelArch": runtime.GOARCH,
-		"kernelVersion": "", "virtualizationSystem": "", "ipV4Addr": dashboardIPv4(), "httpProxy": "",
-		"cpuCores": runtime.NumCPU(), "cpuLogicalCores": runtime.NumCPU(), "cpuModelName": cpu["model"], "cpuMhz": cpu["mhz"],
+		"hostname": host, "os": runtime.GOOS, "platform": release.ID, "platformFamily": release.Family,
+		"platformVersion": release.Version, "prettyDistro": release.Pretty, "kernelArch": dashboardKernelArch(),
+		"kernelVersion": dashboardKernelVersion(), "virtualizationSystem": "", "ipV4Addr": dashboardIPv4(), "httpProxy": "",
+		"cpuCores": physical, "cpuLogicalCores": logical, "cpuModelName": cpu["model"], "cpuMhz": cpu["mhz"],
 		"websiteNumber": counts["Website"], "agentNumber": counts["Agent"], "databaseNumber": counts["Database"],
 		"cronjobNumber": counts["Cronjob"], "appInstalledNumber": counts["AppInstalled"],
 		"currentInfo": current, "quickJump": dashboardQuickJumpsWithCounts(counts),
-	}
-	if dataRaw, err := os.ReadFile("/proc/version"); err == nil {
-		data["kernelVersion"] = strings.TrimSpace(string(dataRaw))
 	}
 	wmhttp.JSON(w, http.StatusOK, map[string]any{"code": 200, "data": data})
 }

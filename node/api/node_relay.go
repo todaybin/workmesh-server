@@ -115,6 +115,13 @@ func (r *NodeRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		r.serveForwarded(w, req)
 		return
 	}
+	if IsAgentRuntimeRequest(req) {
+		target := relayTarget(req)
+		if target != "" && target != "local" && target != "undefined" && target != r.options.NodeID {
+			writeRelayError(w, http.StatusBadRequest, "Agent runtime 请求只能发送到当前节点")
+			return
+		}
+	}
 	target := relayTarget(req)
 	if target == "" || target == "local" || target == "undefined" || target == r.options.NodeID {
 		r.next.ServeHTTP(w, req)

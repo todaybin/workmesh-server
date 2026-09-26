@@ -242,11 +242,10 @@ import { ElTree } from 'element-plus';
 import screenfull from 'screenfull';
 import i18n from '@/lang';
 import { Host } from '@/api/interface/host';
-import { getHostTree, testByID, testLocalConn } from '@/api/modules/terminal';
+import { getHostTree, testByID } from '@/api/modules/terminal';
 import { useGlobalStore } from '@/composables/useGlobalStore';
 import router from '@/routers';
 import { getCommandTree } from '@/api/modules/command';
-import { getAgentSettingInfo } from '@/api/modules/setting';
 import AiSetting from '@/views/terminal/setting/ai/index.vue';
 import { MsgWarning } from '@/utils/message';
 
@@ -315,15 +314,7 @@ const acceptParams = async () => {
 };
 
 const openDefaultLocalConn = async () => {
-    if (isNodeAdmin.value) {
-        onNewLocal();
-        return;
-    }
-    await getAgentSettingInfo().then((res) => {
-        if (res.data?.localSSHConnShow === 'Enable') {
-            onNewLocal();
-        }
-    });
+    await onNewLocal();
 };
 
 const cleanTimer = () => {
@@ -444,11 +435,6 @@ const onNewSsh = () => {
     dialogRef.value!.acceptParams({ isLocal: false });
 };
 const onNewLocal = async () => {
-    const res = await testLocalConn();
-    if (!res.data) {
-        dialogRef.value!.acceptParams({ isLocal: true });
-        return;
-    }
     terminalTabs.value.push({
         index: tabIndex,
         title: i18n.global.t('terminal.localhost'),
@@ -482,13 +468,12 @@ const onReconnect = async (item: any) => {
     }
     item.Refresh = !item.Refresh;
     if (item.wsID === 0) {
-        const res = await testLocalConn();
         nextTick(() => {
             ctx.refs[`t-${item.index}`] &&
                 ctx.refs[`t-${item.index}`][0].acceptParams({
                     endpoint: '/api/v2/hosts/terminal/local',
                     initCmd: initCmd.value,
-                    error: res.data ? '' : 'Failed to set up the connection. Please check the host information',
+                    error: '',
                 });
             initCmd.value = '';
         });

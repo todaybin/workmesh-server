@@ -65,25 +65,30 @@ const handleChange = (tab: any) => {
     }
 };
 
+const finiteNumber = (value: unknown, fallback: number) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+};
+
 const loadTerminalSetting = async () => {
     await getTerminalInfo().then((res) => {
         terminalStore.$patch({
-            lineHeight: Number(res.data.lineHeight),
-            letterSpacing: Number(res.data.letterSpacing),
-            fontSize: Number(res.data.fontSize),
+            lineHeight: finiteNumber(res.data.lineHeight, 1.2),
+            letterSpacing: finiteNumber(res.data.letterSpacing, 0),
+            fontSize: finiteNumber(res.data.fontSize, 12),
             fontFamily: res.data.fontFamily || "Monaco, Menlo, Consolas, 'Courier New', monospace",
             backgroundColor: res.data.backgroundColor || '#000000',
             foregroundColor: res.data.foregroundColor || '#f5f5f5',
-            cursorBlink: res.data.cursorBlink,
-            cursorStyle: res.data.cursorStyle,
-            scrollback: Number(res.data.scrollback),
-            scrollSensitivity: Number(res.data.scrollSensitivity),
+            cursorBlink: res.data.cursorBlink || 'Enable',
+            cursorStyle: res.data.cursorStyle || 'block',
+            scrollback: finiteNumber(res.data.scrollback, 1000),
+            scrollSensitivity: finiteNumber(res.data.scrollSensitivity, 6),
         });
     });
 };
 
-onMounted(() => {
-    loadTerminalSetting();
+onMounted(async () => {
+    await loadTerminalSetting();
     handleChange('terminal');
 });
 onUnmounted(() => {
