@@ -174,7 +174,7 @@
 
 ### 2026-08-30 隐藏路由批次
 
-- [x] `GET /api/v2/core/script/run`：受 `WORKMESH_COMMAND_TOKEN` 保护，支持 30 秒超时、退出码和输出回传；未配置令牌时明确返回 `COMMAND_AUTH_REQUIRED`。
+- [x] `GET/WS /api/v2/core/script/run`：管理员 Session 可运行已审核脚本，服务调用兼容 `WORKMESH_COMMAND_TOKEN`；通过受限 WebSocket 终端持续回传输出并支持输入/resize，系统脚本固定白名单，未登录时返回 `LOCAL_AUTH_REQUIRED`。
 - [x] `GET /api/v2/process/ws`：实现 RFC6455 文本帧长度编码，支持超过 125 字节的进程快照，连接断开后释放 ticker 和 socket。
 - [~] 网站统计与 WAF 统计接口：统一由 `analyticsHandler` 返回契约化数据并持久化监控配置；真实访问日志采集器尚未接入，统计数值不能宣称等价旧系统。
 - [x] 分组 CRUD 别名：`/api/v2/groups/*` 与 `/api/v2/core/groups/*` 共用 `coreResourceStore`，具备新增、查询和删除的可重复测试路径。

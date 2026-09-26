@@ -67,7 +67,7 @@
 | 功能名称 | 旧源码位置 | 旧路由或入口 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 测试命令 | 部署验证 | 当前状态 | 剩余缺口 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Passkey 凭据元数据管理 | `/www/apps/1Panel/core/app/service/auth.go` | `GET /api/v2/core/auth/passkey/list`、`POST /api/v2/core/auth/passkey/register/*`、`POST /api/v2/core/auth/passkey/del` | `control/service/core.go`、`node/api/core_handlers.go` | 同左 | Session/Cookie 或 Bearer；注册挑战 5 分钟有效 | 凭据 ID、名称、创建时间 | `WORKMESH_DATA_DIR/passkeys.json`，临时文件原子替换 | `node/api/core_handlers_test.go:TestCorePasskeyRegistrationLifecycle` | `go test ./node/api -run CorePasskey` | 待双节点制品部署 | implemented | 未接入浏览器 WebAuthn 验证器时，空 credentialId 会明确拒绝 |
-| 脚本库受控执行 | `/www/apps/1Panel/core/app/api/v2/script_library.go:RunScript` | `GET /api/v2/core/script/run` | `node/api/core_resources.go:handleScriptRun` | `GET /api/v2/core/script/run` | `X-WorkMesh-Token` 与 `WORKMESH_COMMAND_TOKEN` | 已登记脚本库记录，不接受直接 command 参数 | core resource store | `node/api/core_resources_test.go` | `go test ./node/api -run ScriptRun` | 待真实脚本库部署验证 | implemented | 仅允许 script_id 对应脚本，禁止任意宿主命令 |
+| 脚本库受控执行 | `/www/apps/1Panel/core/app/api/v2/script_library.go:RunScript` | `GET/WS /api/v2/core/script/run` | `node/api/core_resources.go:handleScriptRun` | `GET/WS /api/v2/core/script/run` | 管理员 Session；服务调用可使用 `X-WorkMesh-Token` | 已登记且已审核脚本（系统脚本固定白名单），不接受直接 command 参数 | core resource store | `node/api/core_resources_test.go`、`node/api/terminal_ws_contract_test.go` | `GOWORK=off go test ./node/api -run 'ScriptRun|Terminal'` | 待真实脚本库部署验证 | implemented | 复用终端 WebSocket 流式输出，保留脚本审批、来源和节点权限边界 |
 | 进程详情采集 | `/www/apps/1Panel/agent/app/service/process.go:GetProcessInfoByPID` | `GET /api/v2/process/:pid` | `node/api/process.go:handleProcessByID` | `GET /api/v2/process/:pid` | 节点会话鉴权 | `/proc/<pid>/cmdline`、`/proc/<pid>/status` | 无状态实时采集 | `node/api/process_test.go` | `go test ./node/api -run Process` | 待 Linux 节点验证 | implemented | Windows 无 procfs 时仅返回可访问字段 |
 
 ## 2026-08-31 控制面会话与 API 凭据持久化
@@ -348,7 +348,7 @@ node scripts/with-dev-env.mjs -- node test/contract/hidden-function-scan.mjs --l
 | 计划任务调度 | agent cronjob_helper | node/service/cronjob.go | POST /api/v2/cronjobs/next | 节点会话 | cron 表达式 | 任务定义 | node/service/cronjob_test.go | implemented | 时区配置待补充 |
 | 任务重试超时 | agent task runtime | node/service/cronjob.go | POST /api/v2/cronjobs/handle | 节点会话/HMAC | RetryTimes/Timeout | 执行记录 | node/service/cronjob_test.go | implemented | 分布式 fencing 待接入 |
 | 记录分页清理 | agent cronjobRepo | node/service/cronjob.go、node/api/host_container_cron.go | POST /api/v2/cronjobs/search/records | 节点会话 | 本地执行记录 | cronjobs.json（最多 1000 条/任务） | node/service/cronjob_test.go | implemented | 记录文件日志关联待补充 |
-| 脚本库持久化与审核执行 | core script library | node/api/core_resources.go | POST /api/v2/core/script、GET /api/v2/core/script/run | Session + X-WorkMesh-Token | scripts.json | 原子 JSON 文件 | node/api/core_resources_test.go | implemented | 远程签名同步待接入 |
+| 脚本库持久化与审核执行 | core script library | node/api/core_resources.go | POST /api/v2/core/script、GET/WS /api/v2/core/script/run | 管理员 Session；服务调用可使用 `X-WorkMesh-Token` | SQLite `script_library` | 事务写入 | node/api/core_resources_test.go | implemented | 远程签名同步待接入 |
 | 命令执行白名单 | core command | node/service/cronjob.go、node/service/command.go | POST /api/v2/system/command | X-WorkMesh-Token | 白名单程序与参数 | 审计日志 | node/service/command_test.go | implemented | 完整审计查询待补充 |
 ## 主机与容器功能补齐
 | 功能名称 | 来源模块 | 新源码位置 | 接口方法和路径 | 鉴权方式 | 数据来源 | 持久化方式 | 测试文件 | 当前状态 | 剩余缺口 |

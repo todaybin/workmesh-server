@@ -36,6 +36,11 @@
 
 更新时间：2026-09-26
 
+## 2026-09-26 脚本库执行权限与 WebSocket 兼容
+
+- [x] 修复脚本库全部脚本执行时的 `401`/自动退出：管理员 Session 可运行已审核脚本，服务令牌保持兼容；运行协议恢复为与 1Panel 一致的 WebSocket 流式终端。详情见 [`2026-09-26-script-library-websocket-permission.md`](progress/2026-09-26-script-library-websocket-permission.md)。
+- [!] 尚未执行 KVM 等会修改宿主机的软件安装脚本，也未发布生产 `9999`。
+
 ## 2026-09-26 计划恢复与完整需求矩阵
 
 - [x] 已恢复并核对前序多 Agent 需求：面板/Gateway/Server/Agent/Sandbox 分层、`apps/workmesh` 与 `dist/workmesh` 构建关系、项目目录和语言环境隔离、A/B/C Session 身份、Server 权威在线状态、长轮询/SSE 流式反馈、Artifact/缓存回收、资源硬限制、Deployment Broker 以及 `9999` 隔离升级均已在主计划的“完整需求矩阵”逐项登记。

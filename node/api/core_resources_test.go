@@ -4,16 +4,20 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -68,6 +72,58 @@ func TestScriptRunRequiresCommandToken(t *testing.T) {
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 without token, got %d", res.Code)
+	}
+}
+
+func TestScriptRunWebSocketStreamsApprovedScript(t *testing.T) {
+	t.Setenv("WORKMESH_COMMAND_TOKEN", "script-test-token")
+	scriptStoreMu.Lock()
+	previous := scriptStore
+	scriptStore = &scriptLibraryStore{items: []scriptLibraryItem{{ID: "test-script", Name: "测试脚本", Script: "printf script-ws-ok", Approved: true}}}
+	scriptStoreMu.Unlock()
+	t.Cleanup(func() {
+		scriptStoreMu.Lock()
+		scriptStore = previous
+		scriptStoreMu.Unlock()
+	})
+
+	mux := http.NewServeMux()
+	registerCoreResourceRoutes(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	serverURL := strings.TrimPrefix(server.URL, "http://")
+	path := "/api/v2/core/script/run?script_id=" + url.QueryEscape("test-script") + "&cols=80&rows=24"
+	conn := dialTerminalTCP(t, serverURL, path, websocketHeaders("script-test-token", server.URL))
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, nil)
+	if err != nil || response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("脚本 WebSocket 握手失败: status=%v err=%v", response, err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	foundOutput := false
+	for {
+		opcode, payload, readErr := readServerWebSocketFrame(reader)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if opcode == 0x8 {
+			break
+		}
+		if opcode != 0x1 {
+			continue
+		}
+		var message terminalServerMessage
+		if json.Unmarshal(payload, &message) != nil || message.Type != "cmd" {
+			continue
+		}
+		output, decodeErr := base64.StdEncoding.DecodeString(message.Data)
+		if decodeErr == nil && strings.Contains(string(output), "script-ws-ok") {
+			foundOutput = true
+		}
+	}
+	if !foundOutput {
+		t.Fatal("未收到已审核脚本的 WebSocket 输出")
 	}
 }
 
